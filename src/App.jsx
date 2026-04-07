@@ -588,12 +588,12 @@ export default function FitnessApp() {
                           <button onClick={e => { e.stopPropagation(); toggleExDone(i); }} title="Mark exercise complete" style={{
                             width: 36, height: 36, borderRadius: "50%",
                             background: exDone ? "#22c55e" : "rgba(20,20,30,0.9)",
-                            border: exDone ? "none" : "2px solid #444",
-                            color: "#fff", fontSize: 18, cursor: "pointer",
+                            border: exDone ? "2px solid #22c55e" : "2px solid #666",
+                            color: exDone ? "#fff" : "#888", fontSize: 18, cursor: "pointer",
                             display: "flex", alignItems: "center", justifyContent: "center",
                             transition: "all 0.2s", fontWeight: 800,
                           }}>
-                            {exDone ? "✓" : ""}
+                            {exDone ? "✓" : "○"}
                           </button>
                         </div>
                       </div>
