@@ -5,12 +5,51 @@ const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Ca
 
 const EXERCISE_LIBRARY = {
   Chest:     ["Barbell Bench Press", "Incline Dumbbell Press", "Diamond Push-ups", "Weighted Dips", "Push-ups"],
-  Back:      ["Deadlift", "Bent-over Barbell Row", "Weighted Pull-ups", "Single-arm DB Row", "KB Single-arm Row", "Sandbag Carry"],
+  Back:      ["Deadlift", "Bent-over Barbell Row", "Inverted Row", "Single-arm DB Row", "KB Single-arm Row", "Sandbag Carry"],
   Shoulders: ["Overhead Press", "Dumbbell Shoulder Press", "Arnold Press", "Lateral Raises", "KB Clean & Press", "Heavy Club Mill", "Heavy Club Shield Cast"],
   Arms:      ["Skull Crushers", "Overhead Tricep Extension", "Hammer Curls", "Incline Dumbbell Curl", "EZ Bar Curl", "KB Curl", "KB Halo"],
   Legs:      ["Barbell Back Squat", "Romanian Deadlift", "Walking Lunges", "Bulgarian Split Squat", "KB Goblet Squat", "KB Swing", "Hip Thrust", "Standing Calf Raises"],
   Core:      ["Plank", "Hanging Leg Raises", "Med Ball Slam", "Sandbag Clean & Squat", "Russian Twists"],
   Cardio:    ["HIIT Sprints (20s on/10s off)", "Zone 2 Walk/Jog", "KB Swing"],
+};
+
+const SWAP_OPTIONS = {
+  "Weighted Pull-ups":        ["Inverted Row", "Bent-over Barbell Row", "KB Single-arm Row"],
+  "Inverted Row":             ["Bent-over Barbell Row", "Single-arm DB Row", "KB Single-arm Row", "Band Pull-apart"],
+  "Barbell Bench Press":      ["Incline Dumbbell Press", "Diamond Push-ups", "Weighted Dips", "Push-ups"],
+  "Incline Dumbbell Press":   ["Barbell Bench Press", "Diamond Push-ups", "Push-ups"],
+  "Overhead Press":           ["Dumbbell Shoulder Press", "Arnold Press", "KB Clean & Press"],
+  "Dumbbell Shoulder Press":  ["Overhead Press", "Arnold Press", "KB Clean & Press"],
+  "Deadlift":                 ["Romanian Deadlift", "KB Swing", "Sandbag Clean & Squat"],
+  "Romanian Deadlift":        ["Deadlift", "KB Swing", "Hip Thrust"],
+  "Barbell Back Squat":       ["KB Goblet Squat", "Walking Lunges", "Bulgarian Split Squat"],
+  "KB Goblet Squat":          ["Barbell Back Squat", "Walking Lunges", "Bulgarian Split Squat"],
+  "Walking Lunges":           ["KB Goblet Squat", "Bulgarian Split Squat", "Barbell Back Squat"],
+  "Bulgarian Split Squat":    ["Walking Lunges", "KB Goblet Squat", "Barbell Back Squat"],
+  "Hip Thrust":               ["Romanian Deadlift", "KB Swing", "Barbell Back Squat"],
+  "Skull Crushers":           ["Overhead Tricep Extension", "Diamond Push-ups", "Weighted Dips"],
+  "Overhead Tricep Extension":["Skull Crushers", "Diamond Push-ups", "Weighted Dips"],
+  "Weighted Dips":            ["Diamond Push-ups", "Skull Crushers", "Overhead Tricep Extension"],
+  "Diamond Push-ups":         ["Weighted Dips", "Overhead Tricep Extension", "Skull Crushers"],
+  "Hammer Curls":             ["EZ Bar Curl", "Incline Dumbbell Curl", "KB Curl"],
+  "EZ Bar Curl":              ["Hammer Curls", "Incline Dumbbell Curl", "KB Curl"],
+  "Incline Dumbbell Curl":    ["Hammer Curls", "EZ Bar Curl", "KB Curl"],
+  "KB Curl":                  ["Hammer Curls", "EZ Bar Curl", "Incline Dumbbell Curl"],
+  "Hanging Leg Raises":       ["Plank", "Russian Twists", "Med Ball Slam"],
+  "Plank":                    ["Hanging Leg Raises", "Russian Twists"],
+  "KB Swing":                 ["Romanian Deadlift", "Hip Thrust", "Sandbag Clean & Squat"],
+  "KB Halo":                  ["Lateral Raises", "Arnold Press"],
+  "Lateral Raises":           ["KB Halo", "Arnold Press", "Dumbbell Shoulder Press"],
+  "Arnold Press":             ["Dumbbell Shoulder Press", "Overhead Press", "KB Clean & Press"],
+  "KB Clean & Press":         ["Overhead Press", "Arnold Press", "Dumbbell Shoulder Press"],
+  "Bent-over Barbell Row":    ["Single-arm DB Row", "KB Single-arm Row", "Inverted Row"],
+  "Single-arm DB Row":        ["Bent-over Barbell Row", "KB Single-arm Row", "Inverted Row"],
+  "KB Single-arm Row":        ["Single-arm DB Row", "Bent-over Barbell Row", "Inverted Row"],
+  "Sandbag Carry":            ["KB Swing", "Sandbag Clean & Squat"],
+  "Med Ball Slam":            ["KB Swing", "Sandbag Clean & Squat"],
+  "Standing Calf Raises":     ["KB Goblet Squat"],
+  "Heavy Club Mill":          ["Heavy Club Shield Cast", "KB Halo"],
+  "Heavy Club Shield Cast":   ["Heavy Club Mill", "KB Halo"],
 };
 
 const EXERCISE_IMGS = {
@@ -97,7 +136,7 @@ const DEFAULT_PLAN = {
   ]},
   Tue: { name: "Pull · Back/Biceps", muscles: ["Back","Arms"], exercises: [
     { name: "Deadlift", sets: 4, reps: 6, weight: 135 },
-    { name: "Weighted Pull-ups", sets: 4, reps: 8, weight: 0 },
+    { name: "Inverted Row", sets: 4, reps: 10, weight: 0 },
     { name: "Bent-over Barbell Row", sets: 4, reps: 8, weight: 135 },
     { name: "Single-arm DB Row", sets: 3, reps: 12, weight: 65 },
     { name: "KB Halo", sets: 3, reps: 10, weight: 35 },
@@ -123,7 +162,7 @@ const DEFAULT_PLAN = {
   ]},
   Fri: { name: "Pull · Width + Detail", muscles: ["Back","Arms"], exercises: [
     { name: "Deadlift", sets: 5, reps: 5, weight: 155 },
-    { name: "Weighted Pull-ups", sets: 5, reps: 6, weight: 0 },
+    { name: "Inverted Row", sets: 5, reps: 8, weight: 0 },
     { name: "KB Single-arm Row", sets: 4, reps: 10, weight: 53 },
     { name: "Sandbag Carry", sets: 4, reps: 40, weight: 0 },
     { name: "EZ Bar Curl", sets: 4, reps: 10, weight: 65 },
@@ -148,7 +187,32 @@ const DEFAULT_PLAN = {
 
 
 
-// ── Exercise Detail Modal ──────────────────────────────────────────────────────
+// ── Swap Modal ────────────────────────────────────────────────────────────────
+function SwapModal({ currentName, options, onSwap, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#12121a", borderRadius: "22px 22px 0 0", width: "100%", maxWidth: 480, padding: "24px 20px 36px", border: "1px solid #2a2a36" }}>
+        <div style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>Can't do this one?</div>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 6 }}>Swap: {currentName}</div>
+        <div style={{ fontSize: 12, color: "#555", marginBottom: 20 }}>Tap an alternative below</div>
+        {options.map(name => (
+          <button key={name} onClick={() => onSwap(name)} style={{
+            width: "100%", background: "#1a1a26", border: "1px solid #2a2a36", color: "#f0ede8",
+            borderRadius: 14, padding: "14px 18px", marginBottom: 10, fontSize: 15, fontWeight: 700,
+            cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center"
+          }}>
+            {name} <span style={{ color: "#f97316", fontSize: 18 }}>→</span>
+          </button>
+        ))}
+        <button onClick={onClose} style={{ width: "100%", background: "#0e0e16", color: "#555", border: "1px solid #1a1a26", borderRadius: 14, padding: "13px", fontWeight: 700, cursor: "pointer", fontSize: 14, marginTop: 4 }}>
+          Keep Original
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function ExerciseModal({ ex, onClose }) {
   const media = getMedia(ex.name);
   const isBodyweight = ex.weight === 0;
@@ -232,6 +296,7 @@ export default function FitnessApp() {
   const [selMuscle, setSelMuscle] = useState("Chest");
   const [toast, setToast] = useState(null);
   const [modalEx, setModalEx] = useState(null);
+  const [swapTarget, setSwapTarget] = useState(null); // {day, idx} or null
 
   const setPlan = (updater) => {
     setPlanState(prev => {
@@ -261,7 +326,6 @@ export default function FitnessApp() {
     const totalSets = exs.reduce((a, e) => a + e.sets, 0);
     const done = Object.values(completedSets).filter(Boolean).length;
     saveLog({
-      ...p,
       ...logs,
       [dk]: {
         day: trackingDay, name: plan[trackingDay]?.name,
@@ -285,6 +349,16 @@ export default function FitnessApp() {
   };
 
   const removeEx = (day, idx) => setPlan(p => ({ ...p, [day]: { ...p[day], exercises: p[day].exercises.filter((_, i) => i !== idx) } }));
+
+  const swapEx = (day, idx, newName) => {
+    setPlan(p => {
+      const u = { ...p, [day]: { ...p[day], exercises: [...p[day].exercises] } };
+      u[day].exercises[idx] = { ...u[day].exercises[idx], name: newName };
+      return u;
+    });
+    setSwapTarget(null);
+    showToast(`Swapped to ${newName}!`);
+  };
 
   const addEx = () => {
     if (!newEx.name) return;
@@ -382,6 +456,7 @@ export default function FitnessApp() {
                           </div>
                           <div style={{ display: "flex", gap: 5 }}>
                             <button onClick={e => { e.stopPropagation(); setModalEx(ex); }} title="Watch demo" style={{ background: "rgba(180,0,0,0.85)", border: "none", color: "#fff", borderRadius: 8, padding: "5px 9px", cursor: "pointer", fontSize: 12, fontWeight: 800 }}>▶</button>
+                            <button onClick={e => { e.stopPropagation(); setSwapTarget({ day: activeDay, idx: i }); }} title="Swap exercise" style={{ background: "rgba(30,30,40,0.85)", border: "none", color: "#f97316", borderRadius: 8, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}>⇄</button>
                             <button onClick={e => { e.stopPropagation(); setEditingEx(`${activeDay}-${i}`); }} style={{ background: "rgba(30,30,40,0.85)", border: "none", color: "#aaa", borderRadius: 8, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}>✏️</button>
                             <button onClick={e => { e.stopPropagation(); removeEx(activeDay, i); }} style={{ background: "rgba(30,30,40,0.85)", border: "none", color: "#666", borderRadius: 8, padding: "5px 8px", cursor: "pointer", fontSize: 12 }}>✕</button>
                           </div>
@@ -542,6 +617,12 @@ export default function FitnessApp() {
                         background: "#1a0000", border: "1px solid #330000", color: "#cc2200",
                         borderRadius: 10, padding: "12px 14px", cursor: "pointer", fontSize: 15, fontWeight: 900
                       }}>▶</button>
+                      {(SWAP_OPTIONS[ex.name]?.length > 0) && (
+                        <button onClick={() => setSwapTarget({ day: trackingDay, idx: i })} title="Swap exercise" style={{
+                          background: "#1a1200", border: "1px solid #332200", color: "#f97316",
+                          borderRadius: 10, padding: "12px 14px", cursor: "pointer", fontSize: 15, fontWeight: 900
+                        }}>⇄</button>
+                      )}
                     </div>
                   </div>
                 );
@@ -618,6 +699,14 @@ export default function FitnessApp() {
 
       {/* Exercise Modal */}
       {modalEx && <ExerciseModal ex={modalEx} onClose={() => setModalEx(null)} />}
+      {swapTarget && (
+        <SwapModal
+          currentName={(plan[swapTarget.day]?.exercises?.[swapTarget.idx]?.name) || ""}
+          options={SWAP_OPTIONS[(plan[swapTarget.day]?.exercises?.[swapTarget.idx]?.name)] || []}
+          onSwap={(newName) => swapEx(swapTarget.day, swapTarget.idx, newName)}
+          onClose={() => setSwapTarget(null)}
+        />
+      )}
 
       {/* Toast */}
       {toast && (
