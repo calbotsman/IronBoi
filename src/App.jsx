@@ -262,44 +262,251 @@ function SwapModal({ currentName, options, onSwap, onClose }) {
 }
 
 
+// ── Exercise knowledge base ───────────────────────────────────────────────────
+// primary: main movers (bright), secondary: stabilisers (dim), cues: coaching tips
+const EXERCISE_DB = {
+  "Barbell Bench Press":      { primary: ["chest"], secondary: ["triceps","front_delt"], cues: ["Arch your back, feet flat","Bar to lower chest, elbows 45-60°","Drive through your heels","Squeeze pecs at the top"] },
+  "Incline Dumbbell Press":   { primary: ["upper_chest"], secondary: ["front_delt","triceps"], cues: ["30-45° bench angle","Full stretch at bottom","Elbows slightly in","Squeeze at lockout"] },
+  "Diamond Push-ups":         { primary: ["triceps"], secondary: ["chest","front_delt"], cues: ["Hands form a diamond","Elbows travel back, not out","Full ROM","Keep core tight"] },
+  "Weighted Dips":            { primary: ["chest","triceps"], secondary: ["front_delt"], cues: ["Lean forward for chest focus","Full depth, shoulder safe","Control the descent","Lock out at top"] },
+  "Push-ups":                 { primary: ["chest"], secondary: ["triceps","front_delt"], cues: ["Hands just outside shoulders","Core rigid throughout","Full range of motion","Control both ways"] },
+  "Overhead Press":           { primary: ["front_delt","side_delt"], secondary: ["triceps","upper_chest"], cues: ["Bar to clavicle start","Press vertically, not forward","Full lockout at top","Brace abs hard"] },
+  "Dumbbell Shoulder Press":  { primary: ["front_delt","side_delt"], secondary: ["triceps"], cues: ["Neutral or pronated grip","Don't arc behind head","Control descent","Equal sides"] },
+  "Arnold Press":             { primary: ["front_delt","side_delt"], secondary: ["rear_delt","triceps"], cues: ["Rotate from palms-in to out","Hits all three delt heads","Slow on the way down","Don't rush the rotation"] },
+  "Lateral Raises":           { primary: ["side_delt"], secondary: ["rear_delt"], cues: ["Slight forward lean","Lead with elbows, not hands","Stop at shoulder height","No shrugging"] },
+  "KB Clean & Press":         { primary: ["front_delt","side_delt"], secondary: ["traps","triceps","glutes"], cues: ["Hike KB back, then clean","Rack position tight to body","Press straight overhead","Hinge, don't squat the clean"] },
+  "Heavy Club Mill":          { primary: ["side_delt","rear_delt"], secondary: ["lats","core"], cues: ["Arm stays extended","Rotate from shoulder","Control arc speed","Keep wrist neutral"] },
+  "Heavy Club Shield Cast":   { primary: ["front_delt","chest"], secondary: ["core","triceps"], cues: ["Start from order position","Swing across body smoothly","Control return","Brace core throughout"] },
+  "Skull Crushers":           { primary: ["triceps"], secondary: [], cues: ["Bar to forehead / behind","Upper arms stay vertical","Elbows don't flare","Full extension at top"] },
+  "Overhead Tricep Extension":{ primary: ["triceps"], secondary: [], cues: ["Elbows stay narrow","Full stretch at bottom","Brace core standing","Slow eccentric"] },
+  "Deadlift":                 { primary: ["hamstrings","glutes"], secondary: ["lats","erectors","traps"], cues: ["Hip hinge, not a squat","Bar stays over mid-foot","Chest up, lat spread","Drive floor away"] },
+  "Romanian Deadlift":        { primary: ["hamstrings","glutes"], secondary: ["erectors"], cues: ["Soft knee throughout","Push hips back, bar skims legs","Feel stretch in hamstrings","Don't round lower back"] },
+  "Bent-over Barbell Row":    { primary: ["lats","mid_back"], secondary: ["biceps","rear_delt"], cues: ["45° torso angle","Pull to lower chest/navel","Squeeze shoulder blades","Control descent"] },
+  "Inverted Row":             { primary: ["lats","mid_back"], secondary: ["biceps","rear_delt"], cues: ["Body straight as a plank","Pull chest to bar","Squeeze at top","Harder = more horizontal"] },
+  "Single-arm DB Row":        { primary: ["lats"], secondary: ["biceps","mid_back"], cues: ["Support on bench","Pull elbow back and up","Full stretch at bottom","Don't rotate torso much"] },
+  "KB Single-arm Row":        { primary: ["lats"], secondary: ["biceps","rear_delt"], cues: ["Staggered stance","Pull KB to hip","Squeeze at top","Control the drop"] },
+  "KB Halo":                  { primary: ["side_delt","rear_delt"], secondary: ["core","traps"], cues: ["Keep KB close to head","Circle is tight, controlled","Alternate directions","Don't tilt head"] },
+  "Sandbag Carry":            { primary: ["traps","core"], secondary: ["biceps","lats"], cues: ["Hug bag to chest or shoulder","Stay tall, don't lean","Short powerful steps","Brace all the way"] },
+  "Hammer Curls":             { primary: ["biceps"], secondary: ["brachialis","forearms"], cues: ["Neutral grip throughout","No swinging","Full extension at bottom","Controlled squeeze"] },
+  "EZ Bar Curl":              { primary: ["biceps"], secondary: ["brachialis"], cues: ["Elbows pinned to ribs","Don't let elbows drift forward","Squeeze at top","Slow eccentric builds mass"] },
+  "Incline Dumbbell Curl":    { primary: ["biceps"], secondary: ["brachialis"], cues: ["Incline stretches long head","Full range of motion","Don't swing back","Slow lowering"] },
+  "KB Curl":                  { primary: ["biceps"], secondary: ["forearms"], cues: ["Horns facing up at top","Control at all times","Pinch elbows to ribs","Squeeze at peak"] },
+  "Barbell Back Squat":       { primary: ["quads","glutes"], secondary: ["hamstrings","erectors"], cues: ["Bar on upper traps, not neck","Knees track over toes","Break parallel","Chest up, no morning-over"] },
+  "Walking Lunges":           { primary: ["quads","glutes"], secondary: ["hamstrings","core"], cues: ["Big step forward","Back knee grazes floor","Keep torso upright","Drive through front heel"] },
+  "Bulgarian Split Squat":    { primary: ["quads","glutes"], secondary: ["hamstrings"], cues: ["Front foot far enough forward","Torso slight lean","Control descent","Don't let front knee cave"] },
+  "KB Goblet Squat":          { primary: ["quads","glutes"], secondary: ["core","adductors"], cues: ["Hold KB at chest","Elbows track inside knees","Sit deep, chest tall","Drive heels into floor"] },
+  "Hip Thrust":               { primary: ["glutes"], secondary: ["hamstrings","core"], cues: ["Upper back on bench","Bar over hip crease","Drive hips to ceiling","Squeeze hard at top"] },
+  "KB Swing":                 { primary: ["hamstrings","glutes"], secondary: ["core","lats"], cues: ["It's a hip hinge, not a squat","Hike KB back between legs","Explode hips forward","Arms just carry the bell"] },
+  "Standing Calf Raises":     { primary: ["calves"], secondary: [], cues: ["Full stretch at bottom","Pause at top","Slow eccentric","Both legs equal"] },
+  "Plank":                    { primary: ["core"], secondary: ["chest","front_delt"], cues: ["Body arrow-straight","Don't let hips sag","Breathe, don't hold breath","Push floor away"] },
+  "Hanging Leg Raises":       { primary: ["core"], secondary: ["hip_flexors","lats"], cues: ["Posterior tilt before raising","Control the lowering","Don't swing","Squeeze abs, not hip flexors"] },
+  "Med Ball Slam":            { primary: ["core","lats"], secondary: ["front_delt","glutes"], cues: ["Full overhead extension","Slam through floor","Catch on bounce","Brace on every rep"] },
+  "Sandbag Clean & Squat":    { primary: ["quads","glutes"], secondary: ["lats","core","traps"], cues: ["Clean from floor to rack","Receive in partial squat","Stand to full extension","Control the drop"] },
+  "HIIT Sprints (20s on/10s off)": { primary: ["quads","hamstrings"], secondary: ["glutes","calves"], cues: ["Drive arms, drive legs","Stay on balls of feet","Full effort each interval","Walk recovery if needed"] },
+  "Zone 2 Walk/Jog":          { primary: ["quads","hamstrings"], secondary: ["glutes","calves"], cues: ["Conversational pace","Nasal breathing if possible","30-45 min is ideal","This builds your aerobic base"] },
+  "Foam Rolling":             { primary: ["core"], secondary: [], cues: ["30s per muscle group","Slow rolls, pause on tender spots","Breathe into the pressure","Don't roll joints"] },
+  "Stretching Circuit":       { primary: ["core"], secondary: [], cues: ["Hold 30-60s each stretch","Breathe out into the stretch","Never bounce","After training or separately"] },
+};
+
+// Muscle diagram — compact SVG body map, highlights by muscle group
+function MuscleDiagram({ primary = [], secondary = [] }) {
+  const muscleColor = (m) => {
+    if (primary.includes(m)) return C.accent;
+    if (secondary.includes(m)) return "rgba(232,255,0,0.35)";
+    return "rgba(255,255,255,0.07)";
+  };
+
+  return (
+    <div style={{ display: "flex", justifyContent: "center", gap: 20, marginBottom: 20 }}>
+      {/* FRONT */}
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 10, color: C.textDim, letterSpacing: 2, textTransform: "uppercase", marginBottom: 6, fontFamily: T.body }}>Front</div>
+        <svg width="90" height="170" viewBox="0 0 90 170" fill="none">
+          {/* Head */}
+          <ellipse cx="45" cy="14" rx="11" ry="13" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
+          {/* Neck */}
+          <rect x="41" y="25" width="8" height="8" rx="2" fill="rgba(255,255,255,0.08)" />
+          {/* Chest / pecs */}
+          <path d="M28 34 Q37 30 45 33 Q53 30 62 34 L60 52 Q52 55 45 54 Q38 55 30 52 Z" fill={muscleColor("chest")} />
+          <path d="M28 34 Q22 34 20 40 L22 52 Q28 52 30 52 Z" fill={muscleColor("front_delt")} />
+          <path d="M62 34 Q68 34 70 40 L68 52 Q62 52 60 52 Z" fill={muscleColor("front_delt")} />
+          {/* Upper chest */}
+          <path d="M30 34 Q37 30 45 32 Q53 30 60 34 L58 42 Q52 40 45 40 Q38 40 32 42 Z" fill={muscleColor("upper_chest")} />
+          {/* Front delts separate highlight */}
+          <ellipse cx="23" cy="38" rx="7" ry="8" fill={muscleColor("front_delt")} opacity="0.8" />
+          <ellipse cx="67" cy="38" rx="7" ry="8" fill={muscleColor("front_delt")} opacity="0.8" />
+          {/* Side delts */}
+          <ellipse cx="19" cy="44" rx="5" ry="7" fill={muscleColor("side_delt")} />
+          <ellipse cx="71" cy="44" rx="5" ry="7" fill={muscleColor("side_delt")} />
+          {/* Biceps */}
+          <path d="M17 52 Q14 58 15 68 L20 68 Q22 58 22 52 Z" fill={muscleColor("biceps")} />
+          <path d="M73 52 Q76 58 75 68 L70 68 Q68 58 68 52 Z" fill={muscleColor("biceps")} />
+          {/* Forearms */}
+          <path d="M15 68 L13 90 L18 90 L20 68 Z" fill={muscleColor("forearms")} />
+          <path d="M75 68 L77 90 L72 90 L70 68 Z" fill={muscleColor("forearms")} />
+          {/* Abs / core */}
+          <path d="M35 54 L38 54 L39 72 L36 72 Z" fill={muscleColor("core")} />
+          <path d="M41 54 L44 54 L44 72 L41 72 Z" fill={muscleColor("core")} />
+          <path d="M46 54 L49 54 L49 72 L46 72 Z" fill={muscleColor("core")} />
+          <path d="M52 54 L55 54 L54 72 L51 72 Z" fill={muscleColor("core")} />
+          {/* Hip flexors */}
+          <path d="M33 72 Q30 78 32 86 L40 86 Q40 78 38 72 Z" fill={muscleColor("hip_flexors")} />
+          <path d="M57 72 Q60 78 58 86 L50 86 Q50 78 52 72 Z" fill={muscleColor("hip_flexors")} />
+          {/* Quads */}
+          <path d="M32 86 Q28 96 30 116 L40 116 Q42 96 40 86 Z" fill={muscleColor("quads")} />
+          <path d="M58 86 Q62 96 60 116 L50 116 Q48 96 50 86 Z" fill={muscleColor("quads")} />
+          {/* Adductors */}
+          <path d="M40 86 Q43 92 43 116 L47 116 Q47 92 50 86 Z" fill={muscleColor("adductors")} />
+          {/* Calves front */}
+          <path d="M30 118 Q28 130 30 146 L38 146 Q40 130 40 118 Z" fill={muscleColor("calves")} />
+          <path d="M60 118 Q62 130 60 146 L52 146 Q50 130 50 118 Z" fill={muscleColor("calves")} />
+          {/* Outline */}
+          <path d="M28 34 Q22 34 18 42 L13 90 L15 90 L20 68 L22 52 L30 52 L30 86 L30 118 L38 118 L38 146 L42 146 L42 168 L48 168 L48 146 L52 146 L52 118 L60 118 L60 86 L60 52 L68 52 L70 68 L75 90 L77 90 L72 68 L68 42 Q68 34 62 34 L60 34 L45 32 L30 34 Z" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.8" />
+        </svg>
+      </div>
+
+      {/* BACK */}
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 10, color: C.textDim, letterSpacing: 2, textTransform: "uppercase", marginBottom: 6, fontFamily: T.body }}>Back</div>
+        <svg width="90" height="170" viewBox="0 0 90 170" fill="none">
+          <ellipse cx="45" cy="14" rx="11" ry="13" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
+          <rect x="41" y="25" width="8" height="8" rx="2" fill="rgba(255,255,255,0.08)" />
+          {/* Traps */}
+          <path d="M30 33 Q37 26 45 28 Q53 26 60 33 L58 44 Q52 40 45 40 Q38 40 32 44 Z" fill={muscleColor("traps")} />
+          {/* Rear delts */}
+          <ellipse cx="22" cy="40" rx="7" ry="8" fill={muscleColor("rear_delt")} />
+          <ellipse cx="68" cy="40" rx="7" ry="8" fill={muscleColor("rear_delt")} />
+          {/* Lats */}
+          <path d="M22 44 Q18 56 20 72 L32 72 Q36 60 35 44 Z" fill={muscleColor("lats")} />
+          <path d="M68 44 Q72 56 70 72 L58 72 Q54 60 55 44 Z" fill={muscleColor("lats")} />
+          {/* Mid/upper back rhomboids */}
+          <path d="M34 44 Q38 42 45 42 Q52 42 56 44 L55 62 Q52 60 45 60 Q38 60 35 62 Z" fill={muscleColor("mid_back")} />
+          {/* Erectors */}
+          <path d="M38 62 L41 62 L41 86 L38 86 Z" fill={muscleColor("erectors")} />
+          <path d="M49 62 L52 62 L52 86 L49 86 Z" fill={muscleColor("erectors")} />
+          {/* Triceps */}
+          <path d="M17 52 Q14 60 15 70 L20 70 Q22 60 22 52 Z" fill={muscleColor("triceps")} />
+          <path d="M73 52 Q76 60 75 70 L70 70 Q68 60 68 52 Z" fill={muscleColor("triceps")} />
+          {/* Forearms back */}
+          <path d="M15 70 L13 90 L18 90 L20 70 Z" fill={muscleColor("forearms")} />
+          <path d="M75 70 L77 90 L72 90 L70 70 Z" fill={muscleColor("forearms")} />
+          {/* Glutes */}
+          <path d="M32 86 Q28 96 32 108 L43 108 Q44 96 45 86 Z" fill={muscleColor("glutes")} />
+          <path d="M58 86 Q62 96 58 108 L47 108 Q46 96 45 86 Z" fill={muscleColor("glutes")} />
+          {/* Hamstrings */}
+          <path d="M32 108 Q30 118 32 130 L42 130 Q43 118 43 108 Z" fill={muscleColor("hamstrings")} />
+          <path d="M58 108 Q60 118 58 130 L48 130 Q47 118 47 108 Z" fill={muscleColor("hamstrings")} />
+          {/* Calves back */}
+          <path d="M32 130 Q30 140 32 150 L40 150 Q41 140 42 130 Z" fill={muscleColor("calves")} />
+          <path d="M58 130 Q60 140 58 150 L50 150 Q49 140 48 130 Z" fill={muscleColor("calves")} />
+          {/* Outline */}
+          <path d="M30 33 Q22 35 18 44 L13 90 L15 90 L20 70 L22 52 L22 44 L32 44 L32 86 L32 130 L40 130 L40 150 L42 150 L42 168 L48 168 L48 150 L50 150 L50 130 L58 130 L58 86 L58 44 L68 44 L68 52 L70 70 L75 90 L77 90 L72 44 Q68 35 60 33 L45 28 Z" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.8" />
+        </svg>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: C.accent, flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: C.textMid, fontFamily: T.body }}>Primary</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: "rgba(232,255,0,0.35)", flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: C.textMid, fontFamily: T.body }}>Secondary</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: "rgba(255,255,255,0.07)", flexShrink: 0 }} />
+          <span style={{ fontSize: 11, color: C.textMid, fontFamily: T.body }}>Inactive</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExerciseModal({ ex, onClose }) {
+  const [showVideo, setShowVideo] = useState(false);
   const media = getMedia(ex.name);
   const isBodyweight = ex.weight === 0;
   const isTimed = ex.name.toLowerCase().includes("plank") || ex.name.toLowerCase().includes("jog") || ex.name.toLowerCase().includes("sprint");
+  const db = EXERCISE_DB[ex.name] || { primary: [], secondary: [], cues: ["Focus on full range of motion", "Control the eccentric", "Breathe consistently"] };
+  const ytQuery = encodeURIComponent(ex.name + " exercise form tutorial");
+  const ytEmbed = `https://www.youtube.com/embed?listType=search&list=${ytQuery}`;
+
   return (
     <Sheet onClose={onClose}>
-      <div style={{ position: "relative" }}>
-        <img src={media.img} alt={ex.name} style={{ width: "100%", height: 220, objectFit: "cover", display: "block" }} onError={e => { e.target.src = DEFAULT_IMG; }} />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, #111 0%, transparent 55%)" }} />
-        <div style={{ position: "absolute", bottom: 16, left: 20 }}>
-          <div style={{ fontFamily: T.display, fontSize: 34, letterSpacing: 1, lineHeight: 1, color: C.text }}>{ex.name}</div>
+      <div style={{ maxHeight: "85vh", overflowY: "auto" }}>
+        {/* Hero image */}
+        <div style={{ position: "relative", height: 180 }}>
+          <img src={media.img} alt={ex.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} onError={e => { e.target.src = DEFAULT_IMG; }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, #111 0%, transparent 50%)" }} />
+          <div style={{ position: "absolute", bottom: 14, left: 20 }}>
+            <div style={{ fontFamily: T.display, fontSize: 30, letterSpacing: 1, lineHeight: 1 }}>{ex.name}</div>
+          </div>
         </div>
-      </div>
-      <div style={{ padding: "20px 20px 40px" }}>
-        <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-          {[
-            { label: "Sets", val: ex.sets },
-            { label: isTimed ? "Sec" : "Reps", val: ex.reps },
-            { label: "Weight", val: isBodyweight ? "BW" : `${ex.weight} lbs` },
-          ].map(s => (
-            <div key={s.label} style={{ flex: 1, background: C.surface2, borderRadius: 14, padding: "14px 10px", textAlign: "center", border: `1px solid ${C.border}` }}>
-              <div style={{ fontFamily: T.display, fontSize: 28, color: C.accent, letterSpacing: 1 }}>{s.val}</div>
-              <div style={{ fontSize: 11, color: C.textMid, marginTop: 2, textTransform: "uppercase", letterSpacing: 1.5, fontFamily: T.body }}>{s.label}</div>
+
+        <div style={{ padding: "18px 20px 36px" }}>
+          {/* Stats row */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+            {[
+              { label: "Sets", val: ex.sets },
+              { label: isTimed ? "Sec" : "Reps", val: ex.reps },
+              { label: "Weight", val: isBodyweight ? "BW" : `${ex.weight} lbs` },
+            ].map(s => (
+              <div key={s.label} style={{ flex: 1, background: C.surface2, borderRadius: 12, padding: "12px 8px", textAlign: "center", border: `1px solid ${C.border}` }}>
+                <div style={{ fontFamily: T.display, fontSize: 26, color: C.accent, letterSpacing: 1 }}>{s.val}</div>
+                <div style={{ fontSize: 10, color: C.textMid, marginTop: 2, textTransform: "uppercase", letterSpacing: 1.5, fontFamily: T.body }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Muscle diagram */}
+          <div style={{ background: C.surface2, borderRadius: 16, padding: "16px 12px", marginBottom: 16, border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 11, color: C.textMid, letterSpacing: 2, textTransform: "uppercase", marginBottom: 14, fontFamily: T.body }}>Muscles Worked</div>
+            <MuscleDiagram primary={db.primary} secondary={db.secondary} />
+          </div>
+
+          {/* Form cues */}
+          <div style={{ background: C.surface2, borderRadius: 16, padding: "16px", marginBottom: 16, border: `1px solid ${C.border}` }}>
+            <div style={{ fontSize: 11, color: C.textMid, letterSpacing: 2, textTransform: "uppercase", marginBottom: 12, fontFamily: T.body }}>Form Cues</div>
+            {db.cues.map((cue, i) => (
+              <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: i < db.cues.length - 1 ? 10 : 0 }}>
+                <div style={{ fontFamily: T.display, fontSize: 18, color: C.accent, lineHeight: 1, marginTop: 1, minWidth: 18 }}>{i + 1}</div>
+                <div style={{ fontSize: 14, color: C.text, fontFamily: T.body, lineHeight: 1.4 }}>{cue}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Video section */}
+          {!showVideo ? (
+            <button onClick={() => setShowVideo(true)} style={{
+              width: "100%", background: "#1a0000", border: "1px solid #440000",
+              color: "#ff4444", borderRadius: 16, padding: "17px",
+              fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: T.body,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              marginBottom: 12,
+            }}>
+              <span style={{ fontSize: 18 }}>▶</span> Watch Demo
+            </button>
+          ) : (
+            <div style={{ borderRadius: 16, overflow: "hidden", marginBottom: 12, border: `1px solid ${C.border}` }}>
+              <iframe
+                width="100%"
+                height="200"
+                src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(ex.name + " exercise tutorial form")}&autoplay=0`}
+                title={ex.name + " tutorial"}
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={{ display: "block" }}
+              />
             </div>
-          ))}
+          )}
+
+          <button onClick={onClose} style={{
+            width: "100%", background: C.surface2, color: C.textMid, border: `1px solid ${C.border}`,
+            borderRadius: 16, padding: "15px", fontWeight: 700, cursor: "pointer", fontSize: 14, fontFamily: T.body,
+          }}>Close</button>
         </div>
-        <a href={media.video} target="_blank" rel="noopener noreferrer" style={{
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          background: "#ff0000", color: "#fff", borderRadius: 16, padding: "17px",
-          textDecoration: "none", fontWeight: 800, fontSize: 15, marginBottom: 12,
-          fontFamily: T.body,
-        }}>
-          ▶ Watch Demo on YouTube
-        </a>
-        <button onClick={onClose} style={{
-          width: "100%", background: C.surface2, color: C.textMid, border: `1px solid ${C.border}`,
-          borderRadius: 16, padding: "15px", fontWeight: 700, cursor: "pointer", fontSize: 14, fontFamily: T.body,
-        }}>Close</button>
       </div>
     </Sheet>
   );
