@@ -615,15 +615,19 @@ export default function FitnessApp() {
     setNewEx({ name: "", sets: 3, reps: 10, weight: 0 }); setShowAdd(false); showToast("Exercise added!");
   };
 
+  // Only offer "move to today" for days that have already passed this week
+  const todayIdx = DAYS.indexOf(today);
+  const isPastDay = (day) => DAYS.indexOf(day) < todayIdx;
+
   const moveToToday = () => {
     if (activeDay === today) return;
     setPlan(p => {
-      const moving = p[activeDay];     // workout we're moving
-      const displaced = p[today];      // workout currently on today
+      const moving = p[activeDay];
+      const displaced = p[today];
       return {
         ...p,
-        [today]: { ...moving },         // today gets the selected workout
-        [activeDay]: { ...displaced },  // selected day gets today's (possibly rest)
+        [today]: { ...moving },
+        [activeDay]: { ...displaced },
       };
     });
     setActiveDay(today);
@@ -702,8 +706,8 @@ export default function FitnessApp() {
               }}>START ▶</button>
             </div>
 
-            {/* Move to Today banner — shown when viewing a non-today day with exercises */}
-            {activeDay !== today && !isRest(activeDay) && (
+            {/* Move to Today banner — only for past days you missed */}
+            {isPastDay(activeDay) && !isRest(activeDay) && (
               <button onClick={moveToToday} style={{
                 width: "100%", background: C.accent,
                 border: "none",
@@ -822,7 +826,7 @@ export default function FitnessApp() {
               {DAYS.filter(d => !isRest(d)).map(day => (
                 <div key={day} style={{ marginBottom: 10 }}>
                   <div onClick={() => startWorkout(day)} style={{
-                    background: C.surface, borderRadius: day !== today ? "20px 20px 0 0" : 20,
+                    background: C.surface, borderRadius: isPastDay(day) ? "20px 20px 0 0" : 20,
                     padding: "20px 22px",
                     border: `1px solid ${day === today ? C.accent : C.border}`,
                     borderBottom: day !== today ? "none" : undefined,
@@ -838,7 +842,7 @@ export default function FitnessApp() {
                       : <div style={{ color: C.textDim, fontSize: 22 }}>›</div>
                     }
                   </div>
-                  {day !== today && (
+                  {isPastDay(day) && (
                     <button
                       onClick={e => {
                         e.stopPropagation();
