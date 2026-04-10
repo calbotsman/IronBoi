@@ -705,13 +705,14 @@ export default function FitnessApp() {
             {/* Move to Today banner — shown when viewing a non-today day with exercises */}
             {activeDay !== today && !isRest(activeDay) && (
               <button onClick={moveToToday} style={{
-                width: "100%", background: C.accentDim, border: `1px solid ${C.accent}`,
-                color: C.accent, borderRadius: 12, padding: "12px 16px", marginBottom: 16,
-                fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: T.body,
+                width: "100%", background: C.accent,
+                border: "none",
+                color: "#000", borderRadius: 14, padding: "14px 16px", marginBottom: 16,
+                fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: T.body,
                 display: "flex", alignItems: "center", justifyContent: "space-between",
               }}>
-                <span>Missed this one? Move to {today}</span>
-                <span style={{ fontSize: 16 }}>→</span>
+                <span>⚡ Missed {activeDay}? Move to {today}</span>
+                <span style={{ fontSize: 18 }}>→</span>
               </button>
             )}
 
@@ -819,19 +820,47 @@ export default function FitnessApp() {
             <div>
               <div style={{ fontFamily: T.display, fontSize: 36, letterSpacing: 2, marginBottom: 16 }}>CHOOSE WORKOUT</div>
               {DAYS.filter(d => !isRest(d)).map(day => (
-                <div key={day} onClick={() => startWorkout(day)} style={{
-                  background: C.surface, borderRadius: 20, padding: "20px 22px", marginBottom: 10,
-                  border: `1px solid ${day === today ? C.accent : C.border}`, cursor: "pointer",
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                }}>
-                  <div>
-                    <div style={{ fontFamily: T.display, fontSize: 22, letterSpacing: 1 }}>{plan[day]?.name}</div>
-                    <div style={{ fontSize: 12, color: C.textMid, marginTop: 4 }}>{day} · {plan[day]?.exercises?.length} exercises</div>
+                <div key={day} style={{ marginBottom: 10 }}>
+                  <div onClick={() => startWorkout(day)} style={{
+                    background: C.surface, borderRadius: day !== today ? "20px 20px 0 0" : 20,
+                    padding: "20px 22px",
+                    border: `1px solid ${day === today ? C.accent : C.border}`,
+                    borderBottom: day !== today ? "none" : undefined,
+                    cursor: "pointer",
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                  }}>
+                    <div>
+                      <div style={{ fontFamily: T.display, fontSize: 22, letterSpacing: 1 }}>{plan[day]?.name}</div>
+                      <div style={{ fontSize: 12, color: C.textMid, marginTop: 4 }}>{day} · {plan[day]?.exercises?.length} exercises</div>
+                    </div>
+                    {day === today
+                      ? <div style={{ background: C.accent, color: "#000", borderRadius: 20, padding: "8px 16px", fontSize: 12, fontWeight: 800, fontFamily: T.body }}>TODAY</div>
+                      : <div style={{ color: C.textDim, fontSize: 22 }}>›</div>
+                    }
                   </div>
-                  {day === today
-                    ? <div style={{ background: C.accent, color: "#000", borderRadius: 20, padding: "8px 16px", fontSize: 12, fontWeight: 800, fontFamily: T.body }}>TODAY</div>
-                    : <div style={{ color: C.textDim, fontSize: 22 }}>›</div>
-                  }
+                  {day !== today && (
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setPlan(p => {
+                          const moving = p[day];
+                          const displaced = p[today];
+                          return { ...p, [today]: { ...moving }, [day]: { ...displaced } };
+                        });
+                        showToast(`${plan[day]?.name} moved to ${today}!`);
+                        startWorkout(today);
+                      }}
+                      style={{
+                        width: "100%", background: C.accentDim, border: `1px solid ${C.accent}`,
+                        borderTop: "none", color: C.accent, borderRadius: "0 0 20px 20px",
+                        padding: "12px 22px", fontSize: 12, fontWeight: 800,
+                        cursor: "pointer", fontFamily: T.body,
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                      }}>
+                      <span>⚡ Move to {today} &amp; start now</span>
+                      <span>→</span>
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
