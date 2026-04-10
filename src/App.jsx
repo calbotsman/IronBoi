@@ -423,14 +423,52 @@ function MuscleDiagram({ primary = [], secondary = [] }) {
   );
 }
 
+// Curated YouTube video IDs — Alan Thrall, Jeff Nippard, Renaissance Periodization etc.
+const YT_VIDEOS = {
+  "Barbell Bench Press":        "rT7DgCr-3pg",
+  "Incline Dumbbell Press":     "8iPEnn-ltC8",
+  "Diamond Push-ups":           "J0DnG1_S92I",
+  "Weighted Dips":              "2z8JmcrW-As",
+  "Push-ups":                   "IODxDxX7oi4",
+  "Overhead Press":             "2yjwXTZtzDM",
+  "Dumbbell Shoulder Press":    "qEwKCR5JCog",
+  "Arnold Press":               "6Z15_WdXmVw",
+  "Lateral Raises":             "3VcKaXpzqRo",
+  "KB Clean & Press":           "MI-gSAHHQMY",
+  "Skull Crushers":             "d_KZxkY_5cM",
+  "Overhead Tricep Extension":  "YbX7Wd8jQ-Q",
+  "Deadlift":                   "op9kVnSso6Q",
+  "Romanian Deadlift":          "JCXUYuzwNrM",
+  "Bent-over Barbell Row":      "FWJR5Ve8bnQ",
+  "Inverted Row":               "LK1mGTkFyRg",
+  "Single-arm DB Row":          "pYcpY20QaE8",
+  "KB Single-arm Row":          "wv0BaRBozl8",
+  "KB Halo":                    "E2A_AKIxazg",
+  "Hammer Curls":               "TwD-YGVP4Bk",
+  "EZ Bar Curl":                "zG2i9RGNL4A",
+  "Incline Dumbbell Curl":      "soxrZlIl35U",
+  "KB Curl":                    "iszz-BGIY7s",
+  "Barbell Back Squat":         "bEv6CCg2BC8",
+  "Walking Lunges":             "L8fvypPrzzs",
+  "Bulgarian Split Squat":      "2C-uNgKwPLE",
+  "KB Goblet Squat":            "MeIiIdhvXT4",
+  "Hip Thrust":                 "xDmFkJxPzeM",
+  "KB Swing":                   "sSESeQAir2M",
+  "Standing Calf Raises":       "gwLzBJYoWlA",
+  "Plank":                      "ASdvN_XEl_c",
+  "Hanging Leg Raises":         "hdng3uzCKX8",
+  "Med Ball Slam":              "4YRB9M6OiDE",
+  "Sandbag Carry":              "LWzHa7XDGAk",
+};
+
 function ExerciseModal({ ex, onClose }) {
   const [showVideo, setShowVideo] = useState(false);
   const media = getMedia(ex.name);
   const isBodyweight = ex.weight === 0;
   const isTimed = ex.name.toLowerCase().includes("plank") || ex.name.toLowerCase().includes("jog") || ex.name.toLowerCase().includes("sprint");
   const db = EXERCISE_DB[ex.name] || { primary: [], secondary: [], cues: ["Focus on full range of motion", "Control the eccentric", "Breathe consistently"] };
-  const ytQuery = encodeURIComponent(ex.name + " exercise form tutorial");
-  const ytEmbed = `https://www.youtube.com/embed?listType=search&list=${ytQuery}`;
+  const videoId = YT_VIDEOS[ex.name];
+  const ytSearchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(ex.name + " exercise form tutorial")}`;
 
   return (
     <Sheet onClose={onClose}>
@@ -477,7 +515,7 @@ function ExerciseModal({ ex, onClose }) {
           </div>
 
           {/* Video section */}
-          {!showVideo ? (
+          {videoId && !showVideo && (
             <button onClick={() => setShowVideo(true)} style={{
               width: "100%", background: "#1a0000", border: "1px solid #440000",
               color: "#ff4444", borderRadius: 16, padding: "17px",
@@ -487,12 +525,14 @@ function ExerciseModal({ ex, onClose }) {
             }}>
               <span style={{ fontSize: 18 }}>▶</span> Watch Demo
             </button>
-          ) : (
+          )}
+
+          {videoId && showVideo && (
             <div style={{ borderRadius: 16, overflow: "hidden", marginBottom: 12, border: `1px solid ${C.border}` }}>
               <iframe
                 width="100%"
-                height="200"
-                src={`https://www.youtube.com/embed?listType=search&list=${encodeURIComponent(ex.name + " exercise tutorial form")}&autoplay=0`}
+                height="210"
+                src={`https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1`}
                 title={ex.name + " tutorial"}
                 frameBorder="0"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
@@ -500,6 +540,19 @@ function ExerciseModal({ ex, onClose }) {
                 style={{ display: "block" }}
               />
             </div>
+          )}
+
+          {/* Fallback search link for exercises without a mapped video */}
+          {!videoId && (
+            <a href={ytSearchUrl} target="_blank" rel="noopener noreferrer" style={{
+              width: "100%", background: "#1a0000", border: "1px solid #440000",
+              color: "#ff4444", borderRadius: 16, padding: "17px",
+              fontWeight: 800, fontSize: 15, cursor: "pointer", fontFamily: T.body,
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+              marginBottom: 12, textDecoration: "none",
+            }}>
+              <span style={{ fontSize: 18 }}>▶</span> Search on YouTube ↗
+            </a>
           )}
 
           <button onClick={onClose} style={{
