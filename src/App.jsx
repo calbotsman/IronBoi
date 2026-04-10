@@ -1087,14 +1087,21 @@ export default function FitnessApp() {
 
       {/* Modals */}
       {modalEx && <ExerciseModal ex={modalEx} onClose={() => setModalEx(null)} />}
-      {swapTarget && (
-        <SwapModal
-          currentName={(plan[swapTarget.day]?.exercises?.[swapTarget.idx]?.name) || ""}
-          options={SWAP_OPTIONS[(plan[swapTarget.day]?.exercises?.[swapTarget.idx]?.name)] || []}
-          onSwap={(newName) => swapEx(swapTarget.day, swapTarget.idx, newName)}
-          onClose={() => setSwapTarget(null)}
-        />
-      )}
+      {swapTarget && (() => {
+        const day = swapTarget.day;
+        const idx = swapTarget.idx;
+        const currentName = plan[day]?.exercises?.[idx]?.name || "";
+        const alreadyInPlan = new Set((plan[day]?.exercises || []).map(e => e.name));
+        const options = (SWAP_OPTIONS[currentName] || []).filter(n => !alreadyInPlan.has(n));
+        return (
+          <SwapModal
+            currentName={currentName}
+            options={options.length > 0 ? options : (SWAP_OPTIONS[currentName] || [])}
+            onSwap={(newName) => swapEx(day, idx, newName)}
+            onClose={() => setSwapTarget(null)}
+          />
+        );
+      })()}
 
       {/* Toast */}
       {toast && (
