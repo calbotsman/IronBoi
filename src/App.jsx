@@ -615,6 +615,21 @@ export default function FitnessApp() {
     setNewEx({ name: "", sets: 3, reps: 10, weight: 0 }); setShowAdd(false); showToast("Exercise added!");
   };
 
+  const moveToToday = () => {
+    if (activeDay === today) return;
+    setPlan(p => {
+      const moving = p[activeDay];     // workout we're moving
+      const displaced = p[today];      // workout currently on today
+      return {
+        ...p,
+        [today]: { ...moving },         // today gets the selected workout
+        [activeDay]: { ...displaced },  // selected day gets today's (possibly rest)
+      };
+    });
+    setActiveDay(today);
+    showToast(`${plan[activeDay]?.name} moved to ${today}!`);
+  };
+
   const isRest = day => (plan[day]?.exercises?.length || 0) === 0;
   const logEntries = Object.entries(logs).reverse();
   const totalWorkouts = logEntries.length;
@@ -678,7 +693,7 @@ export default function FitnessApp() {
 
           {/* Day card */}
           <div style={{ background: C.surface, borderRadius: 20, padding: "20px", border: `1px solid ${C.border}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: activeDay !== today && !isRest(activeDay) ? 10 : 18 }}>
               <input value={plan[activeDay]?.name || ""} onChange={e => setPlan(p => ({ ...p, [activeDay]: { ...p[activeDay], name: e.target.value } }))}
                 style={{ background: "transparent", border: "none", color: C.text, fontFamily: T.display, fontSize: 24, letterSpacing: 1, outline: "none", width: "60%" }} />
               <button onClick={() => startWorkout(activeDay)} style={{
@@ -686,6 +701,19 @@ export default function FitnessApp() {
                 padding: "12px 18px", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: T.body,
               }}>START ▶</button>
             </div>
+
+            {/* Move to Today banner — shown when viewing a non-today day with exercises */}
+            {activeDay !== today && !isRest(activeDay) && (
+              <button onClick={moveToToday} style={{
+                width: "100%", background: C.accentDim, border: `1px solid ${C.accent}`,
+                color: C.accent, borderRadius: 12, padding: "12px 16px", marginBottom: 16,
+                fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: T.body,
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+              }}>
+                <span>Missed this one? Move to {today}</span>
+                <span style={{ fontSize: 16 }}>→</span>
+              </button>
+            )}
 
             {(plan[activeDay]?.exercises || []).length === 0 ? (
               <div style={{ color: C.textDim, textAlign: "center", padding: "40px 0", fontSize: 14 }}>Rest day</div>
