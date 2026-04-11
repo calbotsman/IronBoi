@@ -735,6 +735,7 @@ export default function FitnessApp() {
             <div style={{ fontFamily: T.display, fontSize: 36, letterSpacing: 2, color: C.text }}>THIS WEEK</div>
             <button onClick={() => {
               if (confirm("Reset week to default program?")) {
+                try { localStorage.removeItem("ironlab_plan"); } catch {}
                 setPlan(DEFAULT_PLAN);
                 showToast("Plan reset to default!");
               }
