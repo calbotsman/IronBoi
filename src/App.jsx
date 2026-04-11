@@ -731,7 +731,20 @@ export default function FitnessApp() {
       {/* ── PLANNER ── */}
       {view === "planner" && (
         <div style={{ padding: "24px 24px 0" }}>
-          <div style={{ fontFamily: T.display, fontSize: 36, letterSpacing: 2, marginBottom: 16, color: C.text }}>THIS WEEK</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontFamily: T.display, fontSize: 36, letterSpacing: 2, color: C.text }}>THIS WEEK</div>
+            <button onClick={() => {
+              if (confirm("Reset week to default program?")) {
+                setPlan(DEFAULT_PLAN);
+                showToast("Plan reset to default!");
+              }
+            }} style={{
+              background: "transparent", border: `1px solid ${C.border}`,
+              color: C.textDim, borderRadius: 10, padding: "8px 12px",
+              fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: T.body,
+              letterSpacing: 1, textTransform: "uppercase",
+            }}>Reset</button>
+          </div>
 
           {/* Day selector */}
           <div style={{ display: "flex", gap: 8, marginBottom: 20, overflowX: "auto", paddingBottom: 4 }}>
