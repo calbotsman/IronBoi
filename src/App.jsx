@@ -672,25 +672,23 @@ export default function FitnessApp() {
   const todayIdx = DAYS.indexOf(today);
   const isPastDay = (day) => DAYS.indexOf(day) < todayIdx;
 
-  const moveToToday = () => {
-    if (activeDay === today) return;
-    const missedIdx = DAYS.indexOf(activeDay); // e.g. Thu = 3
-    // Shift: today gets missed day's workout, then each day after today
-    // gets the workout from the day before it (sliding everything forward)
+  // Shift workouts forward from `fromDay` — that day becomes rest, everything after slides up
+  const shiftForwardFrom = (fromDay) => {
+    const fromIdx = DAYS.indexOf(fromDay);
     setPlan(p => {
       const next = { ...p };
-      // Walk backward from the last day down to missedIdx+1
-      // so each day gets the previous day's workout
-      for (let i = DAYS.length - 1; i > missedIdx; i--) {
+      for (let i = DAYS.length - 1; i > fromIdx; i--) {
         next[DAYS[i]] = { ...p[DAYS[i - 1]] };
       }
-      // The missed day itself becomes a rest day (it was "skipped")
-      next[DAYS[missedIdx]] = { name: "Rest", muscles: [], exercises: [] };
+      next[DAYS[fromIdx]] = { name: "Rest", muscles: [], exercises: [] };
       return next;
     });
     setActiveDay(today);
-    showToast(`Shifted from ${activeDay} — workouts moved forward!`);
+    showToast(`Shifted — workouts moved forward from ${fromDay}!`);
   };
+
+  // Keep old name as alias for planner banner
+  const moveToToday = () => shiftForwardFrom(activeDay);
 
   const isRest = day => (plan[day]?.exercises?.length || 0) === 0;
   const logEntries = Object.entries(logs).reverse();
@@ -764,8 +762,8 @@ export default function FitnessApp() {
               }}>START ▶</button>
             </div>
 
-            {/* Move to Today banner — only for past days you missed */}
-            {isPastDay(activeDay) && !isRest(activeDay) && (
+            {/* Shift forward banner — available on any day with exercises */}
+            {!isRest(activeDay) && (
               <button onClick={moveToToday} style={{
                 width: "100%", background: C.accent,
                 border: "none",
@@ -773,7 +771,7 @@ export default function FitnessApp() {
                 fontSize: 14, fontWeight: 800, cursor: "pointer", fontFamily: T.body,
                 display: "flex", alignItems: "center", justifyContent: "space-between",
               }}>
-                <span>⚡ Missed {activeDay}? Move to {today}</span>
+                <span>⚡ Skip {activeDay === today ? "today" : activeDay} — shift week forward</span>
                 <span style={{ fontSize: 18 }}>→</span>
               </button>
             )}
@@ -884,7 +882,7 @@ export default function FitnessApp() {
               {DAYS.filter(d => !isRest(d)).map(day => (
                 <div key={day} style={{ marginBottom: 10 }}>
                   <div onClick={() => startWorkout(day)} style={{
-                    background: C.surface, borderRadius: isPastDay(day) ? "20px 20px 0 0" : 20,
+                    background: C.surface, borderRadius: (day !== today && !isRest(day)) ? "20px 20px 0 0" : 20,
                     padding: "20px 22px",
                     border: `1px solid ${day === today ? C.accent : C.border}`,
                     borderBottom: day !== today ? "none" : undefined,
@@ -900,16 +898,11 @@ export default function FitnessApp() {
                       : <div style={{ color: C.textDim, fontSize: 22 }}>›</div>
                     }
                   </div>
-                  {isPastDay(day) && (
+                  {day !== today && !isRest(day) && (
                     <button
                       onClick={e => {
                         e.stopPropagation();
-                        setPlan(p => {
-                          const moving = p[day];
-                          const displaced = p[today];
-                          return { ...p, [today]: { ...moving }, [day]: { ...displaced } };
-                        });
-                        showToast(`${plan[day]?.name} moved to ${today}!`);
+                        shiftForwardFrom(day);
                         startWorkout(today);
                       }}
                       style={{
@@ -919,7 +912,7 @@ export default function FitnessApp() {
                         cursor: "pointer", fontFamily: T.body,
                         display: "flex", alignItems: "center", justifyContent: "space-between",
                       }}>
-                      <span>⚡ Move to {today} &amp; start now</span>
+                      <span>⚡ Skip {day} — shift week forward &amp; start today</span>
                       <span>→</span>
                     </button>
                   )}
