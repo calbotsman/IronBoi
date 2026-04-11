@@ -674,17 +674,22 @@ export default function FitnessApp() {
 
   const moveToToday = () => {
     if (activeDay === today) return;
+    const missedIdx = DAYS.indexOf(activeDay); // e.g. Thu = 3
+    // Shift: today gets missed day's workout, then each day after today
+    // gets the workout from the day before it (sliding everything forward)
     setPlan(p => {
-      const moving = p[activeDay];
-      const displaced = p[today];
-      return {
-        ...p,
-        [today]: { ...moving },
-        [activeDay]: { ...displaced },
-      };
+      const next = { ...p };
+      // Walk backward from the last day down to missedIdx+1
+      // so each day gets the previous day's workout
+      for (let i = DAYS.length - 1; i > missedIdx; i--) {
+        next[DAYS[i]] = { ...p[DAYS[i - 1]] };
+      }
+      // The missed day itself becomes a rest day (it was "skipped")
+      next[DAYS[missedIdx]] = { name: "Rest", muscles: [], exercises: [] };
+      return next;
     });
     setActiveDay(today);
-    showToast(`${plan[activeDay]?.name} moved to ${today}!`);
+    showToast(`Shifted from ${activeDay} — workouts moved forward!`);
   };
 
   const isRest = day => (plan[day]?.exercises?.length || 0) === 0;
