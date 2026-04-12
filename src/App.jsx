@@ -178,10 +178,14 @@ const DEFAULT_PLAN = {
     { name: "KB Curl", sets: 3, reps: 12, weight: 35 },
     { name: "Hanging Leg Raises", sets: 4, reps: 15, weight: 0 },
   ]},
-  Sun: { name: "Active Recovery", muscles: ["Cardio","Core"], exercises: [
-    { name: "Zone 2 Walk/Jog", sets: 1, reps: 45, weight: 0 },
-    { name: "Foam Rolling", sets: 1, reps: 15, weight: 0 },
-    { name: "Stretching Circuit", sets: 1, reps: 20, weight: 0 },
+  Sun: { name: "Pull · Width + Detail", muscles: ["Back","Arms"], exercises: [
+    { name: "Deadlift", sets: 5, reps: 5, weight: 155 },
+    { name: "Inverted Row", sets: 5, reps: 8, weight: 0 },
+    { name: "KB Single-arm Row", sets: 4, reps: 10, weight: 53 },
+    { name: "Sandbag Carry", sets: 4, reps: 40, weight: 0 },
+    { name: "EZ Bar Curl", sets: 4, reps: 10, weight: 65 },
+    { name: "KB Curl", sets: 3, reps: 12, weight: 35 },
+    { name: "Hanging Leg Raises", sets: 4, reps: 15, weight: 0 },
   ]},
 };
 
