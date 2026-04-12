@@ -169,14 +169,14 @@ const DEFAULT_PLAN = {
     { name: "KB Curl", sets: 3, reps: 12, weight: 35 },
     { name: "Hanging Leg Raises", sets: 4, reps: 15, weight: 0 },
   ]},
-  Sat: { name: "Legs · Posterior + HIIT", muscles: ["Legs","Core","Cardio"], exercises: [
-    { name: "Romanian Deadlift", sets: 5, reps: 8, weight: 135 },
-    { name: "KB Swing", sets: 5, reps: 20, weight: 53 },
-    { name: "Hip Thrust", sets: 4, reps: 12, weight: 135 },
-    { name: "Sandbag Clean & Squat", sets: 4, reps: 8, weight: 0 },
-    { name: "Med Ball Slam", sets: 4, reps: 15, weight: 0 },
-    { name: "Hanging Leg Raises", sets: 3, reps: 15, weight: 0 },
-    { name: "HIIT Sprints (20s on/10s off)", sets: 8, reps: 1, weight: 0 },
+  Sat: { name: "Pull · Width + Detail", muscles: ["Back","Arms"], exercises: [
+    { name: "Deadlift", sets: 5, reps: 5, weight: 155 },
+    { name: "Inverted Row", sets: 5, reps: 8, weight: 0 },
+    { name: "KB Single-arm Row", sets: 4, reps: 10, weight: 53 },
+    { name: "Sandbag Carry", sets: 4, reps: 40, weight: 0 },
+    { name: "EZ Bar Curl", sets: 4, reps: 10, weight: 65 },
+    { name: "KB Curl", sets: 3, reps: 12, weight: 35 },
+    { name: "Hanging Leg Raises", sets: 4, reps: 15, weight: 0 },
   ]},
   Sun: { name: "Active Recovery", muscles: ["Cardio","Core"], exercises: [
     { name: "Zone 2 Walk/Jog", sets: 1, reps: 45, weight: 0 },
@@ -596,9 +596,9 @@ export default function FitnessApp() {
   const [plan, setPlanState] = useState(() => {
     try {
       const version = localStorage.getItem("ironlab_plan_version");
-      if (version !== "2") {
+      if (version !== "3") {
         localStorage.removeItem("ironlab_plan");
-        localStorage.setItem("ironlab_plan_version", "2");
+        localStorage.setItem("ironlab_plan_version", "3");
         return DEFAULT_PLAN;
       }
       const s = localStorage.getItem("ironlab_plan");
