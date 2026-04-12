@@ -595,8 +595,8 @@ export default function FitnessApp() {
   });
   const [plan, setPlanState] = useState(() => {
     try {
-      localStorage.removeItem("ironlab_plan");
-      localStorage.removeItem("ironlab_plan_version");
+      const saved = localStorage.getItem("ironlab_plan");
+      if (saved) return JSON.parse(saved);
       return DEFAULT_PLAN;
     } catch { return DEFAULT_PLAN; }
   });
