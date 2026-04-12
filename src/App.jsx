@@ -617,6 +617,32 @@ export default function FitnessApp() {
   const [modalEx, setModalEx] = useState(null);
   const [swapTarget, setSwapTarget] = useState(null);
 
+  // ── Daily Habits ──
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const DAILY_HABITS = [
+    { id: "fasciitis", label: "Plantar Fasciitis Rehab", detail: "Towel scrunches · Calf stretches · Frozen bottle roll · Heel raises", icon: "🦶" },
+    { id: "meds", label: "Take Meds", icon: "💊" },
+    { id: "creatine", label: "Creatine (5g)", icon: "⚡" },
+  ];
+  const [dailyChecks, setDailyChecks] = useState(() => {
+    try {
+      const s = localStorage.getItem("ironlab_daily");
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (parsed._date === todayKey) return parsed;
+      }
+      return { _date: todayKey };
+    } catch { return { _date: todayKey }; }
+  });
+  const toggleDaily = (id) => {
+    setDailyChecks(prev => {
+      const next = { ...prev, _date: todayKey, [id]: !prev[id] };
+      try { localStorage.setItem("ironlab_daily", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const dailyDone = DAILY_HABITS.filter(h => dailyChecks[h.id]).length;
+
   const setPlan = (updater) => {
     setPlanState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -735,6 +761,43 @@ export default function FitnessApp() {
           <div style={{ fontSize: 11, color: C.textMid, letterSpacing: 1, textTransform: "uppercase" }}>Sessions</div>
         </div>
       </div>
+
+      {/* ── DAILY CHECKLIST ── */}
+      {view === "planner" && (
+        <div style={{ margin: "16px 24px 0", background: C.surface, borderRadius: 20, padding: "18px 20px", border: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontFamily: T.display, fontSize: 22, letterSpacing: 1, color: C.text }}>DAILY</div>
+            <div style={{ fontSize: 12, color: dailyDone === DAILY_HABITS.length ? C.green : C.textMid, fontWeight: 700, fontFamily: T.body }}>
+              {dailyDone}/{DAILY_HABITS.length}
+            </div>
+          </div>
+          {DAILY_HABITS.map(h => (
+            <button key={h.id} onClick={() => toggleDaily(h.id)} style={{
+              display: "flex", alignItems: "center", gap: 12, width: "100%",
+              background: dailyChecks[h.id] ? C.greenDim : C.surface2,
+              border: `1px solid ${dailyChecks[h.id] ? C.green : C.border}`,
+              borderRadius: 14, padding: "14px 16px", marginBottom: 8, cursor: "pointer",
+              transition: "all 0.2s",
+            }}>
+              <div style={{
+                width: 26, height: 26, borderRadius: 8,
+                border: `2px solid ${dailyChecks[h.id] ? C.green : C.textDim}`,
+                background: dailyChecks[h.id] ? C.green : "transparent",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 14, color: "#000", fontWeight: 900, flexShrink: 0,
+              }}>{dailyChecks[h.id] ? "✓" : ""}</div>
+              <div style={{ flex: 1, textAlign: "left" }}>
+                <div style={{
+                  fontSize: 14, fontWeight: 700, fontFamily: T.body,
+                  color: dailyChecks[h.id] ? C.green : C.text,
+                  textDecoration: dailyChecks[h.id] ? "line-through" : "none",
+                }}>{h.icon} {h.label}</div>
+                {h.detail && <div style={{ fontSize: 11, color: C.textMid, marginTop: 3, fontFamily: T.body }}>{h.detail}</div>}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── PLANNER ── */}
       {view === "planner" && (
