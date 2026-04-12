@@ -595,14 +595,9 @@ export default function FitnessApp() {
   });
   const [plan, setPlanState] = useState(() => {
     try {
-      const version = localStorage.getItem("ironlab_plan_version");
-      if (version !== "3") {
-        localStorage.removeItem("ironlab_plan");
-        localStorage.setItem("ironlab_plan_version", "3");
-        return DEFAULT_PLAN;
-      }
-      const s = localStorage.getItem("ironlab_plan");
-      return s ? JSON.parse(s) : DEFAULT_PLAN;
+      localStorage.removeItem("ironlab_plan");
+      localStorage.removeItem("ironlab_plan_version");
+      return DEFAULT_PLAN;
     } catch { return DEFAULT_PLAN; }
   });
   const today = getTodayDay();
