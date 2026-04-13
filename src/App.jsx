@@ -1,6 +1,4 @@
 import { useState, useEffect } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth, signInWithGoogle, logOut, loadData, saveData } from "./firebase";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Cardio"];
@@ -595,8 +593,6 @@ function PhilosophyCard({ item }) {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function FitnessApp() {
-  const [user, setUser] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
   const [view, setView] = useState("planner");
   const [logs, setLogs] = useState(() => {
     try { const s = localStorage.getItem("ironlab_logs"); return s ? JSON.parse(s) : {}; } catch { return {}; }
@@ -639,41 +635,10 @@ export default function FitnessApp() {
     } catch { return { _date: todayKey }; }
   });
 
-  // ── Firebase Auth ──
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      setAuthLoading(false);
-      if (u) {
-        // Load from Firestore on sign-in
-        const [savedPlan, savedLogs, savedDaily] = await Promise.all([
-          loadData(u.uid, "plan"),
-          loadData(u.uid, "logs"),
-          loadData(u.uid, "daily"),
-        ]);
-        if (savedPlan) {
-          setPlanState(savedPlan);
-          try { localStorage.setItem("ironlab_plan", JSON.stringify(savedPlan)); } catch {}
-        }
-        if (savedLogs) {
-          setLogs(savedLogs);
-          try { localStorage.setItem("ironlab_logs", JSON.stringify(savedLogs)); } catch {}
-        }
-        if (savedDaily && savedDaily._date === todayKey) {
-          setDailyChecks(savedDaily);
-          try { localStorage.setItem("ironlab_daily", JSON.stringify(savedDaily)); } catch {}
-        }
-      }
-    });
-    return unsub;
-  }, []);
-
-  // ── Sync helpers (localStorage + Firestore) ──
   const toggleDaily = (id) => {
     setDailyChecks(prev => {
       const next = { ...prev, _date: todayKey, [id]: !prev[id] };
       try { localStorage.setItem("ironlab_daily", JSON.stringify(next)); } catch {}
-      if (user) saveData(user.uid, "daily", next);
       return next;
     });
   };
@@ -683,14 +648,12 @@ export default function FitnessApp() {
     setPlanState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       try { localStorage.setItem("ironlab_plan", JSON.stringify(next)); } catch {}
-      if (user) saveData(user.uid, "plan", next);
       return next;
     });
   };
   const saveLog = (newLogs) => {
     setLogs(newLogs);
     try { localStorage.setItem("ironlab_logs", JSON.stringify(newLogs)); } catch {}
-    if (user) saveData(user.uid, "logs", newLogs);
   };
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2500); };
   const startWorkout = day => { setTrackingDay(day); setCompletedSets({}); setCompletedExercises({}); setView("tracker"); };
@@ -770,30 +733,6 @@ export default function FitnessApp() {
   // Shared input style
   const inputStyle = { background: C.surface2, border: `1px solid ${C.border}`, color: C.text, borderRadius: 12, padding: "12px 14px", fontSize: 15, width: "100%", boxSizing: "border-box", fontFamily: T.body, outline: "none" };
 
-  // ── Auth gate ──
-  if (authLoading) {
-    return (
-      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ fontFamily: T.display, fontSize: 36, color: C.accent, letterSpacing: 2 }}>IRON LAB</div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 24, padding: 24 }}>
-        <div style={{ fontFamily: T.display, fontSize: 48, color: C.text, letterSpacing: 2 }}>IRON LAB</div>
-        <div style={{ fontSize: 14, color: C.textMid, fontFamily: T.body }}>Sign in to sync your data across devices</div>
-        <button onClick={signInWithGoogle} style={{
-          background: C.accent, color: "#000", border: "none", borderRadius: 20,
-          padding: "16px 32px", fontSize: 15, fontWeight: 800, cursor: "pointer",
-          fontFamily: T.body, letterSpacing: 0.5,
-        }}>
-          Sign in with Google
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: T.body, paddingBottom: 80 }}>
@@ -811,15 +750,6 @@ export default function FitnessApp() {
             fontFamily: T.body, letterSpacing: 0.5,
           }}>
             START TODAY
-          </button>
-          <button onClick={logOut} style={{
-            background: "transparent", border: `1px solid ${C.border}`, borderRadius: 20,
-            padding: "12px 14px", cursor: "pointer", fontSize: 11, color: C.textDim,
-            fontFamily: T.body, fontWeight: 700,
-          }} title="Sign out">
-            {user.photoURL ? (
-              <img src={user.photoURL} alt="" style={{ width: 20, height: 20, borderRadius: "50%" }} />
-            ) : "OUT"}
           </button>
         </div>
       </div>
