@@ -107,6 +107,29 @@ function getMedia(name) {
 const JS_DAY_TO_IDX = [6, 0, 1, 2, 3, 4, 5];
 const getTodayDay = () => DAYS[JS_DAY_TO_IDX[new Date().getDay()]];
 
+// Build swap options for any exercise — use SWAP_OPTIONS if defined, otherwise
+// fall back to exercises sharing the same primary muscle group from EXERCISE_DB.
+function getSwapOptions(name, alreadyInPlan) {
+  const already = new Set(alreadyInPlan);
+  already.add(name); // never suggest the current exercise itself
+
+  // 1. Try curated list first
+  const curated = (SWAP_OPTIONS[name] || []).filter(n => !already.has(n));
+  if (curated.length > 0) return curated;
+
+  // 2. Fall back to same-muscle exercises from EXERCISE_DB
+  const current = EXERCISE_DB[name];
+  if (current && current.primary.length > 0) {
+    const sameMuscle = Object.entries(EXERCISE_DB)
+      .filter(([n, data]) => !already.has(n) && data.primary.some(m => current.primary.includes(m)))
+      .map(([n]) => n);
+    if (sameMuscle.length > 0) return sameMuscle;
+  }
+
+  // 3. Last resort — anything not already in the plan
+  return Object.keys(EXERCISE_DB).filter(n => !already.has(n)).slice(0, 6);
+}
+
 const PHILOSOPHY = [
   { principle: "Progressive Overload", icon: "📈", summary: "Add weight, reps, or sets over time — the #1 driver of hypertrophy.", detail: "Schoenfeld (2010): mechanical tension is the primary stimulus for muscle growth. Increase load by 2.5–5% when you hit the top of your rep range for 2 consecutive sessions." },
   { principle: "Mechanical Tension > Metabolic Stress", icon: "⚙️", summary: "Lift heavy with full range of motion. The burn is secondary.", detail: "Research shows stretched-position loading (e.g. deep squats, incline curls) produces superior hypertrophy vs. partial reps chasing the pump. Control the eccentric." },
@@ -1092,13 +1115,11 @@ export default function FitnessApp() {
                         width: 52, height: 52, borderRadius: 12, cursor: "pointer", fontSize: 16, fontWeight: 900, flexShrink: 0,
                         display: "flex", alignItems: "center", justifyContent: "center",
                       }}>▶</button>
-                      {(SWAP_OPTIONS[ex.name]?.length > 0) && (
-                        <button onClick={() => setSwapTarget({ day: trackingDay, idx: i })} style={{
+                      <button onClick={() => setSwapTarget({ day: trackingDay, idx: i })} style={{
                           background: C.accentDim, border: `1px solid ${C.accent}`, color: C.accent,
                           width: 52, height: 52, borderRadius: 12, cursor: "pointer", fontSize: 18, fontWeight: 900, flexShrink: 0,
                           display: "flex", alignItems: "center", justifyContent: "center",
                         }}>⇄</button>
-                      )}
                     </div>
                   </div>
                 );
@@ -1181,8 +1202,8 @@ export default function FitnessApp() {
         const day = swapTarget.day;
         const idx = swapTarget.idx;
         const currentName = plan[day]?.exercises?.[idx]?.name || "";
-        const alreadyInPlan = new Set((plan[day]?.exercises || []).map(e => e.name));
-        const options = (SWAP_OPTIONS[currentName] || []).filter(n => !alreadyInPlan.has(n));
+        const alreadyInPlan = (plan[day]?.exercises || []).map(e => e.name);
+        const options = getSwapOptions(currentName, alreadyInPlan);
         return (
           <SwapModal
             currentName={currentName}
