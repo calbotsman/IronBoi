@@ -243,7 +243,11 @@ function SwapModal({ currentName, options, onSwap, onClose }) {
       <div style={{ padding: "20px 20px 40px" }}>
         <div style={{ fontSize: 11, letterSpacing: 3, color: C.textMid, textTransform: "uppercase", marginBottom: 4, fontFamily: T.body }}>Swap Exercise</div>
         <div style={{ fontFamily: T.display, fontSize: 32, letterSpacing: 1, color: C.text, marginBottom: 20, lineHeight: 1 }}>{currentName}</div>
-        {options.map(name => (
+        {options.length === 0 ? (
+          <div style={{ color: C.textMid, fontFamily: T.body, fontSize: 14, padding: "20px 0", textAlign: "center" }}>
+            All swap options are already in this workout.
+          </div>
+        ) : options.map(name => (
           <button key={name} onClick={() => onSwap(name)} style={{
             width: "100%", background: C.surface2, border: `1px solid ${C.border}`,
             color: C.text, borderRadius: 16, padding: "18px 20px", marginBottom: 10,
@@ -1182,7 +1186,7 @@ export default function FitnessApp() {
         return (
           <SwapModal
             currentName={currentName}
-            options={options.length > 0 ? options : (SWAP_OPTIONS[currentName] || [])}
+            options={options}
             onSwap={(newName) => swapEx(day, idx, newName)}
             onClose={() => setSwapTarget(null)}
           />
