@@ -704,6 +704,56 @@ export default function FitnessApp() {
   const [modalEx, setModalEx] = useState(null);
   const [swapTarget, setSwapTarget] = useState(null);
 
+  // ── Nutrition ──
+  const [nutritionTargets, setNutritionTargets] = useState(() => {
+    try {
+      const s = localStorage.getItem("ironlab_nutrition_targets");
+      if (s) return JSON.parse(s);
+    } catch {}
+    return { kcal: 2300, protein: 180, fat: 70, carbs: 230 };
+  });
+  const [nutritionLog, setNutritionLog] = useState(() => {
+    try {
+      const s = localStorage.getItem("ironlab_nutrition_log");
+      if (s) return JSON.parse(s);
+    } catch {}
+    return {};
+  });
+  const [showAddFood, setShowAddFood] = useState(false);
+  const [newFood, setNewFood] = useState({ name: "", kcal: "", protein: "", fat: "", carbs: "" });
+  const [editingTargets, setEditingTargets] = useState(false);
+
+  const saveTargets = (t) => {
+    setNutritionTargets(t);
+    try { localStorage.setItem("ironlab_nutrition_targets", JSON.stringify(t)); } catch {}
+  };
+  const saveNutritionLog = (next) => {
+    setNutritionLog(next);
+    try { localStorage.setItem("ironlab_nutrition_log", JSON.stringify(next)); } catch {}
+  };
+  const addFood = () => {
+    const kcal = Number(newFood.kcal) || 0;
+    if (!newFood.name.trim() || kcal <= 0) return;
+    const entry = {
+      id: Date.now(),
+      name: newFood.name.trim(),
+      kcal,
+      protein: Number(newFood.protein) || 0,
+      fat: Number(newFood.fat) || 0,
+      carbs: Number(newFood.carbs) || 0,
+    };
+    const dk = new Date().toISOString().slice(0, 10);
+    const dayEntries = nutritionLog[dk] || [];
+    saveNutritionLog({ ...nutritionLog, [dk]: [...dayEntries, entry] });
+    setNewFood({ name: "", kcal: "", protein: "", fat: "", carbs: "" });
+    setShowAddFood(false);
+    showToast("Logged 🍽");
+  };
+  const removeFood = (dateKey, id) => {
+    const next = { ...nutritionLog, [dateKey]: (nutritionLog[dateKey] || []).filter(e => e.id !== id) };
+    saveNutritionLog(next);
+  };
+
   // ── Daily Habits ──
   const todayKey = new Date().toISOString().slice(0, 10);
   const DAILY_HABITS = [
@@ -1256,6 +1306,156 @@ export default function FitnessApp() {
         </div>
       )}
 
+      {/* ── NUTRITION ── */}
+      {view === "eat" && (() => {
+        const dk = new Date().toISOString().slice(0, 10);
+        const entries = nutritionLog[dk] || [];
+        const totals = entries.reduce((a, e) => ({
+          kcal: a.kcal + (e.kcal || 0),
+          protein: a.protein + (e.protein || 0),
+          fat: a.fat + (e.fat || 0),
+          carbs: a.carbs + (e.carbs || 0),
+        }), { kcal: 0, protein: 0, fat: 0, carbs: 0 });
+        const pct = (v, t) => t > 0 ? Math.min(100, Math.round((v / t) * 100)) : 0;
+        const ring = [
+          { key: "kcal", label: "CALORIES", val: totals.kcal, target: nutritionTargets.kcal, color: C.accent, unit: "" },
+          { key: "protein", label: "PROTEIN", val: totals.protein, target: nutritionTargets.protein, color: C.green, unit: "g" },
+          { key: "fat", label: "FAT", val: totals.fat, target: nutritionTargets.fat, color: "#ff9f43", unit: "g" },
+          { key: "carbs", label: "CARBS", val: totals.carbs, target: nutritionTargets.carbs, color: "#3aa0ff", unit: "g" },
+        ];
+        const remainingKcal = nutritionTargets.kcal - totals.kcal;
+        return (
+          <div style={{ padding: "24px 24px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontFamily: T.display, fontSize: 36, letterSpacing: 2 }}>EAT</div>
+                <div style={{ fontSize: 12, color: C.textMid, letterSpacing: 1 }}>{dk} · Daily Fuel</div>
+              </div>
+              <button onClick={() => setEditingTargets(v => !v)} style={{
+                background: "none", border: `1px solid ${C.border}`, color: C.textMid,
+                borderRadius: 10, padding: "8px 14px", fontSize: 11, letterSpacing: 1,
+                fontFamily: T.body, cursor: "pointer", textTransform: "uppercase",
+              }}>{editingTargets ? "Done" : "Targets"}</button>
+            </div>
+
+            {editingTargets && (
+              <div style={{ background: C.surface, borderRadius: 20, padding: 20, border: `1px solid ${C.border}`, marginBottom: 16 }}>
+                <div style={{ fontFamily: T.display, fontSize: 20, letterSpacing: 1, marginBottom: 14 }}>DAILY TARGETS</div>
+                {[["kcal", "Calories"], ["protein", "Protein (g)"], ["fat", "Fat (g)"], ["carbs", "Carbs (g)"]].map(([k, lbl]) => (
+                  <div key={k} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, color: C.textMid, letterSpacing: 1 }}>{lbl}</div>
+                    <input type="number" value={nutritionTargets[k]} onChange={e => saveTargets({ ...nutritionTargets, [k]: Number(e.target.value) || 0 })}
+                      style={{
+                        background: C.surface2, border: `1px solid ${C.border}`, color: C.text,
+                        borderRadius: 10, padding: "8px 12px", width: 110, fontSize: 14,
+                        textAlign: "right", fontFamily: T.body,
+                      }} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ background: C.surface, borderRadius: 20, padding: 22, border: `1px solid ${C.border}`, marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div style={{ fontSize: 11, color: C.textMid, letterSpacing: 2, textTransform: "uppercase" }}>Remaining</div>
+                <div style={{ fontSize: 11, color: C.textDim, letterSpacing: 1 }}>of {nutritionTargets.kcal} kcal</div>
+              </div>
+              <div style={{ fontFamily: T.display, fontSize: 64, lineHeight: 1, color: remainingKcal < 0 ? C.red : C.accent, letterSpacing: 1 }}>
+                {remainingKcal}
+              </div>
+              <div style={{ fontSize: 12, color: C.textMid, marginTop: 6 }}>
+                {totals.kcal} eaten · {remainingKcal < 0 ? `${Math.abs(remainingKcal)} over` : `${remainingKcal} left`}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+              {ring.slice(1).map(m => (
+                <div key={m.key} style={{ background: C.surface, borderRadius: 16, padding: 16, border: `1px solid ${C.border}` }}>
+                  <div style={{ fontSize: 10, color: C.textMid, letterSpacing: 2, marginBottom: 6 }}>{m.label}</div>
+                  <div style={{ fontFamily: T.display, fontSize: 28, color: m.color, letterSpacing: 1, lineHeight: 1 }}>
+                    {Math.round(m.val)}<span style={{ fontSize: 14, color: C.textMid }}>/{m.target}{m.unit}</span>
+                  </div>
+                  <div style={{ background: C.surface2, borderRadius: 6, height: 4, overflow: "hidden", marginTop: 10 }}>
+                    <div style={{ background: m.color, height: "100%", width: `${pct(m.val, m.target)}%`, borderRadius: 6 }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => setShowAddFood(true)} style={{
+              width: "100%", background: C.accent, color: "#000", border: "none", borderRadius: 14,
+              padding: "16px", fontWeight: 800, fontSize: 14, letterSpacing: 1, cursor: "pointer",
+              fontFamily: T.body, marginBottom: 14,
+            }}>+ LOG FOOD</button>
+
+            {showAddFood && (
+              <div style={{ background: C.surface, borderRadius: 20, padding: 20, border: `1px solid ${C.accent}`, marginBottom: 14 }}>
+                <div style={{ fontFamily: T.display, fontSize: 20, letterSpacing: 1, marginBottom: 14 }}>NEW ENTRY</div>
+                <input placeholder="Name (e.g. Chicken & rice)" value={newFood.name} onChange={e => setNewFood({ ...newFood, name: e.target.value })}
+                  style={{
+                    background: C.surface2, border: `1px solid ${C.border}`, color: C.text,
+                    borderRadius: 10, padding: "10px 12px", width: "100%", fontSize: 14,
+                    fontFamily: T.body, marginBottom: 10, boxSizing: "border-box",
+                  }} />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                  {[["kcal", "Calories"], ["protein", "Protein g"], ["fat", "Fat g"], ["carbs", "Carbs g"]].map(([k, lbl]) => (
+                    <input key={k} type="number" placeholder={lbl} value={newFood[k]} onChange={e => setNewFood({ ...newFood, [k]: e.target.value })}
+                      style={{
+                        background: C.surface2, border: `1px solid ${C.border}`, color: C.text,
+                        borderRadius: 10, padding: "10px 12px", fontSize: 14,
+                        fontFamily: T.body, boxSizing: "border-box",
+                      }} />
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { setShowAddFood(false); setNewFood({ name: "", kcal: "", protein: "", fat: "", carbs: "" }); }} style={{
+                    flex: 1, background: "none", color: C.textMid, border: `1px solid ${C.border}`,
+                    borderRadius: 12, padding: "12px", fontFamily: T.body, fontSize: 13, letterSpacing: 1, cursor: "pointer",
+                  }}>CANCEL</button>
+                  <button onClick={addFood} style={{
+                    flex: 2, background: C.accent, color: "#000", border: "none",
+                    borderRadius: 12, padding: "12px", fontFamily: T.body, fontSize: 13, fontWeight: 800, letterSpacing: 1, cursor: "pointer",
+                  }}>ADD</button>
+                </div>
+              </div>
+            )}
+
+            <div style={{ fontSize: 11, color: C.textMid, letterSpacing: 2, marginBottom: 10, textTransform: "uppercase" }}>Today</div>
+            {entries.length === 0 ? (
+              <div style={{ textAlign: "center", color: C.textDim, padding: "40px 0 100px" }}>
+                <div style={{ fontFamily: T.display, fontSize: 48, marginBottom: 8, color: C.border }}>0</div>
+                <div style={{ fontSize: 13 }}>Nothing logged yet.</div>
+              </div>
+            ) : (
+              <div style={{ paddingBottom: 100 }}>
+                {entries.map(e => (
+                  <div key={e.id} style={{
+                    background: C.surface, borderRadius: 14, padding: "14px 16px",
+                    border: `1px solid ${C.border}`, marginBottom: 8,
+                    display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, fontFamily: T.body, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</div>
+                      <div style={{ fontSize: 11, color: C.textMid, marginTop: 4, letterSpacing: 0.5 }}>
+                        P {e.protein}g · F {e.fat}g · C {e.carbs}g
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: T.display, fontSize: 20, color: C.accent, lineHeight: 1 }}>{e.kcal}</div>
+                      <div style={{ fontSize: 9, color: C.textMid, letterSpacing: 1 }}>KCAL</div>
+                    </div>
+                    <button onClick={() => removeFood(dk, e.id)} style={{
+                      background: "none", border: "none", color: C.textDim, fontSize: 18,
+                      cursor: "pointer", padding: "4px 8px",
+                    }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Modals */}
       {modalEx && <ExerciseModal ex={modalEx} onClose={() => setModalEx(null)} />}
       {swapTarget && (() => {
@@ -1291,7 +1491,7 @@ export default function FitnessApp() {
         display: "flex", justifyContent: "space-around", padding: "8px 0 20px",
         backdropFilter: "blur(20px)",
       }}>
-        {[["planner","Plan","PLAN"],["tracker","Track","TRACK"],["history","Log","LOG"],["philosophy","Why","SCIENCE"]].map(([v, icon, label]) => (
+        {[["planner","Plan","PLAN"],["tracker","Track","TRACK"],["eat","Eat","EAT"],["history","Log","LOG"],["philosophy","Why","SCIENCE"]].map(([v, icon, label]) => (
           <button key={v} onClick={() => setView(v)} style={{
             background: "none", border: "none",
             color: view === v ? C.accent : C.textDim,
