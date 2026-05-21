@@ -32,17 +32,19 @@ This is the working state Tosh wants Codex looped in on. Two prior docs in this 
 | Phase 0 delivery | **4 small PRs, not one big one.** | One Phase 0 task per PR for easier review and bisecting. |
 | Coach model provider (2026-05-21) | **Gemini only.** Keep `selectCoachModelProvider` for future flexibility; remove Anthropic. | Resolves the question we'd posed to Codex. |
 
-## Phase 0 task list (revised 2026-05-21)
+## Phase 0 task list (revised 2026-05-21 after verifying code against docs)
 
 | # | Task | Status |
 |---|---|---|
-| 1 | Drop coach trigger timeout 540s→60s, set maxInstances:20, retry:false | ✅ landed in baseline 2026-05-21 |
-| 2 | Move Gemini API key from URL query to `x-goog-api-key` header | pending |
-| 3 | **Remove Anthropic SDK + `AnthropicCoachProvider`** (replaces stream-throttle) | pending |
-| 4 | Add `turnId` UUID per coach turn, log + persist | pending |
-| 5 | Add per-user daily message + token counter with hard cap | pending |
+| 1 | Drop coach trigger timeout 540s→60s, set maxInstances:20, retry:false | ✅ landed in baseline 2026-05-21 (`functions/src/index.ts:804-819`) |
+| 2 | Move Gemini API key from URL query to `x-goog-api-key` header | ✅ **already shipped** (`functions/src/coach/modelProvider.ts:97`) |
+| 3 | **Remove Anthropic SDK + `AnthropicCoachProvider`** (replaces stream-throttle) | pending — only remaining Phase 0 item |
+| 4 | Add `turnId` UUID per coach turn, log + persist | ✅ **already shipped** (`functions/src/index.ts:825` generates UUID; threaded through `orchestrate.ts:28-208`; persisted at `index.ts:652-653`) |
+| 5 | Add per-user daily message + token counter with hard cap | ✅ **already shipped** (`functions/src/usage/cap.ts` with defaults `200/1M/200k` matching locked decision, wired into `orchestrate.ts:94-116`) |
 
-Tasks #6 onward (prompt restructure, tool executor, memory queue, App Check, account deletion, etc.) are Phase 1+ and not in scope for Phase 0.
+**2026-05-21 audit-vs-code reconciliation:** The original doc claimed tasks 2/4/5 were "pending." Code inspection + `npm run check`, `npm run lint:security` (16/16), and `npm run test:security` (54/54 with emulator) all pass — meaning these tasks were implemented but never reconciled into this status doc. The only true outstanding Phase 0 item is PR #3 (Anthropic removal), which we just defined today.
+
+Tasks #6 onward (prompt restructure, tool executor, memory queue, App Check, account deletion, etc.) are Phase 1+ and not in scope for Phase 0. **Some may also already be implemented** — `functions/src/coach/contextBundle.ts`, `functions/src/contracts/coach-agent.ts`, `functions/src/onboarding/flow.ts`, `functions/src/workouts/planAdjustments.ts`, `functions/src/corpus/researchCorpus.ts` all exist in the tree. Audit Phase 1 against code before planning further.
 
 ## What's already in the working tree (Task #1)
 
