@@ -1,4 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import {
+  callFunction,
+  firebaseConfigured,
+  signInWithApple,
+  signOut,
+  subscribeCoachMessages,
+  subscribeAuth,
+} from "./firebaseClient.js";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Cardio"];
@@ -106,6 +114,81 @@ function getMedia(name) {
 }
 const JS_DAY_TO_IDX = [6, 0, 1, 2, 3, 4, 5];
 const getTodayDay = () => DAYS[JS_DAY_TO_IDX[new Date().getDay()]];
+
+const isoNow = () => new Date().toISOString();
+
+function toFirestorePlan(plan) {
+  return {
+    planId: "current",
+    source: "legacy_pwa",
+    days: plan,
+    updatedAt: isoNow(),
+  };
+}
+
+function toFirestoreDaily(date, checks) {
+  const { _date, ...rest } = checks || {};
+  return {
+    date,
+    checks: Object.fromEntries(
+      Object.entries(rest).map(([key, value]) => [key, Boolean(value)]),
+    ),
+    updatedAt: isoNow(),
+  };
+}
+
+function toFirestoreWorkoutLog(sessionId, day, dayPlan, completedSets, completedExercises) {
+  const exercises = dayPlan?.exercises || [];
+  return {
+    sessionId,
+    date: new Date().toISOString().slice(0, 10),
+    source: "manual",
+    exercises: exercises.map((ex, index) => ({
+      name: ex.name,
+      sets: Array.from({ length: ex.sets }, (_, setIndex) => ({
+        reps: ex.reps,
+        loadKg: Number(((ex.weight || 0) * 0.45359237).toFixed(2)),
+        notes: completedExercises[index]
+          ? "Exercise marked complete in Iron Lab PWA."
+          : completedSets[`${index}-${setIndex}`]
+            ? "Set marked complete in Iron Lab PWA."
+            : undefined,
+      })).filter((set) => set.notes),
+    })),
+    durationSec: undefined,
+    perceivedEffort: undefined,
+    postSessionNotes: `Logged from ${day} · ${dayPlan?.name || "Workout"}`,
+    createdAt: isoNow(),
+  };
+}
+
+function localDateKeyToIso(key) {
+  const parsed = new Date(key);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return new Date().toISOString().slice(0, 10);
+}
+
+function legacyLogToFirestore(sessionId, key, log) {
+  return {
+    sessionId,
+    date: localDateKeyToIso(key),
+    source: "manual",
+    exercises: (log.exercises || []).map((ex) => ({
+      name: ex.name,
+      sets: Array.from({ length: ex.setsCompleted || 0 }, () => ({
+        reps: ex.reps,
+        loadKg: Number(((ex.weight || 0) * 0.45359237).toFixed(2)),
+        notes: ex.exerciseDone
+          ? "Migrated completed exercise from Iron Lab PWA localStorage."
+          : "Migrated completed set from Iron Lab PWA localStorage.",
+      })),
+    })),
+    durationSec: undefined,
+    perceivedEffort: undefined,
+    postSessionNotes: `Migrated from ${log.day || "legacy"} · ${log.name || "Workout"}`,
+    createdAt: isoNow(),
+  };
+}
 
 // Build swap options for any exercise — use SWAP_OPTIONS if defined, otherwise
 // fall back to exercises sharing the same primary muscle group from EXERCISE_DB.
@@ -621,9 +704,15 @@ function PhilosophyCard({ item }) {
 // ── Main App ──────────────────────────────────────────────────────────────────
 export default function FitnessApp() {
   const [view, setView] = useState("planner");
+  const [firebaseUser, setFirebaseUser] = useState(null);
+  const [syncStatus, setSyncStatus] = useState(
+    firebaseConfigured ? "Sign in to sync" : "Local mode",
+  );
+  const [remoteHydrated, setRemoteHydrated] = useState(false);
   const [logs, setLogs] = useState(() => {
     try { const s = localStorage.getItem("ironlab_logs"); return s ? JSON.parse(s) : {}; } catch { return {}; }
   });
+  const logsRef = useRef(logs);
   const [plan, setPlanState] = useState(() => {
     try {
       const saved = localStorage.getItem("ironlab_plan");
@@ -643,6 +732,11 @@ export default function FitnessApp() {
   const [toast, setToast] = useState(null);
   const [modalEx, setModalEx] = useState(null);
   const [swapTarget, setSwapTarget] = useState(null);
+  const [coachSessionId] = useState("general");
+  const [coachMessages, setCoachMessages] = useState([]);
+  const [coachInput, setCoachInput] = useState("");
+  const [coachSending, setCoachSending] = useState(false);
+  const syncEnabled = firebaseConfigured && firebaseUser && remoteHydrated;
 
   // ── Daily Habits ──
   const todayKey = new Date().toISOString().slice(0, 10);
@@ -661,6 +755,118 @@ export default function FitnessApp() {
       return { _date: todayKey };
     } catch { return { _date: todayKey }; }
   });
+
+  useEffect(() => {
+    logsRef.current = logs;
+  }, [logs]);
+
+  useEffect(() => {
+    return subscribeAuth(async (user) => {
+      setFirebaseUser(user);
+      setRemoteHydrated(false);
+      if (!firebaseConfigured) {
+        setSyncStatus("Local mode");
+        return;
+      }
+      if (!user) {
+        setSyncStatus("Sign in to sync");
+        return;
+      }
+
+      setSyncStatus("Syncing...");
+      try {
+        const state = await callFunction("getUserState", { today: todayKey });
+        if (state?.plan?.days) {
+          setPlanState(state.plan.days);
+          try { localStorage.setItem("ironlab_plan", JSON.stringify(state.plan.days)); } catch {}
+        }
+        if (state?.daily?.checks) {
+          const nextDaily = { _date: todayKey, ...state.daily.checks };
+          setDailyChecks(nextDaily);
+          try { localStorage.setItem("ironlab_daily", JSON.stringify(nextDaily)); } catch {}
+        }
+        if (Array.isArray(state?.recentLogs) && state.recentLogs.length > 0) {
+          const nextLogs = {};
+          for (const log of state.recentLogs) {
+            const key = log.date || log.sessionId;
+            nextLogs[key] = {
+              day: log.postSessionNotes || "Synced workout",
+              name: log.sessionId,
+              completedSets: log.exercises?.reduce((sum, ex) => sum + (ex.sets?.length || 0), 0) || 0,
+              totalSets: log.exercises?.reduce((sum, ex) => sum + (ex.sets?.length || 0), 0) || 0,
+              exercises: log.exercises || [],
+            };
+          }
+          setLogs(nextLogs);
+          try { localStorage.setItem("ironlab_logs", JSON.stringify(nextLogs)); } catch {}
+        } else {
+          const migrationKey = `ironlab_logs_migrated_${user.uid}`;
+          const alreadyMigrated = localStorage.getItem(migrationKey) === "true";
+          const localEntries = Object.entries(logsRef.current);
+          if (!alreadyMigrated && localEntries.length > 0) {
+            await Promise.all(
+              localEntries.map(([key, log], index) =>
+                callFunction(
+                  "logWorkout",
+                  legacyLogToFirestore(`legacy_${index}_${localDateKeyToIso(key)}`, key, log),
+                ),
+              ),
+            );
+            localStorage.setItem(migrationKey, "true");
+          }
+        }
+        setRemoteHydrated(true);
+        setSyncStatus("Synced");
+      } catch (error) {
+        console.error(error);
+        setRemoteHydrated(true);
+        setSyncStatus("Sync failed · local saved");
+      }
+    });
+  }, [todayKey]);
+
+  useEffect(() => {
+    if (!syncEnabled) return;
+    const timer = setTimeout(() => {
+      callFunction("upsertWorkoutPlan", toFirestorePlan(plan))
+        .then(() => setSyncStatus("Synced"))
+        .catch((error) => {
+          console.error(error);
+          setSyncStatus("Plan sync failed");
+        });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [plan, syncEnabled]);
+
+  useEffect(() => {
+    if (!syncEnabled) return;
+    callFunction("recordDailyCheck", toFirestoreDaily(todayKey, dailyChecks))
+      .then(() => setSyncStatus("Synced"))
+      .catch((error) => {
+        console.error(error);
+        setSyncStatus("Daily sync failed");
+      });
+  }, [dailyChecks, syncEnabled, todayKey]);
+
+  useEffect(() => {
+    if (!firebaseConfigured || !firebaseUser) {
+      setCoachMessages([]);
+      return undefined;
+    }
+
+    return subscribeCoachMessages(
+      firebaseUser.uid,
+      coachSessionId,
+      (messages, error) => {
+        if (error) {
+          console.error(error);
+          setSyncStatus("Coach sync failed");
+          return;
+        }
+        setCoachMessages(messages);
+      },
+    );
+  }, [coachSessionId, firebaseUser]);
 
   const toggleDaily = (id) => {
     setDailyChecks(prev => {
@@ -683,6 +889,41 @@ export default function FitnessApp() {
     try { localStorage.setItem("ironlab_logs", JSON.stringify(newLogs)); } catch {}
   };
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+  const sendCoachChat = async () => {
+    const content = coachInput.trim();
+    if (!content || coachSending) return;
+    if (!firebaseConfigured) {
+      showToast("Firebase env not configured");
+      return;
+    }
+    if (!firebaseUser) {
+      showToast("Sign in to use Coach");
+      return;
+    }
+
+    setCoachSending(true);
+    setCoachInput("");
+    try {
+      await callFunction("createCoachSession", {
+        sessionId: coachSessionId,
+        startedAt: isoNow(),
+      });
+      await callFunction("sendCoachMessage", {
+        sessionId: coachSessionId,
+        messageId: `msg_${Date.now()}`,
+        role: "user",
+        content,
+        timestamp: isoNow(),
+        toolCallIds: [],
+      });
+    } catch (error) {
+      console.error(error);
+      setCoachInput(content);
+      showToast("Coach message failed");
+    } finally {
+      setCoachSending(false);
+    }
+  };
   const startWorkout = day => { setTrackingDay(day); setCompletedSets({}); setCompletedExercises({}); setView("tracker"); };
   const toggleSet = (ei, si) => { const k = `${ei}-${si}`; setCompletedSets(p => ({ ...p, [k]: !p[k] })); };
   const toggleExDone = ei => setCompletedExercises(p => ({ ...p, [ei]: !p[ei] }));
@@ -692,7 +933,7 @@ export default function FitnessApp() {
     const exs = plan[trackingDay]?.exercises || [];
     const totalSets = exs.reduce((a, e) => a + e.sets, 0);
     const done = Object.values(completedSets).filter(Boolean).length;
-    saveLog({
+    const newLogs = {
       ...logs,
       [dk]: {
         day: trackingDay, name: plan[trackingDay]?.name,
@@ -703,7 +944,20 @@ export default function FitnessApp() {
           exerciseDone: completedExercises[i] || false,
         }))
       }
-    });
+    };
+    saveLog(newLogs);
+    if (syncEnabled) {
+      const sessionId = `${new Date().toISOString().slice(0, 10)}_${trackingDay}`;
+      callFunction(
+        "logWorkout",
+        toFirestoreWorkoutLog(sessionId, trackingDay, plan[trackingDay], completedSets, completedExercises),
+      )
+        .then(() => setSyncStatus("Synced"))
+        .catch((error) => {
+          console.error(error);
+          setSyncStatus("Workout sync failed");
+        });
+    }
     setTrackingDay(null); setView("history"); showToast("Workout logged! 💪");
   };
 
@@ -771,6 +1025,42 @@ export default function FitnessApp() {
           <div style={{ fontFamily: T.display, fontSize: 48, letterSpacing: 2, lineHeight: 1, color: C.text }}>IRON LAB</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={async () => {
+              if (!firebaseConfigured) {
+                showToast("Firebase env not configured");
+                return;
+              }
+              try {
+                if (firebaseUser) {
+                  await signOut();
+                  setSyncStatus("Sign in to sync");
+                } else {
+                  setSyncStatus("Signing in...");
+                  await signInWithApple();
+                }
+              } catch (error) {
+                console.error(error);
+                setSyncStatus("Sign-in failed");
+                showToast("Sign-in failed");
+              }
+            }}
+            style={{
+              background: firebaseUser ? C.surface2 : "transparent",
+              border: `1px solid ${firebaseUser ? C.green : C.border}`,
+              color: firebaseUser ? C.green : C.textMid,
+              borderRadius: 20,
+              padding: "10px 14px",
+              fontSize: 11,
+              fontWeight: 800,
+              cursor: "pointer",
+              fontFamily: T.body,
+              letterSpacing: 0.5,
+              textTransform: "uppercase",
+            }}
+          >
+            {firebaseUser ? "SYNC ON" : "SYNC"}
+          </button>
           <button onClick={() => startWorkout(today)} style={{
             background: C.accent, borderRadius: 20, padding: "12px 22px",
             fontSize: 13, fontWeight: 800, color: "#000", cursor: "pointer", border: "none",
@@ -779,6 +1069,9 @@ export default function FitnessApp() {
             START TODAY
           </button>
         </div>
+      </div>
+      <div style={{ margin: "10px 24px 0", color: C.textDim, fontSize: 11, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>
+        {syncStatus}
       </div>
 
       {/* ── GOAL BANNER ── */}
@@ -1187,6 +1480,146 @@ export default function FitnessApp() {
         </div>
       )}
 
+      {/* ── COACH ── */}
+      {view === "coach" && (
+        <div style={{ padding: "24px 24px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 16 }}>
+            <div>
+              <div style={{ fontFamily: T.display, fontSize: 36, letterSpacing: 2, color: C.text }}>COACH</div>
+              <div style={{ fontSize: 12, color: C.textMid, marginTop: 4, letterSpacing: 1 }}>
+                {firebaseUser ? "Your IronBoi training thread" : "Sign in to start your coach thread"}
+              </div>
+            </div>
+            {!firebaseUser && (
+              <button
+                onClick={async () => {
+                  if (!firebaseConfigured) {
+                    showToast("Firebase env not configured");
+                    return;
+                  }
+                  try {
+                    setSyncStatus("Signing in...");
+                    await signInWithApple();
+                  } catch (error) {
+                    console.error(error);
+                    setSyncStatus("Sign-in failed");
+                    showToast("Sign-in failed");
+                  }
+                }}
+                style={{
+                  background: C.accent,
+                  border: "none",
+                  color: "#000",
+                  borderRadius: 14,
+                  padding: "12px 16px",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  fontFamily: T.body,
+                }}
+              >
+                SIGN IN
+              </button>
+            )}
+          </div>
+
+          <div style={{
+            background: C.surface,
+            border: `1px solid ${C.border}`,
+            borderRadius: 20,
+            minHeight: 360,
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}>
+            {coachMessages.length === 0 ? (
+              <div style={{
+                flex: 1,
+                minHeight: 260,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                textAlign: "center",
+                color: C.textDim,
+                fontSize: 14,
+                lineHeight: 1.6,
+                padding: "0 28px",
+              }}>
+                Ask about today's workout, a swap, recovery, or what to do after a missed session.
+              </div>
+            ) : (
+              coachMessages.map((message) => {
+                const isUser = message.role === "user";
+                const isPending = message.status === "streaming" && !message.content;
+                return (
+                  <div
+                    key={message.id || message.messageId}
+                    style={{
+                      alignSelf: isUser ? "flex-end" : "flex-start",
+                      maxWidth: "86%",
+                      background: isUser ? C.accent : C.surface2,
+                      color: isUser ? "#000" : C.text,
+                      border: `1px solid ${isUser ? C.accent : C.border}`,
+                      borderRadius: 16,
+                      padding: "12px 14px",
+                      fontSize: 14,
+                      lineHeight: 1.55,
+                      whiteSpace: "pre-wrap",
+                      fontFamily: T.body,
+                    }}
+                  >
+                    {isPending ? "Thinking..." : message.content}
+                    {message.status === "blocked" && (
+                      <div style={{ marginTop: 8, color: C.red, fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>
+                        Safety boundary
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+
+            <div style={{ display: "flex", gap: 8, borderTop: `1px solid ${C.border}`, paddingTop: 12 }}>
+              <input
+                value={coachInput}
+                onChange={(event) => setCoachInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    sendCoachChat();
+                  }
+                }}
+                placeholder={firebaseUser ? "Ask Coach..." : "Sign in to message Coach"}
+                disabled={!firebaseUser || coachSending}
+                style={{
+                  ...inputStyle,
+                  opacity: firebaseUser ? 1 : 0.55,
+                }}
+              />
+              <button
+                onClick={sendCoachChat}
+                disabled={!firebaseUser || coachSending || !coachInput.trim()}
+                style={{
+                  background: coachInput.trim() && firebaseUser ? C.accent : C.surface2,
+                  color: coachInput.trim() && firebaseUser ? "#000" : C.textDim,
+                  border: `1px solid ${coachInput.trim() && firebaseUser ? C.accent : C.border}`,
+                  borderRadius: 12,
+                  padding: "0 18px",
+                  fontSize: 12,
+                  fontWeight: 900,
+                  cursor: coachInput.trim() && firebaseUser ? "pointer" : "default",
+                  fontFamily: T.body,
+                  letterSpacing: 1,
+                }}
+              >
+                SEND
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── PHILOSOPHY ── */}
       {view === "philosophy" && (
         <div style={{ padding: "24px 24px 0" }}>
@@ -1231,7 +1664,7 @@ export default function FitnessApp() {
         display: "flex", justifyContent: "space-around", padding: "8px 0 20px",
         backdropFilter: "blur(20px)",
       }}>
-        {[["planner","Plan","PLAN"],["tracker","Track","TRACK"],["history","Log","LOG"],["philosophy","Why","SCIENCE"]].map(([v, icon, label]) => (
+        {[["planner","Plan","PLAN"],["tracker","Track","TRACK"],["history","Log","LOG"],["coach","Coach","COACH"],["philosophy","Why","SCIENCE"]].map(([v, icon, label]) => (
           <button key={v} onClick={() => setView(v)} style={{
             background: "none", border: "none",
             color: view === v ? C.accent : C.textDim,
