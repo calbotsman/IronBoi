@@ -1,0 +1,473 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0752C42577AF71BE965F924A /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DECCF4FA552889A83248A3 /* WorkoutModels.swift */; };
+		0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5041EB6152324AB118525DA6 /* IronBoiApp.swift */; };
+		0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1145525E9C3C34837805B9B /* OnboardingView.swift */; };
+		12EBE51165738CD08093CB14 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */; };
+		243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */; };
+		28C9D2CA7124C268C8AC5E2D /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
+		3CC76B586DFB89D458F96661 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
+		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
+		4A9C5F0510B6438F9A1D6B22 /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9C5F0410B6438F9A1D6B22 /* ExerciseSequence.swift */; };
+		4A9C5F0710B6438F9A1D6B22 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4A9C5F0610B6438F9A1D6B22 /* Assets.xcassets */; };
+		61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8251B627C5781604E47176FE /* CoachView.swift */; };
+		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
+		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
+		8075B31225F93AF14C6E1298 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
+		8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE8CC59433E740F466264C6 /* AppModel.swift */; };
+		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
+		D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		039EE3F780882104FBD9CC48 /* OnboardingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingModels.swift; sourceTree = "<group>"; };
+		07DECCF4FA552889A83248A3 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
+		4A9C5F0410B6438F9A1D6B22 /* ExerciseSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSequence.swift; sourceTree = "<group>"; };
+		4A9C5F0610B6438F9A1D6B22 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5041EB6152324AB118525DA6 /* IronBoiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IronBoiApp.swift; sourceTree = "<group>"; };
+		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
+		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
+		7471B86DB66DD6B54955497F /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
+		8251B627C5781604E47176FE /* CoachView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
+		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
+		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
+		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		F1145525E9C3C34837805B9B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		299051222659FE63A5EADF20 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				12EBE51165738CD08093CB14 /* FirebaseAuth in Frameworks */,
+				8075B31225F93AF14C6E1298 /* FirebaseCore in Frameworks */,
+				3CC76B586DFB89D458F96661 /* FirebaseFirestore in Frameworks */,
+				28C9D2CA7124C268C8AC5E2D /* FirebaseFunctions in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		19CFD00FAA0244356AEB5FAB /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				78A34F132C3B3631FBD2E56C /* Coach */,
+				E54C72839FA7F4784F37A70F /* Onboarding */,
+				77C28A7363F1DDA1ED78B184 /* Workout */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		329346F30DA766EAE94903E2 /* IronBoi */ = {
+			isa = PBXGroup;
+			children = (
+				8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */,
+				967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */,
+				4A9C5F0610B6438F9A1D6B22 /* Assets.xcassets */,
+				5041EB6152324AB118525DA6 /* IronBoiApp.swift */,
+				19CFD00FAA0244356AEB5FAB /* Features */,
+				EB7EACBAA54C1AEDD69C4121 /* Models */,
+				71E5E003852F3BCDAB8248E7 /* Services */,
+			);
+			path = IronBoi;
+			sourceTree = "<group>";
+		};
+		71E5E003852F3BCDAB8248E7 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				CAE8CC59433E740F466264C6 /* AppModel.swift */,
+				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		77C28A7363F1DDA1ED78B184 /* Workout */ = {
+			isa = PBXGroup;
+			children = (
+				7471B86DB66DD6B54955497F /* WorkoutView.swift */,
+			);
+			path = Workout;
+			sourceTree = "<group>";
+		};
+		78A34F132C3B3631FBD2E56C /* Coach */ = {
+			isa = PBXGroup;
+			children = (
+				8251B627C5781604E47176FE /* CoachView.swift */,
+			);
+			path = Coach;
+			sourceTree = "<group>";
+		};
+		B7425B7D04DF34D0B24A2A10 = {
+			isa = PBXGroup;
+			children = (
+				329346F30DA766EAE94903E2 /* IronBoi */,
+				FFB9F988DF3FA230536009A2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E54C72839FA7F4784F37A70F /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				F1145525E9C3C34837805B9B /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		EB7EACBAA54C1AEDD69C4121 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */,
+				681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */,
+				4A9C5F0410B6438F9A1D6B22 /* ExerciseSequence.swift */,
+				039EE3F780882104FBD9CC48 /* OnboardingModels.swift */,
+				07DECCF4FA552889A83248A3 /* WorkoutModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		FFB9F988DF3FA230536009A2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8932D2CF267BB36314E83C02 /* IronBoi.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		BB82AD0B7ABFF8997691B12E /* IronBoi */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 905B861087323AF22003A7CB /* Build configuration list for PBXNativeTarget "IronBoi" */;
+			buildPhases = (
+				77A7C5F14639844B81178345 /* Sources */,
+				0346E1F963A6A68EE66D5E2F /* Resources */,
+				299051222659FE63A5EADF20 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = IronBoi;
+			packageProductDependencies = (
+				3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */,
+				09A65CA69F32F34D53A925B5 /* FirebaseCore */,
+				8323F6678C89F93E8A1AB75E /* FirebaseFirestore */,
+				5E9891FC07CE2B39134434A9 /* FirebaseFunctions */,
+			);
+			productName = IronBoi;
+			productReference = 8932D2CF267BB36314E83C02 /* IronBoi.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		91C623868F830B518E6AB77D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 00CAB05359130044A2CD0EE5 /* Build configuration list for PBXProject "IronBoi" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B7425B7D04DF34D0B24A2A10;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = FFB9F988DF3FA230536009A2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				BB82AD0B7ABFF8997691B12E /* IronBoi */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0346E1F963A6A68EE66D5E2F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4A9C5F0710B6438F9A1D6B22 /* Assets.xcassets in Resources */,
+				243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		77A7C5F14639844B81178345 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */,
+				7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */,
+				61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */,
+				D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */,
+				4A9C5F0510B6438F9A1D6B22 /* ExerciseSequence.swift in Sources */,
+				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
+				8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */,
+				0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */,
+				672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */,
+				0752C42577AF71BE965F924A /* WorkoutModels.swift in Sources */,
+				3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0428A7769B45F11E10F96361 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		57A815B96DC8CB7050E156C4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		C9801A01B2FA8A3AC57F2502 /* Debug */ = {
+			isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
+					CODE_SIGN_IDENTITY = "iPhone Developer";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = SGQ2WLB6M9;
+					GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = IronBoi;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.ironboi;
+				PRODUCT_NAME = IronBoi;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		FD926C5E7306A0CA03EE1618 /* Release */ = {
+			isa = XCBuildConfiguration;
+				buildSettings = {
+					CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
+					CODE_SIGN_IDENTITY = "iPhone Developer";
+					CODE_SIGN_STYLE = Automatic;
+					CURRENT_PROJECT_VERSION = 1;
+					DEVELOPMENT_TEAM = SGQ2WLB6M9;
+					GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = IronBoi;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.ironboi;
+				PRODUCT_NAME = IronBoi;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		00CAB05359130044A2CD0EE5 /* Build configuration list for PBXProject "IronBoi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0428A7769B45F11E10F96361 /* Debug */,
+				57A815B96DC8CB7050E156C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		905B861087323AF22003A7CB /* Build configuration list for PBXNativeTarget "IronBoi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C9801A01B2FA8A3AC57F2502 /* Debug */,
+				FD926C5E7306A0CA03EE1618 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		09A65CA69F32F34D53A925B5 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		5E9891FC07CE2B39134434A9 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
+		};
+		8323F6678C89F93E8A1AB75E /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 91C623868F830B518E6AB77D /* Project object */;
+}
