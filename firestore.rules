@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function onlyKeys(keys) {
+      return request.resource.data.keys().hasOnly(keys);
+    }
+
+    function validUserCoachMessage(messageId) {
+      return onlyKeys(["messageId", "role", "content", "timestamp", "toolCallIds", "status", "inputMode", "structuredAnswer", "turnId"])
+        && request.resource.data.messageId == messageId
+        && request.resource.data.role == "user"
+        && request.resource.data.content is string
+        && request.resource.data.timestamp is string
+        && request.resource.data.toolCallIds is list
+        && validInputMode()
+        && (!("structuredAnswer" in request.resource.data) || request.resource.data.structuredAnswer is map)
+        && (!("turnId" in request.resource.data) || request.resource.data.turnId is string)
+        && request.resource.data.status == "queued";
+    }
+
+    function validInputMode() {
+      return !("inputMode" in request.resource.data)
+        || request.resource.data.inputMode == "text"
+        || request.resource.data.inputMode == "tap"
+        || request.resource.data.inputMode == "dictation"
+        || request.resource.data.inputMode == "live_voice";
+    }
+
+    function ownerDecisionOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["decision", "decidedAt"]);
+    }
+
+    match /users/{userId} {
+      allow read: if owns(userId);
+      allow write: if false;
+
+      match /profile/current {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
+      match /memoryFacts/{factId} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
+      match /workoutLogs/{logId} {
+        allow read, write: if owns(userId);
+      }
+
+      match /workoutPlans/{planId} {
+        allow read, write: if owns(userId);
+      }
+
+      match /dailyChecks/{date} {
+        allow read, write: if owns(userId);
+      }
+
+      match /activeWorkout/{docId} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
+      match /workoutSessions/{sessionId} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
+      match /metricSnapshots/{snapshotId} {
+        allow read, write: if owns(userId);
+      }
+
+      match /coachSessions/{sessionId} {
+        allow read: if owns(userId);
+        allow write: if false;
+
+        match /messages/{messageId} {
+          allow read: if owns(userId);
+          allow create: if owns(userId) && validUserCoachMessage(messageId);
+          allow update, delete: if false;
+        }
+      }
+
+      match /programProposals/{proposalId} {
+        allow read: if owns(userId);
+        allow create, delete: if false;
+        allow update: if owns(userId) && ownerDecisionOnly();
+      }
+
+      match /planAdjustmentProposals/{proposalId} {
+        allow read: if owns(userId);
+        allow create, delete: if false;
+        allow update: if owns(userId) && ownerDecisionOnly();
+      }
+
+      match /consentRecords/{recordId} {
+        allow read, write: if owns(userId);
+      }
+
+      match /usage/{date} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+    }
+
+    match /corpus/{entryId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /seed/{docId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
