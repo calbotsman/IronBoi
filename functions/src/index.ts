@@ -52,7 +52,6 @@ const require = createRequire(import.meta.url);
 
 const coach = require("./coach/ironboi-coach.v0.json");
 const seed = require("./domain/ironlab-seed.json");
-const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const IosCoachMessageRequest = z.object({
   sessionId: z.string().min(1),
@@ -805,7 +804,7 @@ export const onUserCoachMessageCreated = onDocumentCreated(
   {
     region: "us-central1",
     document: "users/{userId}/coachSessions/{sessionId}/messages/{messageId}",
-    secrets: [anthropicApiKey, geminiApiKey],
+    secrets: [geminiApiKey],
     // Bill protection + sanity. A chat turn should never need more than 60s.
     // maxInstances caps a runaway client at ~20 concurrent coach turns.
     // retry:false because we never want a coach turn to silently re-run
@@ -832,7 +831,6 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       messageId,
       turnId,
       userContent: data.content,
-      anthropicApiKey: anthropicApiKey.value() || process.env.ANTHROPIC_API_KEY,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
     });
   },

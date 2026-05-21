@@ -1,5 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
-
 type GenerateCoachReplyArgs = {
   system: string;
   userContent: string;
@@ -17,64 +15,17 @@ export type GenerateCoachReplyResult = {
 };
 
 export type CoachModelProvider = {
-  provider: "anthropic" | "gemini";
+  provider: "gemini";
   model: string;
   generateCoachReply(args: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult>;
 };
 
 type SelectCoachModelProviderArgs = {
-  anthropicApiKey?: string;
   geminiApiKey?: string;
 };
 
-const STREAM_WRITE_INTERVAL_MS = 1_500;
-
 function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
-}
-
-export class AnthropicCoachProvider implements CoachModelProvider {
-  provider = "anthropic" as const;
-  model = process.env.IRONBOI_COACH_MODEL || "claude-sonnet-4-5-20250929";
-
-  constructor(private readonly apiKey: string) {}
-
-  async generateCoachReply({
-    system,
-    userContent,
-    onText,
-  }: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult> {
-    const anthropic = new Anthropic({ apiKey: this.apiKey });
-    const stream = anthropic.messages.stream({
-      model: this.model,
-      max_tokens: 900,
-      system,
-      messages: [{ role: "user", content: userContent }],
-    });
-
-    let content = "";
-    let lastWriteAt = 0;
-    stream.on("text", async (text: string) => {
-      content += text;
-      const now = Date.now();
-      if (!onText || now - lastWriteAt < STREAM_WRITE_INTERVAL_MS) {
-        return;
-      }
-      lastWriteAt = now;
-      await onText(content);
-    });
-
-    const finalMessage = await stream.finalMessage();
-    await onText?.(content);
-    return {
-      content,
-      usage: {
-        inputTokens:
-          finalMessage.usage?.input_tokens ?? estimateTokens(`${system}\n${userContent}`),
-        outputTokens: finalMessage.usage?.output_tokens ?? estimateTokens(content),
-      },
-    };
-  }
 }
 
 export class GeminiCoachProvider implements CoachModelProvider {
@@ -157,23 +108,14 @@ export class GeminiCoachProvider implements CoachModelProvider {
   }
 }
 
+// Gemini-only as of 2026-05-21. The selector signature stays in place so a
+// second provider (OpenRouter, Claude, etc.) can slot in without touching
+// callers — just add a new provider class and another branch here.
 export function selectCoachModelProvider({
-  anthropicApiKey,
   geminiApiKey,
 }: SelectCoachModelProviderArgs): CoachModelProvider | null {
-  const preferredProvider = process.env.IRONBOI_COACH_PROVIDER || "gemini";
-
-  if (preferredProvider === "anthropic" && anthropicApiKey) {
-    return new AnthropicCoachProvider(anthropicApiKey);
-  }
-
   if (geminiApiKey) {
     return new GeminiCoachProvider(geminiApiKey);
   }
-
-  if (anthropicApiKey) {
-    return new AnthropicCoachProvider(anthropicApiKey);
-  }
-
   return null;
 }

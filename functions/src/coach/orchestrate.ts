@@ -27,7 +27,6 @@ type OrchestrateCoachTurnArgs = {
   messageId: string;
   turnId: string;
   userContent: string;
-  anthropicApiKey?: string;
   geminiApiKey?: string;
 };
 
@@ -43,7 +42,6 @@ export async function orchestrateCoachTurn({
   messageId,
   turnId,
   userContent,
-  anthropicApiKey,
   geminiApiKey,
 }: OrchestrateCoachTurnArgs) {
   const assistantMessageId = `${messageId}_coach`;
@@ -129,7 +127,7 @@ export async function orchestrateCoachTurn({
       retrievedCorpus,
     });
     const system = assembleCoachSystemPrompt(coach as never, contextBundle);
-    const provider = selectCoachModelProvider({ anthropicApiKey, geminiApiKey });
+    const provider = selectCoachModelProvider({ geminiApiKey });
 
     if (!provider) {
       const fallback =
