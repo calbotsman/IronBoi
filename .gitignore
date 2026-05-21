@@ -1,3 +1,35 @@
+# Node / Vite
 node_modules/
 dist/
+
+# macOS
 .DS_Store
+
+# Firebase Functions build output
+functions/lib/
+
+# Firebase local state + emulator logs
+.firebase/
+*.log
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Env files (commit .env.example only)
+.env
+.env.local
+.env.*.local
+
+# Xcode / iOS build artifacts
+ios/IronBoi/.build/
+ios/**/build/
+ios/**/DerivedData/
+**/xcuserdata/
+*.xcuserstate
+ios/**/Pods/
+ios/**/.swiftpm/
+
+# Editor scratch
+*.swp
+.idea/
+.vscode/
