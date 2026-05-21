@@ -1,0 +1,16 @@
+export const userScopedCollections = [
+  "profile/current",
+  "workoutLogs/test-log",
+  "workoutPlans/current",
+  "dailyChecks/2026-05-08",
+  "activeWorkout/current",
+  "workoutSessions/test-session",
+  "metricSnapshots/test-snapshot",
+  "memoryFacts/test-fact",
+  "consentRecords/test-consent",
+  "usage/2026-05-08",
+  "coachSessions/test-session",
+  "coachSessions/test-session/messages/test-message",
+  "programProposals/test-proposal",
+  "planAdjustmentProposals/test-proposal",
+] as const;

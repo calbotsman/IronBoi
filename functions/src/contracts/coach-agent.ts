@@ -1,0 +1,473 @@
+import { z } from "zod";
+
+export const ISODateTime = z.string().datetime();
+
+export const SexOrGender = z.enum([
+  "female",
+  "male",
+  "non_binary",
+  "prefer_not_to_say",
+  "self_described",
+]);
+
+export const TrainingExperience = z.enum([
+  "new",
+  "beginner",
+  "intermediate",
+  "advanced",
+]);
+
+export const TrainingFocus = z.enum([
+  "myo_recommended",
+  "muscle_split",
+  "full_body",
+  "strength_conditioning",
+  "mobility_recovery",
+  "endurance_conditioning",
+]);
+
+export const GoalType = z.enum([
+  "strength",
+  "muscle_gain",
+  "fat_loss",
+  "general_fitness",
+  "mobility",
+  "endurance",
+  "habit_building",
+  "return_to_training",
+]);
+
+export const DataCategory = z.enum([
+  "profile",
+  "coach_memory",
+  "workout_logs",
+  "manual_metrics",
+  "healthkit_steps",
+  "healthkit_workouts",
+  "healthkit_active_energy",
+  "healthkit_resting_heart_rate",
+  "healthkit_sleep",
+  "healthkit_body_weight",
+  "healthkit_hrv",
+  "conversation_history",
+]);
+
+export const RiskLevel = z.enum(["low", "medium", "high", "blocked"]);
+export const CoachInputMode = z.enum(["text", "tap", "dictation", "live_voice"]);
+export const OnboardingStatus = z.enum([
+  "not_started",
+  "collecting",
+  "proposal_ready",
+  "complete",
+]);
+export const PlanAdjustmentCategory = z.enum([
+  "time_limit",
+  "equipment_limit",
+  "skip_or_reschedule",
+  "readiness_low",
+  "style_preference",
+  "injury_pain",
+  "pregnancy_postpartum",
+  "travel",
+  "nutrition_context",
+  "other",
+]);
+export const PlanAdjustmentDecision = z.enum([
+  "pending",
+  "accepted",
+  "rejected",
+  "edited",
+]);
+
+export const CoachAgentContract = z.object({
+  id: z.literal("myo_coach"),
+  version: z.string().min(1),
+  identity: z.object({
+    displayName: z.literal("MYO Coach"),
+    role: z.string().min(1),
+    productBoundary: z.literal("general_wellness_fitness"),
+    notFor: z.array(z.string()).default([
+      "diagnosis",
+      "disease treatment",
+      "emergency handling",
+      "clinical decision support",
+      "rehabilitation protocols without review",
+    ]),
+  }),
+  soul: z.object({
+    coachingPhilosophy: z.string().min(1),
+    motivationalStyle: z.string().min(1),
+    refusalStyle: z.string().min(1),
+  }),
+  brain: z.object({
+    planningPrinciples: z.array(z.string()).min(1),
+    memoryUseRules: z.array(z.string()).min(1),
+    uncertaintyRules: z.array(z.string()).min(1),
+  }),
+  safetyPolicy: z.object({
+    emergencyEscalation: z.string().min(1),
+    medicalBoundary: z.string().min(1),
+    blockedTopics: z.array(z.string()).min(1),
+    clinicianEscalationTriggers: z.array(z.string()).min(1),
+    populationAwareInputs: z.array(z.string()).min(1),
+  }),
+  memoryPolicy: z.object({
+    userInspectable: z.literal(true),
+    userEditable: z.literal(true),
+    userDeletable: z.literal(true),
+    defaultRetention: z.string().min(1),
+    writeRequiresSource: z.literal(true),
+    noCrossUserRetrieval: z.literal(true),
+  }),
+  retrievalPolicy: z.object({
+    corpusRequiredFor: z.array(z.string()).min(1),
+    allowedWithoutCorpus: z.array(z.string()).min(1),
+    citationMode: z.enum(["internal", "user_visible_when_helpful"]),
+    staleCorpusBehavior: z.enum(["answer_generic_only", "refuse"]),
+  }),
+  toolRegistry: z.array(z.string()).min(1),
+  responseContract: z.object({
+    defaultFormat: z.literal("coach_response_v1"),
+    supportsToolCards: z.literal(true),
+    requiresSafetyLabelForHighRisk: z.literal(true),
+  }),
+}).strict();
+
+export const UserHealthProfile = z.object({
+  userId: z.string().min(1),
+  ageYears: z.number().int().min(13).max(120),
+  sexOrGender: SexOrGender,
+  sexOrGenderSelfDescription: z.string().optional(),
+  heightCm: z.number().positive().optional(),
+  weightKg: z.number().positive().optional(),
+  goals: z.array(GoalType).min(1),
+  goalNotes: z.string().optional(),
+  trainingExperience: TrainingExperience,
+  injuriesOrLimitations: z.array(z.string()).default([]),
+  equipment: z.array(z.string()).default([]),
+  schedule: z.object({
+    daysPerWeek: z.number().int().min(1).max(7).optional(),
+    preferredDays: z.array(z.string()).default([]),
+    sessionLengthMin: z.number().int().positive().optional(),
+  }).strict(),
+  preferences: z.object({
+    coachingTone: z.enum(["direct", "warm", "balanced"]).default("balanced"),
+    preferredWorkoutTime: z.enum(["morning", "afternoon", "evening", "flexible"]).default("flexible"),
+    dislikedExercises: z.array(z.string()).default([]),
+    trainingFocus: TrainingFocus.default("myo_recommended"),
+  }).strict(),
+  dietaryConstraints: z.array(z.string()).default([]),
+  onboardingStatus: OnboardingStatus.default("complete"),
+  onboardingStep: z.string().optional(),
+  onboardingMissingFields: z.array(z.string()).default([]),
+  createdAt: ISODateTime,
+  updatedAt: ISODateTime,
+}).strict();
+
+export const CoachMemoryFact = z.object({
+  userId: z.string().min(1),
+  factId: z.string().min(1),
+  category: z.enum([
+    "preference",
+    "constraint",
+    "adherence_pattern",
+    "exercise_response",
+    "motivation",
+    "schedule",
+    "equipment",
+    "safety_note",
+  ]),
+  content: z.string().min(1),
+  source: z.enum([
+    "user_stated",
+    "coach_inferred",
+    "log_derived",
+    "healthkit_derived",
+  ]),
+  confidence: z.number().min(0).max(1),
+  createdAt: ISODateTime,
+  lastReinforcedAt: ISODateTime.optional(),
+  userEditable: z.literal(true),
+  userDeletedAt: ISODateTime.optional(),
+}).strict();
+
+export const WorkoutLog = z.object({
+  userId: z.string().min(1),
+  sessionId: z.string().min(1),
+  date: z.string().date(),
+  source: z.enum(["manual", "healthkit_import", "coach_generated"]),
+  exercises: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        sets: z
+          .array(
+            z.object({
+              reps: z.number().int().nonnegative().optional(),
+              loadKg: z.number().nonnegative().optional(),
+              durationSec: z.number().int().nonnegative().optional(),
+              distanceM: z.number().nonnegative().optional(),
+              rpe: z.number().min(1).max(10).optional(),
+              notes: z.string().optional(),
+            }).strict(),
+          )
+          .default([]),
+      }).strict(),
+    )
+    .default([]),
+  durationSec: z.number().int().nonnegative().optional(),
+  perceivedEffort: z.number().min(1).max(10).optional(),
+  postSessionNotes: z.string().optional(),
+  createdAt: ISODateTime,
+}).strict();
+
+export const PlannedExercise = z.object({
+  name: z.string().min(1),
+  sets: z.number().int().nonnegative(),
+  reps: z.number().int().nonnegative(),
+  weight: z.number().nonnegative().default(0),
+}).strict();
+
+export const PlannedWorkoutDay = z.object({
+  name: z.string().min(1),
+  muscles: z.array(z.string()).default([]),
+  exercises: z.array(PlannedExercise).default([]),
+}).strict();
+
+export const ActiveWorkoutSet = z.object({
+  setIndex: z.number().int().nonnegative(),
+  completed: z.boolean().default(false),
+  reps: z.number().int().nonnegative().optional(),
+  weight: z.number().nonnegative().optional(),
+}).strict();
+
+export const ActiveWorkoutExercise = z.object({
+  exerciseIndex: z.number().int().nonnegative(),
+  name: z.string().min(1),
+  targetSets: z.number().int().nonnegative(),
+  targetReps: z.number().int().nonnegative(),
+  targetWeight: z.number().nonnegative().default(0),
+  completedSets: z.array(ActiveWorkoutSet).default([]),
+  exerciseDone: z.boolean().default(false),
+  notes: z.string().optional(),
+}).strict();
+
+export const ActiveWorkoutSession = z.object({
+  userId: z.string().min(1),
+  sessionId: z.string().min(1),
+  planId: z.string().min(1).default("current"),
+  dayKey: z.string().min(1),
+  workoutName: z.string().min(1),
+  status: z.enum(["active", "completed", "abandoned"]).default("active"),
+  startedAt: ISODateTime,
+  updatedAt: ISODateTime,
+  completedAt: ISODateTime.optional(),
+  exercises: z.array(ActiveWorkoutExercise).default([]),
+}).strict();
+
+export const WorkoutPlan = z.object({
+  userId: z.string().min(1),
+  planId: z.string().min(1),
+  source: z.enum(["legacy_pwa", "coach_generated", "user_edited"]),
+  days: z.record(z.string(), PlannedWorkoutDay),
+  updatedAt: ISODateTime,
+}).strict();
+
+export const DailyCheck = z.object({
+  userId: z.string().min(1),
+  date: z.string().date(),
+  checks: z.record(z.string(), z.boolean()),
+  updatedAt: ISODateTime,
+}).strict();
+
+export const MetricSnapshot = z.object({
+  userId: z.string().min(1),
+  snapshotId: z.string().min(1),
+  capturedAt: ISODateTime,
+  source: z.enum(["manual", "healthkit"]),
+  metrics: z.object({
+    steps: z.number().int().nonnegative().optional(),
+    activeEnergyKcal: z.number().nonnegative().optional(),
+    restingHeartRateBpm: z.number().positive().optional(),
+    sleepDurationMin: z.number().nonnegative().optional(),
+    bodyWeightKg: z.number().positive().optional(),
+    hrvMs: z.number().positive().optional(),
+  }).strict(),
+  interpretationPolicy: z.literal("context_only_not_deterministic"),
+}).strict();
+
+export const ConsentRecord = z.object({
+  userId: z.string().min(1),
+  recordId: z.string().min(1),
+  category: DataCategory,
+  purpose: z.string().min(1),
+  granted: z.boolean(),
+  grantedAt: ISODateTime.optional(),
+  revokedAt: ISODateTime.optional(),
+  scope: z.object({
+    read: z.boolean().default(false),
+    write: z.boolean().default(false),
+    share: z.boolean().default(false),
+    retrieval: z.boolean().default(false),
+  }).strict(),
+  policyVersion: z.string().min(1),
+}).strict();
+
+export const CoachMessage = z.object({
+  messageId: z.string().min(1),
+  role: z.enum(["user", "coach", "tool", "system"]),
+  content: z.string(),
+  timestamp: ISODateTime,
+  riskLevel: RiskLevel.optional(),
+  inputMode: CoachInputMode.optional(),
+  structuredAnswer: z.record(z.string(), z.unknown()).optional(),
+  turnId: z.string().optional(),
+  toolCallIds: z.array(z.string()).default([]),
+}).strict();
+
+export const ResearchCorpusEntry = z.object({
+  entryId: z.string().min(1),
+  title: z.string().min(1),
+  sourceName: z.string().min(1),
+  sourceUrl: z.string().url().optional(),
+  sourceType: z.enum([
+    "government_guideline",
+    "medical_society_guideline",
+    "internal_domain_seed",
+    "expert_reviewed_note",
+  ]),
+  reviewedAt: ISODateTime,
+  tags: z.array(z.string()).default([]),
+  appliesTo: z.array(z.string()).default([]),
+  summary: z.string().min(1),
+  claims: z.array(z.string()).default([]),
+  safetyBoundaries: z.array(z.string()).default([]),
+  staleAfter: ISODateTime.optional(),
+}).strict();
+
+export const NutritionTargets = z.object({
+  calories: z
+    .object({
+      min: z.number().int().positive(),
+      max: z.number().int().positive(),
+      note: z.string().min(1),
+    }).strict()
+    .optional(),
+  proteinGrams: z.object({
+    min: z.number().int().positive(),
+    max: z.number().int().positive(),
+  }).strict(),
+  assumptions: z.array(z.string()).default([]),
+  safetyNotes: z.array(z.string()).default([]),
+}).strict();
+
+export const ProgramProposal = z.object({
+  userId: z.string().min(1),
+  proposalId: z.string().min(1),
+  source: z.literal("onboarding"),
+  decision: z.enum(["pending", "accepted", "rejected", "edited"]).default("pending"),
+  profile: UserHealthProfile,
+  workoutPlan: WorkoutPlan,
+  nutritionTargets: NutritionTargets,
+  createdAt: ISODateTime,
+  decidedAt: ISODateTime.optional(),
+}).strict();
+
+export const PlanAdjustmentProposal = z.object({
+  userId: z.string().min(1),
+  proposalId: z.string().min(1),
+  source: z.enum(["coach_chat", "workout_detail", "system"]),
+  decision: PlanAdjustmentDecision.default("pending"),
+  category: PlanAdjustmentCategory,
+  riskLevel: RiskLevel,
+  originalUserText: z.string().min(1),
+  summary: z.string().min(1),
+  rationale: z.string().min(1),
+  appliesTo: z.object({
+    planId: z.string().min(1).default("current"),
+    dayKey: z.string().min(1).optional(),
+    exerciseName: z.string().min(1).optional(),
+  }).strict(),
+  proposedPlanPatch: z.object({
+    type: z.enum([
+      "review_only",
+      "modify_exercise",
+      "replace_exercise",
+      "shorten_workout",
+      "reschedule_day",
+      "replace_day_focus",
+    ]),
+    title: z.string().min(1),
+    changes: z.array(z.string().min(1)).default([]),
+    replacementDay: PlannedWorkoutDay.optional(),
+  }).strict(),
+  sourceCorpusEntryIds: z.array(z.string()).default([]),
+  safetyNotes: z.array(z.string()).default([]),
+  requiresFollowUp: z.boolean().default(false),
+  structuredAnswer: z.record(z.string(), z.unknown()).optional(),
+  createdAt: ISODateTime,
+  decidedAt: ISODateTime.optional(),
+}).strict();
+
+export const CoachSession = z.object({
+  userId: z.string().min(1),
+  sessionId: z.string().min(1),
+  startedAt: ISODateTime,
+  endedAt: ISODateTime.optional(),
+  messages: z.array(CoachMessage).default([]),
+  outcome: z
+    .enum(["active", "completed", "abandoned", "blocked_by_safety"])
+    .default("active"),
+}).strict();
+
+export const CoachResponse = z.object({
+  responseId: z.string().min(1),
+  userId: z.string().min(1),
+  sessionId: z.string().min(1),
+  format: z.literal("coach_response_v1"),
+  message: z.string(),
+  riskLevel: RiskLevel.default("low"),
+  toolCards: z
+    .array(
+      z.object({
+        type: z.enum([
+          "planned_workout",
+          "workout_logged",
+          "progress_summary",
+          "follow_up_question",
+          "safety_notice",
+        ]),
+        title: z.string().min(1),
+        body: z.string().optional(),
+        payload: z.record(z.string(), z.unknown()).default({}),
+      }).strict(),
+    )
+    .default([]),
+  memoryWriteCandidates: z.array(CoachMemoryFact).default([]),
+  corpusEntryIds: z.array(z.string()).default([]),
+  requiredUserAction: z
+    .enum([
+      "none",
+      "answer_follow_up",
+      "grant_consent",
+      "seek_clinician",
+      "contact_emergency_services",
+    ])
+    .default("none"),
+}).strict();
+
+export type CoachAgentContract = z.infer<typeof CoachAgentContract>;
+export type UserHealthProfile = z.infer<typeof UserHealthProfile>;
+export type CoachMemoryFact = z.infer<typeof CoachMemoryFact>;
+export type ActiveWorkoutExercise = z.infer<typeof ActiveWorkoutExercise>;
+export type ActiveWorkoutSession = z.infer<typeof ActiveWorkoutSession>;
+export type WorkoutLog = z.infer<typeof WorkoutLog>;
+export type WorkoutPlan = z.infer<typeof WorkoutPlan>;
+export type DailyCheck = z.infer<typeof DailyCheck>;
+export type MetricSnapshot = z.infer<typeof MetricSnapshot>;
+export type ConsentRecord = z.infer<typeof ConsentRecord>;
+export type CoachSession = z.infer<typeof CoachSession>;
+export type CoachResponse = z.infer<typeof CoachResponse>;
+export type ProgramProposal = z.infer<typeof ProgramProposal>;
+export type PlanAdjustmentProposal = z.infer<typeof PlanAdjustmentProposal>;
+export type ResearchCorpusEntry = z.infer<typeof ResearchCorpusEntry>;

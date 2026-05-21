@@ -1,0 +1,198 @@
+import { z } from "zod";
+import {
+  CoachMemoryFact,
+  MetricSnapshot,
+  UserHealthProfile,
+  WorkoutLog,
+} from "./coach-agent.js";
+
+export const ToolCallBase = z.object({
+  toolCallId: z.string().min(1),
+  requestedAt: z.string().datetime(),
+}).strict();
+
+export const ToolResultBase = z.object({
+  toolCallId: z.string().min(1),
+  outcome: z.enum([
+    "ok",
+    "validation_error",
+    "blocked_by_policy",
+    "not_found",
+    "error",
+  ]),
+  message: z.string().optional(),
+}).strict();
+
+export const LogWorkoutRequest = ToolCallBase.extend({
+  tool: z.literal("log_workout"),
+  workout: WorkoutLog,
+});
+
+export const LogWorkoutResult = ToolResultBase.extend({
+  workoutId: z.string().optional(),
+  memoryCandidates: z.array(CoachMemoryFact).default([]),
+});
+
+export const ReadRecentMetricsRequest = ToolCallBase.extend({
+  tool: z.literal("read_recent_metrics"),
+  categories: z
+    .array(
+      z.enum([
+        "steps",
+        "active_energy",
+        "resting_heart_rate",
+        "sleep",
+        "body_weight",
+        "hrv",
+      ]),
+    )
+    .min(1),
+  lookbackDays: z.number().int().min(1).max(30),
+});
+
+export const ReadRecentMetricsResult = ToolResultBase.extend({
+  snapshots: z.array(MetricSnapshot).default([]),
+  missingConsentCategories: z.array(z.string()).default([]),
+});
+
+export const GeneratePlanRequest = ToolCallBase.extend({
+  tool: z.literal("generate_plan"),
+  profile: UserHealthProfile,
+  horizonDays: z.number().int().min(1).max(28),
+  constraints: z.array(z.string()).default([]),
+});
+
+export const PlannedWorkout = z.object({
+  plannedWorkoutId: z.string().min(1),
+  dayIndex: z.number().int().min(0),
+  title: z.string().min(1),
+  goal: z.string().min(1),
+  estimatedDurationMin: z.number().int().positive(),
+  exercises: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        prescription: z.string().min(1),
+        substitutionOptions: z.array(z.string()).default([]),
+        safetyNotes: z.array(z.string()).default([]),
+      }).strict(),
+    )
+    .default([]),
+}).strict();
+
+export const GeneratePlanResult = ToolResultBase.extend({
+  planId: z.string().optional(),
+  workouts: z.array(PlannedWorkout).default([]),
+  requiredDisclaimers: z.array(z.string()).default([]),
+});
+
+export const AdaptPlanRequest = ToolCallBase.extend({
+  tool: z.literal("adapt_plan"),
+  planId: z.string().min(1),
+  reason: z.enum([
+    "too_hard",
+    "too_easy",
+    "pain_or_discomfort",
+    "time_constraint",
+    "equipment_unavailable",
+    "schedule_change",
+    "missed_session",
+  ]),
+  userNote: z.string().optional(),
+});
+
+export const AdaptPlanResult = ToolResultBase.extend({
+  updatedPlanId: z.string().optional(),
+  changes: z.array(z.string()).default([]),
+  escalationRequired: z.boolean().default(false),
+});
+
+export const ExplainExerciseRequest = ToolCallBase.extend({
+  tool: z.literal("explain_exercise"),
+  exerciseName: z.string().min(1),
+  userContext: z.object({
+    experience: z.string().optional(),
+    limitations: z.array(z.string()).default([]),
+  }).strict().optional(),
+});
+
+export const ExplainExerciseResult = ToolResultBase.extend({
+  explanation: z.string().optional(),
+  formCues: z.array(z.string()).default([]),
+  commonMistakes: z.array(z.string()).default([]),
+  contraindications: z.array(z.string()).default([]),
+  corpusEntryIds: z.array(z.string()).default([]),
+});
+
+export const FlagRiskRequest = ToolCallBase.extend({
+  tool: z.literal("flag_risk"),
+  userText: z.string().min(1),
+  detectedRisk: z.enum([
+    "emergency",
+    "injury_or_pain",
+    "eating_disorder_adjacent",
+    "unsafe_weight_loss",
+    "supplement_or_drug_protocol",
+    "underage",
+    "prompt_injection",
+  ]),
+});
+
+export const FlagRiskResult = ToolResultBase.extend({
+  riskLevel: z.enum(["medium", "high", "blocked"]),
+  userFacingMessage: z.string(),
+  allowedNextActions: z.array(z.string()).default([]),
+});
+
+export const SummarizeProgressRequest = ToolCallBase.extend({
+  tool: z.literal("summarize_progress"),
+  lookbackDays: z.number().int().min(1).max(90),
+});
+
+export const SummarizeProgressResult = ToolResultBase.extend({
+  summary: z.string().optional(),
+  adherencePercent: z.number().min(0).max(100).optional(),
+  highlights: z.array(z.string()).default([]),
+  cautions: z.array(z.string()).default([]),
+});
+
+export const AskFollowUpQuestionRequest = ToolCallBase.extend({
+  tool: z.literal("ask_follow_up_question"),
+  reason: z.enum([
+    "missing_profile",
+    "ambiguous_goal",
+    "possible_safety_issue",
+    "plan_constraint",
+    "consent_required",
+  ]),
+  question: z.string().min(1),
+});
+
+export const AskFollowUpQuestionResult = ToolResultBase.extend({
+  renderedQuestion: z.string().optional(),
+});
+
+export const CoachToolRequest = z.discriminatedUnion("tool", [
+  LogWorkoutRequest,
+  ReadRecentMetricsRequest,
+  GeneratePlanRequest,
+  AdaptPlanRequest,
+  ExplainExerciseRequest,
+  FlagRiskRequest,
+  SummarizeProgressRequest,
+  AskFollowUpQuestionRequest,
+]);
+
+export const CoachToolResult = z.union([
+  LogWorkoutResult,
+  ReadRecentMetricsResult,
+  GeneratePlanResult,
+  AdaptPlanResult,
+  ExplainExerciseResult,
+  FlagRiskResult,
+  SummarizeProgressResult,
+  AskFollowUpQuestionResult,
+]);
+
+export type CoachToolRequest = z.infer<typeof CoachToolRequest>;
+export type CoachToolResult = z.infer<typeof CoachToolResult>;

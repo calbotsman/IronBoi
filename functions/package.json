@@ -1,0 +1,30 @@
+{
+  "name": "ironboi-functions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "lint:security": "vitest run test/security/static test/security/logging test/security/tools",
+    "test:security": "npx firebase-tools emulators:exec --only firestore --project demo-ironboi-security \"vitest run test/security --fileParallelism=false\"",
+    "test:security:static": "vitest run test/security/static test/security/logging test/security/tools",
+    "validate:phase0": "npm run build && node lib/validate-phase0.js"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.1",
+    "firebase-admin": "^13.4.0",
+    "firebase-functions": "^6.5.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "firebase": "^12.13.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
+  }
+}

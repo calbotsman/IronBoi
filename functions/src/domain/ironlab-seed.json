@@ -1,0 +1,1293 @@
+{
+  "MUSCLE_GROUPS": [
+    "Chest",
+    "Back",
+    "Shoulders",
+    "Arms",
+    "Legs",
+    "Core",
+    "Cardio"
+  ],
+  "EXERCISE_LIBRARY": {
+    "Chest": [
+      "Barbell Bench Press",
+      "Incline Dumbbell Press",
+      "Diamond Push-ups",
+      "Weighted Dips",
+      "Push-ups"
+    ],
+    "Back": [
+      "Deadlift",
+      "Bent-over Barbell Row",
+      "Inverted Row",
+      "Single-arm DB Row",
+      "KB Single-arm Row",
+      "Sandbag Carry"
+    ],
+    "Shoulders": [
+      "Overhead Press",
+      "Dumbbell Shoulder Press",
+      "Arnold Press",
+      "Lateral Raises",
+      "KB Clean & Press",
+      "Heavy Club Mill",
+      "Heavy Club Shield Cast"
+    ],
+    "Arms": [
+      "Skull Crushers",
+      "Overhead Tricep Extension",
+      "Hammer Curls",
+      "Incline Dumbbell Curl",
+      "EZ Bar Curl",
+      "KB Curl",
+      "KB Halo"
+    ],
+    "Legs": [
+      "Barbell Back Squat",
+      "Romanian Deadlift",
+      "Walking Lunges",
+      "Bulgarian Split Squat",
+      "KB Goblet Squat",
+      "KB Swing",
+      "Hip Thrust",
+      "Standing Calf Raises"
+    ],
+    "Core": [
+      "Plank",
+      "Hanging Leg Raises",
+      "Med Ball Slam",
+      "Sandbag Clean & Squat",
+      "Russian Twists"
+    ],
+    "Cardio": [
+      "HIIT Sprints (20s on/10s off)",
+      "Zone 2 Walk/Jog",
+      "KB Swing"
+    ]
+  },
+  "SWAP_OPTIONS": {
+    "Weighted Pull-ups": [
+      "Inverted Row",
+      "Bent-over Barbell Row",
+      "KB Single-arm Row"
+    ],
+    "Inverted Row": [
+      "Bent-over Barbell Row",
+      "Single-arm DB Row",
+      "KB Single-arm Row",
+      "Band Pull-apart"
+    ],
+    "Barbell Bench Press": [
+      "Incline Dumbbell Press",
+      "Diamond Push-ups",
+      "Weighted Dips",
+      "Push-ups"
+    ],
+    "Incline Dumbbell Press": [
+      "Barbell Bench Press",
+      "Diamond Push-ups",
+      "Push-ups"
+    ],
+    "Overhead Press": [
+      "Dumbbell Shoulder Press",
+      "Arnold Press",
+      "KB Clean & Press"
+    ],
+    "Dumbbell Shoulder Press": [
+      "Overhead Press",
+      "Arnold Press",
+      "KB Clean & Press"
+    ],
+    "Deadlift": [
+      "Romanian Deadlift",
+      "KB Swing",
+      "Sandbag Clean & Squat"
+    ],
+    "Romanian Deadlift": [
+      "Deadlift",
+      "KB Swing",
+      "Hip Thrust"
+    ],
+    "Barbell Back Squat": [
+      "Pause Squat",
+      "Zercher Squat",
+      "Front Squat",
+      "Box Squat",
+      "Hack Squat"
+    ],
+    "KB Goblet Squat": [
+      "Barbell Back Squat",
+      "Sumo Squat",
+      "Pause Squat",
+      "Box Squat"
+    ],
+    "Walking Lunges": [
+      "Reverse Lunges",
+      "Lateral Lunges",
+      "Step-ups",
+      "KB Farmers Carry"
+    ],
+    "Bulgarian Split Squat": [
+      "Rear-foot Elevated Split Squat",
+      "Step-ups",
+      "Reverse Lunges",
+      "Single-leg Romanian Deadlift"
+    ],
+    "Hip Thrust": [
+      "Romanian Deadlift",
+      "KB Swing",
+      "Glute Bridge",
+      "Cable Pull-through"
+    ],
+    "Skull Crushers": [
+      "Overhead Tricep Extension",
+      "Diamond Push-ups",
+      "Weighted Dips"
+    ],
+    "Overhead Tricep Extension": [
+      "Skull Crushers",
+      "Diamond Push-ups",
+      "Weighted Dips"
+    ],
+    "Weighted Dips": [
+      "Diamond Push-ups",
+      "Skull Crushers",
+      "Overhead Tricep Extension"
+    ],
+    "Diamond Push-ups": [
+      "Weighted Dips",
+      "Overhead Tricep Extension",
+      "Skull Crushers"
+    ],
+    "Hammer Curls": [
+      "EZ Bar Curl",
+      "Incline Dumbbell Curl",
+      "KB Curl"
+    ],
+    "EZ Bar Curl": [
+      "Hammer Curls",
+      "Incline Dumbbell Curl",
+      "KB Curl"
+    ],
+    "Incline Dumbbell Curl": [
+      "Hammer Curls",
+      "EZ Bar Curl",
+      "KB Curl"
+    ],
+    "KB Curl": [
+      "Hammer Curls",
+      "EZ Bar Curl",
+      "Incline Dumbbell Curl"
+    ],
+    "Hanging Leg Raises": [
+      "Plank",
+      "Russian Twists",
+      "Med Ball Slam"
+    ],
+    "Plank": [
+      "Hanging Leg Raises",
+      "Russian Twists"
+    ],
+    "KB Swing": [
+      "Romanian Deadlift",
+      "Hip Thrust",
+      "Sandbag Clean & Squat"
+    ],
+    "KB Halo": [
+      "Lateral Raises",
+      "Arnold Press"
+    ],
+    "Lateral Raises": [
+      "KB Halo",
+      "Arnold Press",
+      "Dumbbell Shoulder Press"
+    ],
+    "Arnold Press": [
+      "Dumbbell Shoulder Press",
+      "Overhead Press",
+      "KB Clean & Press"
+    ],
+    "KB Clean & Press": [
+      "Overhead Press",
+      "Arnold Press",
+      "Dumbbell Shoulder Press"
+    ],
+    "Bent-over Barbell Row": [
+      "Single-arm DB Row",
+      "KB Single-arm Row",
+      "Inverted Row"
+    ],
+    "Single-arm DB Row": [
+      "Bent-over Barbell Row",
+      "KB Single-arm Row",
+      "Inverted Row"
+    ],
+    "KB Single-arm Row": [
+      "Single-arm DB Row",
+      "Bent-over Barbell Row",
+      "Inverted Row"
+    ],
+    "Sandbag Carry": [
+      "KB Swing",
+      "Sandbag Clean & Squat"
+    ],
+    "Med Ball Slam": [
+      "KB Swing",
+      "Sandbag Clean & Squat"
+    ],
+    "Standing Calf Raises": [
+      "KB Goblet Squat"
+    ],
+    "Heavy Club Mill": [
+      "Heavy Club Shield Cast",
+      "KB Halo"
+    ],
+    "Heavy Club Shield Cast": [
+      "Heavy Club Mill",
+      "KB Halo"
+    ]
+  },
+  "EXERCISE_DB": {
+    "Barbell Bench Press": {
+      "primary": [
+        "chest"
+      ],
+      "secondary": [
+        "triceps",
+        "front_delt"
+      ],
+      "cues": [
+        "Arch your back, feet flat",
+        "Bar to lower chest, elbows 45-60°",
+        "Drive through your heels",
+        "Squeeze pecs at the top"
+      ]
+    },
+    "Incline Dumbbell Press": {
+      "primary": [
+        "upper_chest"
+      ],
+      "secondary": [
+        "front_delt",
+        "triceps"
+      ],
+      "cues": [
+        "30-45° bench angle",
+        "Full stretch at bottom",
+        "Elbows slightly in",
+        "Squeeze at lockout"
+      ]
+    },
+    "Diamond Push-ups": {
+      "primary": [
+        "triceps"
+      ],
+      "secondary": [
+        "chest",
+        "front_delt"
+      ],
+      "cues": [
+        "Hands form a diamond",
+        "Elbows travel back, not out",
+        "Full ROM",
+        "Keep core tight"
+      ]
+    },
+    "Weighted Dips": {
+      "primary": [
+        "chest",
+        "triceps"
+      ],
+      "secondary": [
+        "front_delt"
+      ],
+      "cues": [
+        "Lean forward for chest focus",
+        "Full depth, shoulder safe",
+        "Control the descent",
+        "Lock out at top"
+      ]
+    },
+    "Push-ups": {
+      "primary": [
+        "chest"
+      ],
+      "secondary": [
+        "triceps",
+        "front_delt"
+      ],
+      "cues": [
+        "Hands just outside shoulders",
+        "Core rigid throughout",
+        "Full range of motion",
+        "Control both ways"
+      ]
+    },
+    "Overhead Press": {
+      "primary": [
+        "front_delt",
+        "side_delt"
+      ],
+      "secondary": [
+        "triceps",
+        "upper_chest"
+      ],
+      "cues": [
+        "Bar to clavicle start",
+        "Press vertically, not forward",
+        "Full lockout at top",
+        "Brace abs hard"
+      ]
+    },
+    "Dumbbell Shoulder Press": {
+      "primary": [
+        "front_delt",
+        "side_delt"
+      ],
+      "secondary": [
+        "triceps"
+      ],
+      "cues": [
+        "Neutral or pronated grip",
+        "Don't arc behind head",
+        "Control descent",
+        "Equal sides"
+      ]
+    },
+    "Arnold Press": {
+      "primary": [
+        "front_delt",
+        "side_delt"
+      ],
+      "secondary": [
+        "rear_delt",
+        "triceps"
+      ],
+      "cues": [
+        "Rotate from palms-in to out",
+        "Hits all three delt heads",
+        "Slow on the way down",
+        "Don't rush the rotation"
+      ]
+    },
+    "Lateral Raises": {
+      "primary": [
+        "side_delt"
+      ],
+      "secondary": [
+        "rear_delt"
+      ],
+      "cues": [
+        "Slight forward lean",
+        "Lead with elbows, not hands",
+        "Stop at shoulder height",
+        "No shrugging"
+      ]
+    },
+    "KB Clean & Press": {
+      "primary": [
+        "front_delt",
+        "side_delt"
+      ],
+      "secondary": [
+        "traps",
+        "triceps",
+        "glutes"
+      ],
+      "cues": [
+        "Hike KB back, then clean",
+        "Rack position tight to body",
+        "Press straight overhead",
+        "Hinge, don't squat the clean"
+      ]
+    },
+    "Heavy Club Mill": {
+      "primary": [
+        "side_delt",
+        "rear_delt"
+      ],
+      "secondary": [
+        "lats",
+        "core"
+      ],
+      "cues": [
+        "Arm stays extended",
+        "Rotate from shoulder",
+        "Control arc speed",
+        "Keep wrist neutral"
+      ]
+    },
+    "Heavy Club Shield Cast": {
+      "primary": [
+        "front_delt",
+        "chest"
+      ],
+      "secondary": [
+        "core",
+        "triceps"
+      ],
+      "cues": [
+        "Start from order position",
+        "Swing across body smoothly",
+        "Control return",
+        "Brace core throughout"
+      ]
+    },
+    "Skull Crushers": {
+      "primary": [
+        "triceps"
+      ],
+      "secondary": [],
+      "cues": [
+        "Bar to forehead / behind",
+        "Upper arms stay vertical",
+        "Elbows don't flare",
+        "Full extension at top"
+      ]
+    },
+    "Overhead Tricep Extension": {
+      "primary": [
+        "triceps"
+      ],
+      "secondary": [],
+      "cues": [
+        "Elbows stay narrow",
+        "Full stretch at bottom",
+        "Brace core standing",
+        "Slow eccentric"
+      ]
+    },
+    "Deadlift": {
+      "primary": [
+        "hamstrings",
+        "glutes"
+      ],
+      "secondary": [
+        "lats",
+        "erectors",
+        "traps"
+      ],
+      "cues": [
+        "Hip hinge, not a squat",
+        "Bar stays over mid-foot",
+        "Chest up, lat spread",
+        "Drive floor away"
+      ]
+    },
+    "Romanian Deadlift": {
+      "primary": [
+        "hamstrings",
+        "glutes"
+      ],
+      "secondary": [
+        "erectors"
+      ],
+      "cues": [
+        "Soft knee throughout",
+        "Push hips back, bar skims legs",
+        "Feel stretch in hamstrings",
+        "Don't round lower back"
+      ]
+    },
+    "Bent-over Barbell Row": {
+      "primary": [
+        "lats",
+        "mid_back"
+      ],
+      "secondary": [
+        "biceps",
+        "rear_delt"
+      ],
+      "cues": [
+        "45° torso angle",
+        "Pull to lower chest/navel",
+        "Squeeze shoulder blades",
+        "Control descent"
+      ]
+    },
+    "Inverted Row": {
+      "primary": [
+        "lats",
+        "mid_back"
+      ],
+      "secondary": [
+        "biceps",
+        "rear_delt"
+      ],
+      "cues": [
+        "Body straight as a plank",
+        "Pull chest to bar",
+        "Squeeze at top",
+        "Harder = more horizontal"
+      ]
+    },
+    "Single-arm DB Row": {
+      "primary": [
+        "lats"
+      ],
+      "secondary": [
+        "biceps",
+        "mid_back"
+      ],
+      "cues": [
+        "Support on bench",
+        "Pull elbow back and up",
+        "Full stretch at bottom",
+        "Don't rotate torso much"
+      ]
+    },
+    "KB Single-arm Row": {
+      "primary": [
+        "lats"
+      ],
+      "secondary": [
+        "biceps",
+        "rear_delt"
+      ],
+      "cues": [
+        "Staggered stance",
+        "Pull KB to hip",
+        "Squeeze at top",
+        "Control the drop"
+      ]
+    },
+    "KB Halo": {
+      "primary": [
+        "side_delt",
+        "rear_delt"
+      ],
+      "secondary": [
+        "core",
+        "traps"
+      ],
+      "cues": [
+        "Keep KB close to head",
+        "Circle is tight, controlled",
+        "Alternate directions",
+        "Don't tilt head"
+      ]
+    },
+    "Sandbag Carry": {
+      "primary": [
+        "traps",
+        "core"
+      ],
+      "secondary": [
+        "biceps",
+        "lats"
+      ],
+      "cues": [
+        "Hug bag to chest or shoulder",
+        "Stay tall, don't lean",
+        "Short powerful steps",
+        "Brace all the way"
+      ]
+    },
+    "Hammer Curls": {
+      "primary": [
+        "biceps"
+      ],
+      "secondary": [
+        "brachialis",
+        "forearms"
+      ],
+      "cues": [
+        "Neutral grip throughout",
+        "No swinging",
+        "Full extension at bottom",
+        "Controlled squeeze"
+      ]
+    },
+    "EZ Bar Curl": {
+      "primary": [
+        "biceps"
+      ],
+      "secondary": [
+        "brachialis"
+      ],
+      "cues": [
+        "Elbows pinned to ribs",
+        "Don't let elbows drift forward",
+        "Squeeze at top",
+        "Slow eccentric builds mass"
+      ]
+    },
+    "Incline Dumbbell Curl": {
+      "primary": [
+        "biceps"
+      ],
+      "secondary": [
+        "brachialis"
+      ],
+      "cues": [
+        "Incline stretches long head",
+        "Full range of motion",
+        "Don't swing back",
+        "Slow lowering"
+      ]
+    },
+    "KB Curl": {
+      "primary": [
+        "biceps"
+      ],
+      "secondary": [
+        "forearms"
+      ],
+      "cues": [
+        "Horns facing up at top",
+        "Control at all times",
+        "Pinch elbows to ribs",
+        "Squeeze at peak"
+      ]
+    },
+    "Barbell Back Squat": {
+      "primary": [
+        "quads",
+        "glutes"
+      ],
+      "secondary": [
+        "hamstrings",
+        "erectors"
+      ],
+      "cues": [
+        "Bar on upper traps, not neck",
+        "Knees track over toes",
+        "Break parallel",
+        "Chest up, no morning-over"
+      ]
+    },
+    "Walking Lunges": {
+      "primary": [
+        "quads",
+        "glutes"
+      ],
+      "secondary": [
+        "hamstrings",
+        "core"
+      ],
+      "cues": [
+        "Big step forward",
+        "Back knee grazes floor",
+        "Keep torso upright",
+        "Drive through front heel"
+      ]
+    },
+    "Bulgarian Split Squat": {
+      "primary": [
+        "quads",
+        "glutes"
+      ],
+      "secondary": [
+        "hamstrings"
+      ],
+      "cues": [
+        "Front foot far enough forward",
+        "Torso slight lean",
+        "Control descent",
+        "Don't let front knee cave"
+      ]
+    },
+    "KB Goblet Squat": {
+      "primary": [
+        "quads",
+        "glutes"
+      ],
+      "secondary": [
+        "core",
+        "adductors"
+      ],
+      "cues": [
+        "Hold KB at chest",
+        "Elbows track inside knees",
+        "Sit deep, chest tall",
+        "Drive heels into floor"
+      ]
+    },
+    "Hip Thrust": {
+      "primary": [
+        "glutes"
+      ],
+      "secondary": [
+        "hamstrings",
+        "core"
+      ],
+      "cues": [
+        "Upper back on bench",
+        "Bar over hip crease",
+        "Drive hips to ceiling",
+        "Squeeze hard at top"
+      ]
+    },
+    "KB Swing": {
+      "primary": [
+        "hamstrings",
+        "glutes"
+      ],
+      "secondary": [
+        "core",
+        "lats"
+      ],
+      "cues": [
+        "It's a hip hinge, not a squat",
+        "Hike KB back between legs",
+        "Explode hips forward",
+        "Arms just carry the bell"
+      ]
+    },
+    "Standing Calf Raises": {
+      "primary": [
+        "calves"
+      ],
+      "secondary": [],
+      "cues": [
+        "Full stretch at bottom",
+        "Pause at top",
+        "Slow eccentric",
+        "Both legs equal"
+      ]
+    },
+    "Plank": {
+      "primary": [
+        "core"
+      ],
+      "secondary": [
+        "chest",
+        "front_delt"
+      ],
+      "cues": [
+        "Body arrow-straight",
+        "Don't let hips sag",
+        "Breathe, don't hold breath",
+        "Push floor away"
+      ]
+    },
+    "Hanging Leg Raises": {
+      "primary": [
+        "core"
+      ],
+      "secondary": [
+        "hip_flexors",
+        "lats"
+      ],
+      "cues": [
+        "Posterior tilt before raising",
+        "Control the lowering",
+        "Don't swing",
+        "Squeeze abs, not hip flexors"
+      ]
+    },
+    "Med Ball Slam": {
+      "primary": [
+        "core",
+        "lats"
+      ],
+      "secondary": [
+        "front_delt",
+        "glutes"
+      ],
+      "cues": [
+        "Full overhead extension",
+        "Slam through floor",
+        "Catch on bounce",
+        "Brace on every rep"
+      ]
+    },
+    "Sandbag Clean & Squat": {
+      "primary": [
+        "quads",
+        "glutes"
+      ],
+      "secondary": [
+        "lats",
+        "core",
+        "traps"
+      ],
+      "cues": [
+        "Clean from floor to rack",
+        "Receive in partial squat",
+        "Stand to full extension",
+        "Control the drop"
+      ]
+    },
+    "HIIT Sprints (20s on/10s off)": {
+      "primary": [
+        "quads",
+        "hamstrings"
+      ],
+      "secondary": [
+        "glutes",
+        "calves"
+      ],
+      "cues": [
+        "Drive arms, drive legs",
+        "Stay on balls of feet",
+        "Full effort each interval",
+        "Walk recovery if needed"
+      ]
+    },
+    "Zone 2 Walk/Jog": {
+      "primary": [
+        "quads",
+        "hamstrings"
+      ],
+      "secondary": [
+        "glutes",
+        "calves"
+      ],
+      "cues": [
+        "Conversational pace",
+        "Nasal breathing if possible",
+        "30-45 min is ideal",
+        "This builds your aerobic base"
+      ]
+    },
+    "Foam Rolling": {
+      "primary": [
+        "core"
+      ],
+      "secondary": [],
+      "cues": [
+        "30s per muscle group",
+        "Slow rolls, pause on tender spots",
+        "Breathe into the pressure",
+        "Don't roll joints"
+      ]
+    },
+    "Stretching Circuit": {
+      "primary": [
+        "core"
+      ],
+      "secondary": [],
+      "cues": [
+        "Hold 30-60s each stretch",
+        "Breathe out into the stretch",
+        "Never bounce",
+        "After training or separately"
+      ]
+    }
+  },
+  "PHILOSOPHY": [
+    {
+      "principle": "Progressive Overload",
+      "icon": "📈",
+      "summary": "Add weight, reps, or sets over time — the #1 driver of hypertrophy.",
+      "detail": "Schoenfeld (2010): mechanical tension is the primary stimulus for muscle growth. Increase load by 2.5–5% when you hit the top of your rep range for 2 consecutive sessions."
+    },
+    {
+      "principle": "Mechanical Tension > Metabolic Stress",
+      "icon": "⚙️",
+      "summary": "Lift heavy with full range of motion. The burn is secondary.",
+      "detail": "Research shows stretched-position loading (e.g. deep squats, incline curls) produces superior hypertrophy vs. partial reps chasing the pump. Control the eccentric."
+    },
+    {
+      "principle": "Frequency: 2× Per Muscle/Week",
+      "icon": "🔁",
+      "summary": "Each muscle group trained twice weekly outperforms once-weekly splits.",
+      "detail": "Krieger (2010) meta-analysis: 2× weekly frequency produced 6% more hypertrophy than 1×. PPL×2 maximizes this. Protein synthesis peaks ~24–36h post-workout."
+    },
+    {
+      "principle": "Volume: 10–20 Sets Per Muscle/Week",
+      "icon": "📊",
+      "summary": "More sets = more growth, up to your recovery limit.",
+      "detail": "Schoenfeld & Grgic (2017): dose-response relationship between weekly sets and hypertrophy. At 38 with a cut goal, stay 12–16 sets/muscle/week. Avoid junk volume."
+    },
+    {
+      "principle": "Rep Range: 6–30 All Build Muscle",
+      "icon": "🎯",
+      "summary": "Heavy, moderate, and light sets all work — if taken near failure.",
+      "detail": "Schoenfeld et al. (2017): sets of 8–12 optimize the tension-fatigue tradeoff. Use heavy compounds (5–8 reps) for strength and lighter isolation (12–20 reps) for detail."
+    },
+    {
+      "principle": "HIIT for Fat Loss, Not LSD Cardio",
+      "icon": "🔥",
+      "summary": "2× weekly HIIT on leg days. Preserves muscle. Burns more fat.",
+      "detail": "Wilson et al. (2012): concurrent HIIT + resistance training preserves lean mass better than steady-state cardio during a cut. 20–30 min HIIT > 60 min jogging for body comp."
+    },
+    {
+      "principle": "Rest 60–90s for Hypertrophy",
+      "icon": "⏱",
+      "summary": "Short rests keep metabolic stress high. Don't exceed 2 min on isolations.",
+      "detail": "Schoenfeld et al. (2016): 60s rest produced similar hypertrophy to 3-min rest when volume was equated. Shorter rest increases GH response and caloric burn — ideal for a cut."
+    },
+    {
+      "principle": "Sleep & Recovery Are Training",
+      "icon": "😴",
+      "summary": "7–9 hrs sleep is non-negotiable. You grow at rest, not in the gym.",
+      "detail": "Dattilo et al. (2011): sleep deprivation elevates cortisol and reduces testosterone — devastating for a shred. At 38, testosterone recovery is slower. Protect your sleep."
+    }
+  ],
+  "DEFAULT_PLAN": {
+    "Mon": {
+      "name": "Push · Chest/Shoulders/Tris",
+      "muscles": [
+        "Chest",
+        "Shoulders",
+        "Arms"
+      ],
+      "exercises": [
+        {
+          "name": "Barbell Bench Press",
+          "sets": 5,
+          "reps": 8,
+          "weight": 155
+        },
+        {
+          "name": "Incline Dumbbell Press",
+          "sets": 4,
+          "reps": 10,
+          "weight": 60
+        },
+        {
+          "name": "Dumbbell Shoulder Press",
+          "sets": 4,
+          "reps": 10,
+          "weight": 45
+        },
+        {
+          "name": "Lateral Raises",
+          "sets": 4,
+          "reps": 15,
+          "weight": 20
+        },
+        {
+          "name": "Skull Crushers",
+          "sets": 3,
+          "reps": 12,
+          "weight": 65
+        },
+        {
+          "name": "Diamond Push-ups",
+          "sets": 3,
+          "reps": 15,
+          "weight": 0
+        },
+        {
+          "name": "Heavy Club Mill",
+          "sets": 3,
+          "reps": 10,
+          "weight": 15
+        }
+      ]
+    },
+    "Tue": {
+      "name": "Pull · Back/Biceps",
+      "muscles": [
+        "Back",
+        "Arms"
+      ],
+      "exercises": [
+        {
+          "name": "Deadlift",
+          "sets": 4,
+          "reps": 6,
+          "weight": 135
+        },
+        {
+          "name": "Inverted Row",
+          "sets": 4,
+          "reps": 10,
+          "weight": 0
+        },
+        {
+          "name": "Bent-over Barbell Row",
+          "sets": 4,
+          "reps": 8,
+          "weight": 135
+        },
+        {
+          "name": "Single-arm DB Row",
+          "sets": 3,
+          "reps": 12,
+          "weight": 65
+        },
+        {
+          "name": "KB Halo",
+          "sets": 3,
+          "reps": 10,
+          "weight": 35
+        },
+        {
+          "name": "Hammer Curls",
+          "sets": 4,
+          "reps": 12,
+          "weight": 35
+        },
+        {
+          "name": "Incline Dumbbell Curl",
+          "sets": 3,
+          "reps": 12,
+          "weight": 25
+        }
+      ]
+    },
+    "Wed": {
+      "name": "Push · Power + Burn",
+      "muscles": [
+        "Chest",
+        "Shoulders",
+        "Arms"
+      ],
+      "exercises": [
+        {
+          "name": "Overhead Press",
+          "sets": 5,
+          "reps": 6,
+          "weight": 95
+        },
+        {
+          "name": "Arnold Press",
+          "sets": 3,
+          "reps": 12,
+          "weight": 35
+        },
+        {
+          "name": "KB Clean & Press",
+          "sets": 4,
+          "reps": 8,
+          "weight": 53
+        },
+        {
+          "name": "Weighted Dips",
+          "sets": 4,
+          "reps": 10,
+          "weight": 0
+        },
+        {
+          "name": "Overhead Tricep Extension",
+          "sets": 4,
+          "reps": 12,
+          "weight": 35
+        },
+        {
+          "name": "Heavy Club Shield Cast",
+          "sets": 3,
+          "reps": 10,
+          "weight": 15
+        }
+      ]
+    },
+    "Thu": {
+      "name": "Legs · Quad Focus + HIIT",
+      "muscles": [
+        "Legs",
+        "Core",
+        "Cardio"
+      ],
+      "exercises": [
+        {
+          "name": "Barbell Back Squat",
+          "sets": 5,
+          "reps": 8,
+          "weight": 135
+        },
+        {
+          "name": "Walking Lunges",
+          "sets": 4,
+          "reps": 12,
+          "weight": 45
+        },
+        {
+          "name": "Bulgarian Split Squat",
+          "sets": 3,
+          "reps": 10,
+          "weight": 35
+        },
+        {
+          "name": "KB Goblet Squat",
+          "sets": 3,
+          "reps": 15,
+          "weight": 53
+        },
+        {
+          "name": "Standing Calf Raises",
+          "sets": 5,
+          "reps": 20,
+          "weight": 95
+        },
+        {
+          "name": "Plank",
+          "sets": 4,
+          "reps": 60,
+          "weight": 0
+        },
+        {
+          "name": "HIIT Sprints (20s on/10s off)",
+          "sets": 8,
+          "reps": 1,
+          "weight": 0
+        }
+      ]
+    },
+    "Fri": {
+      "name": "Pull · Width + Detail",
+      "muscles": [
+        "Back",
+        "Arms"
+      ],
+      "exercises": [
+        {
+          "name": "Deadlift",
+          "sets": 5,
+          "reps": 5,
+          "weight": 155
+        },
+        {
+          "name": "Inverted Row",
+          "sets": 5,
+          "reps": 8,
+          "weight": 0
+        },
+        {
+          "name": "KB Single-arm Row",
+          "sets": 4,
+          "reps": 10,
+          "weight": 53
+        },
+        {
+          "name": "Sandbag Carry",
+          "sets": 4,
+          "reps": 40,
+          "weight": 0
+        },
+        {
+          "name": "EZ Bar Curl",
+          "sets": 4,
+          "reps": 10,
+          "weight": 65
+        },
+        {
+          "name": "KB Curl",
+          "sets": 3,
+          "reps": 12,
+          "weight": 35
+        },
+        {
+          "name": "Hanging Leg Raises",
+          "sets": 4,
+          "reps": 15,
+          "weight": 0
+        }
+      ]
+    },
+    "Sat": {
+      "name": "Pull · Width + Detail",
+      "muscles": [
+        "Back",
+        "Arms"
+      ],
+      "exercises": [
+        {
+          "name": "Deadlift",
+          "sets": 5,
+          "reps": 5,
+          "weight": 155
+        },
+        {
+          "name": "Inverted Row",
+          "sets": 5,
+          "reps": 8,
+          "weight": 0
+        },
+        {
+          "name": "KB Single-arm Row",
+          "sets": 4,
+          "reps": 10,
+          "weight": 53
+        },
+        {
+          "name": "Sandbag Carry",
+          "sets": 4,
+          "reps": 40,
+          "weight": 0
+        },
+        {
+          "name": "EZ Bar Curl",
+          "sets": 4,
+          "reps": 10,
+          "weight": 65
+        },
+        {
+          "name": "KB Curl",
+          "sets": 3,
+          "reps": 12,
+          "weight": 35
+        },
+        {
+          "name": "Hanging Leg Raises",
+          "sets": 4,
+          "reps": 15,
+          "weight": 0
+        }
+      ]
+    },
+    "Sun": {
+      "name": "Pull · Width + Detail",
+      "muscles": [
+        "Back",
+        "Arms"
+      ],
+      "exercises": [
+        {
+          "name": "Deadlift",
+          "sets": 5,
+          "reps": 5,
+          "weight": 155
+        },
+        {
+          "name": "Inverted Row",
+          "sets": 5,
+          "reps": 8,
+          "weight": 0
+        },
+        {
+          "name": "KB Single-arm Row",
+          "sets": 4,
+          "reps": 10,
+          "weight": 53
+        },
+        {
+          "name": "Sandbag Carry",
+          "sets": 4,
+          "reps": 40,
+          "weight": 0
+        },
+        {
+          "name": "EZ Bar Curl",
+          "sets": 4,
+          "reps": 10,
+          "weight": 65
+        },
+        {
+          "name": "KB Curl",
+          "sets": 3,
+          "reps": 12,
+          "weight": 35
+        },
+        {
+          "name": "Hanging Leg Raises",
+          "sets": 4,
+          "reps": 15,
+          "weight": 0
+        }
+      ]
+    }
+  },
+  "DAILY_HABITS": [
+    {
+      "id": "fasciitis",
+      "label": "Plantar Fasciitis Rehab",
+      "detail": "Towel scrunches · Calf stretches · Frozen bottle roll · Heel raises",
+      "icon": "🦶"
+    },
+    {
+      "id": "meds",
+      "label": "Take Meds",
+      "icon": "💊"
+    },
+    {
+      "id": "creatine",
+      "label": "Creatine (5g)",
+      "icon": "⚡"
+    }
+  ]
+}

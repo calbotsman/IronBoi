@@ -1,0 +1,69 @@
+{
+  "log_workout_request": {
+    "toolCallId": "tool_001",
+    "requestedAt": "2026-05-08T18:00:00.000Z",
+    "tool": "log_workout",
+    "workout": {
+      "userId": "user_123",
+      "sessionId": "session_abc",
+      "date": "2026-05-08",
+      "source": "manual",
+      "exercises": [
+        {
+          "name": "Goblet squat",
+          "sets": [
+            {
+              "reps": 10,
+              "loadKg": 24,
+              "rpe": 7,
+              "notes": "Felt stable"
+            }
+          ]
+        }
+      ],
+      "durationSec": 1800,
+      "perceivedEffort": 7,
+      "postSessionNotes": "Good session, knee felt fine.",
+      "createdAt": "2026-05-08T18:30:00.000Z"
+    }
+  },
+  "generate_plan_request": {
+    "toolCallId": "tool_002",
+    "requestedAt": "2026-05-08T19:00:00.000Z",
+    "tool": "generate_plan",
+    "profile": {
+      "userId": "user_123",
+      "ageYears": 38,
+      "sexOrGender": "male",
+      "heightCm": 178,
+      "weightKg": 84,
+      "goals": ["strength", "general_fitness"],
+      "trainingExperience": "beginner",
+      "injuriesOrLimitations": [],
+      "equipment": ["dumbbells", "bench"],
+      "schedule": {
+        "daysPerWeek": 3,
+        "preferredDays": ["monday", "wednesday", "friday"],
+        "sessionLengthMin": 45
+      },
+      "preferences": {
+        "coachingTone": "direct",
+        "preferredWorkoutTime": "morning",
+        "dislikedExercises": []
+      },
+      "dietaryConstraints": [],
+      "createdAt": "2026-05-08T19:00:00.000Z",
+      "updatedAt": "2026-05-08T19:00:00.000Z"
+    },
+    "horizonDays": 7,
+    "constraints": ["manual_data_only_no_healthkit"]
+  },
+  "flag_risk_result": {
+    "toolCallId": "tool_003",
+    "outcome": "blocked_by_policy",
+    "message": "Emergency symptoms require immediate help.",
+    "riskLevel": "blocked",
+    "userFacingMessage": "Chest pain and dizziness after a workout can be urgent. Please contact emergency services now or have someone nearby help you.",
+    "allowedNextActions": ["contact_emergency_services"]
+  }
+}
