@@ -30,8 +30,21 @@ type OrchestrateCoachTurnArgs = {
   geminiApiKey?: string;
 };
 
+// Phase 1 Task 1.4 — abort the in-flight model call 5s before the function's
+// own timeout (60s, set on the trigger config in index.ts). This gives us
+// enough budget to write a clean "model_timeout" doc instead of letting the
+// platform kill the function mid-write.
+const COACH_MODEL_TIMEOUT_MS = 55_000;
+
 function terminalStatusFor(verdict: SafetyVerdict) {
   return verdict.riskTier === "blocked" ? "blocked" : "complete";
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "DOMException")
+  );
 }
 
 export async function orchestrateCoachTurn({
@@ -151,16 +164,27 @@ export async function orchestrateCoachTurn({
       model: provider.model,
     }, { merge: true });
 
-    const result = await provider.generateCoachReply({
-      system,
-      userContent,
-      onText: async (partialContent) => {
-        await assistantRef.set(
-          { content: partialContent, status: "streaming" },
-          { merge: true },
-        );
-      },
-    });
+    const modelAbort = new AbortController();
+    const modelTimeoutHandle = setTimeout(() => {
+      modelAbort.abort();
+    }, COACH_MODEL_TIMEOUT_MS);
+
+    let result;
+    try {
+      result = await provider.generateCoachReply({
+        system,
+        userContent,
+        signal: modelAbort.signal,
+        onText: async (partialContent) => {
+          await assistantRef.set(
+            { content: partialContent, status: "streaming" },
+            { merge: true },
+          );
+        },
+      });
+    } finally {
+      clearTimeout(modelTimeoutHandle);
+    }
     const content = result.content;
     await recordCoachTurnUsage(db, userId, usageCap.dateKey, result.usage);
 
@@ -198,21 +222,25 @@ export async function orchestrateCoachTurn({
       { merge: true },
     );
   } catch (error) {
+    const aborted = isAbortError(error);
+    const errorCode = aborted ? "model_timeout" : "coach_orchestration_error";
+
     safeLogger.error("Coach turn error", {
-      event: "coach_turn_error",
+      event: aborted ? "coach_model_timeout" : "coach_turn_error",
       userId,
       sessionId,
       messageId,
       turnId,
-      errorCode: error instanceof Error ? error.name : "unknown_error",
+      errorCode,
       errorDetail: error instanceof Error ? error.message.slice(0, 300) : "unknown_error",
     });
     await assistantRef.set(
       {
-        content:
-          "I'm having trouble right now. Your message is saved, but I need you to try again in a moment.",
+        content: aborted
+          ? "That reply took longer than I have to think. Your message is saved — try again or send a shorter version."
+          : "I'm having trouble right now. Your message is saved, but I need you to try again in a moment.",
         status: "error",
-        errorCode: "coach_orchestration_error",
+        errorCode,
         serverCompletedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

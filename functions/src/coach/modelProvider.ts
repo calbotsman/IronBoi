@@ -2,6 +2,9 @@ type GenerateCoachReplyArgs = {
   system: string;
   userContent: string;
   onText?: (content: string) => Promise<void>;
+  // Phase 1 Task 1.4 — orchestrator may abort the in-flight model call when
+  // the function timeout is about to fire. Providers MUST honor this signal.
+  signal?: AbortSignal;
 };
 
 export type CoachModelUsage = {
@@ -38,11 +41,13 @@ export class GeminiCoachProvider implements CoachModelProvider {
     system,
     userContent,
     onText,
+    signal,
   }: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult> {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
       {
         method: "POST",
+        signal,
         headers: {
           "Content-Type": "application/json",
           "x-goog-api-key": this.apiKey,

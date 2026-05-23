@@ -79,6 +79,54 @@ describe("GeminiCoachProvider", () => {
     );
   });
 
+  it("gemini_request_threads_abort_signal_to_fetch", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "ok" }] } }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const controller = new AbortController();
+    const provider = new GeminiCoachProvider("fake-gemini-key");
+    await provider.generateCoachReply({
+      system: "s",
+      userContent: "u",
+      signal: controller.signal,
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
+  });
+
+  it("gemini_request_rejects_when_signal_aborts_mid_flight", async () => {
+    const fetchMock = vi.fn().mockImplementation((_url, init: RequestInit) => {
+      return new Promise((_, reject) => {
+        // Honor abort even though we never resolve normally.
+        init.signal?.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.");
+          err.name = "AbortError";
+          reject(err);
+        });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const controller = new AbortController();
+    const provider = new GeminiCoachProvider("fake-gemini-key");
+    const pending = provider.generateCoachReply({
+      system: "s",
+      userContent: "u",
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    await expect(pending).rejects.toThrowError(/abort/i);
+  });
+
   it("gemini_parser_rejects_malformed_parts_without_type_error", async () => {
     vi.stubGlobal(
       "fetch",
