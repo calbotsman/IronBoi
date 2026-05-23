@@ -197,23 +197,22 @@ type CoachContextBundle = {
 
 **Rollback:** Keep the old `assembleCoachSystemPrompt` exported; flip a feature flag.
 
-### Task 1.2 — Tighten tool executor (Task #8)
+### Task 1.2 — Tighten tool executor (Task #8) ✅ SHIPPED 2026-05-22 (commit c7d4ce4)
 
-**Files:** `functions/src/tools/executor.ts:14-49`, every tool handler's Zod schema.
+**Files modified:** `functions/src/tools/executor.ts`, `functions/test/security/tools/toolExecutorIdentity.test.ts`
 
-**Change:**
-- Add `.strict()` to every tool's input Zod schema.
-- Remove the `userIdAliases` allowlist.
-- New rule: tool schemas MUST omit any field whose name matches `/user|owner|account|behalf|impersonat/i`. If the parser sees one, the executor rejects the call with a `tool_identity_violation` error and logs the attempt with `safeLogger.warn`.
-- `userId` is always injected from `ctx.authenticatedUserId` after parse, never accepted from the model.
+**What shipped:**
+- `userIdAliases` allowlist removed.
+- New `ToolIdentityViolationError` — executor throws + logs `safeLogger.warn` with `event: "tool_identity_violation"` when any identity-shaped key is present in `modelArgs`. No more silent strip.
+- Regex `/user|owner|account|behalf|impersonat|subject/i` for substring detection (catches novel variants like `byUser`, `userOverride`, `actingAsUser`, `accountAlias` that a fixed denylist would miss).
+- Explicit `uid` entry — too short for safe substring matching (would false-positive on `guide`, `fluid`).
+- `SAFE_USER_PREFIXED_FIELDS` allowlist exempts `userNote` (AdaptPlan), `userContext` (ExplainExercise), `userText` (FlagRisk) — these carry user-authored content, not identity claims.
+- `userId` injected from `ctx.authenticatedUserId` after the identity check passes.
+- The contract schemas in `contracts/tool-calls.ts` were already `.strict()` via `ToolCallBase` — defense in depth holds.
 
-**Test:** Cases that today's executor silently strips:
-- `{ targetUserId: "other" }` → reject.
-- `{ ownerId: "other" }` → reject.
-- `{ on_behalf_of: "other" }` → reject.
-- `{ workoutId: "x" }` → accepted, `userId` injected.
+**Test coverage added (+4 cases):** rejects all 17 known identity aliases; rejects novel regex-matched variants; allows safe user-content fields; collects all offending keys into one error; existing missing-auth + unknown-tool cases preserved.
 
-**Rollback:** Restore the allowlist; feature-flagged.
+**Verified:** `npm run check`, `npm run lint:security` (20/20), `npm run test:security` (58/58), `npm run validate:phase0` all pass.
 
 ### Task 1.3 — Gemini safety settings (Task #9)
 
