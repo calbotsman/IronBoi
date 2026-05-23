@@ -41,6 +41,44 @@ describe("GeminiCoachProvider", () => {
     });
   });
 
+  it("gemini_request_includes_explicit_safetySettings_for_all_four_categories", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: "ok" }] } }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const provider = new GeminiCoachProvider("fake-gemini-key");
+    await provider.generateCoachReply({ system: "system", userContent: "hi" });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as {
+      safetySettings?: Array<{ category: string; threshold: string }>;
+    };
+
+    expect(body.safetySettings).toBeDefined();
+    expect(body.safetySettings).toHaveLength(4);
+
+    const byCategory = new Map(
+      (body.safetySettings ?? []).map((s) => [s.category, s.threshold]),
+    );
+    expect(byCategory.get("HARM_CATEGORY_DANGEROUS_CONTENT")).toBe(
+      "BLOCK_MEDIUM_AND_ABOVE",
+    );
+    expect(byCategory.get("HARM_CATEGORY_SEXUALLY_EXPLICIT")).toBe(
+      "BLOCK_LOW_AND_ABOVE",
+    );
+    expect(byCategory.get("HARM_CATEGORY_HARASSMENT")).toBe(
+      "BLOCK_MEDIUM_AND_ABOVE",
+    );
+    expect(byCategory.get("HARM_CATEGORY_HATE_SPEECH")).toBe(
+      "BLOCK_MEDIUM_AND_ABOVE",
+    );
+  });
+
   it("gemini_parser_rejects_malformed_parts_without_type_error", async () => {
     vi.stubGlobal(
       "fetch",

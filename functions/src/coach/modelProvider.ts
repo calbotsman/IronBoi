@@ -61,6 +61,30 @@ export class GeminiCoachProvider implements CoachModelProvider {
             maxOutputTokens: 900,
             temperature: 0.4,
           },
+          // Phase 1 Task 1.3 — explicit safety thresholds.
+          // Defaults vary by model and tend to drift, so we pin them.
+          // SEXUALLY_EXPLICIT is set lower than the others because a coach
+          // context should never produce that category; the others are
+          // BLOCK_MEDIUM_AND_ABOVE so legitimate fitness vocabulary
+          // (rep failure, fatigue, "destroy a workout") doesn't trip.
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+            {
+              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+              threshold: "BLOCK_LOW_AND_ABOVE",
+            },
+            {
+              category: "HARM_CATEGORY_HARASSMENT",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_MEDIUM_AND_ABOVE",
+            },
+          ],
         }),
       },
     );
