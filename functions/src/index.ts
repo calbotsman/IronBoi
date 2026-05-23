@@ -501,20 +501,75 @@ export const finishWorkoutSessionHttp = onRequest(
   },
 );
 
+// Phase 2 Task 2.3 — proposal queue.
+// 14-day TTL for unconfirmed proposed facts. Long enough that a returning
+// user can review what the coach inferred while they were gone; short
+// enough that stale guesses don't accumulate forever.
+const PROPOSED_FACT_TTL_MS = 14 * 24 * 60 * 60 * 1_000;
+
 export const upsertMemoryFact = onCall({ region: "us-central1" }, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = CoachMemoryFact.parse(stripUserId(request.data, userId));
 
-  await db.doc(memoryFactPath(userId, parsed.factId)).set(
-    {
-      ...parsed,
-      serverUpdatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+  // Server decides the state — never trust the client/model on this.
+  // user_stated → confirmed (they told us themselves).
+  // everything else → proposed with a 14-day expiry, even if the client
+  //                   sent state: "confirmed". A client cannot self-confirm
+  //                   coach-inferred memory; only confirmMemoryFact can.
+  const now = new Date();
+  const decidedState =
+    parsed.source === "user_stated" ? "confirmed" : "proposed";
 
-  return { ok: true, factId: parsed.factId };
+  const writeData: Record<string, unknown> = {
+    ...parsed,
+    state: decidedState,
+    serverUpdatedAt: FieldValue.serverTimestamp(),
+  };
+
+  if (decidedState === "confirmed") {
+    if (!parsed.lastConfirmedAt) {
+      writeData.lastConfirmedAt = now.toISOString();
+    }
+    // Confirmed facts don't expire; clear any prior expiresAt if upgrading.
+    writeData.expiresAt = FieldValue.delete();
+  } else {
+    if (!parsed.expiresAt) {
+      writeData.expiresAt = new Date(
+        now.getTime() + PROPOSED_FACT_TTL_MS,
+      ).toISOString();
+    }
+  }
+
+  await db.doc(memoryFactPath(userId, parsed.factId)).set(writeData, {
+    merge: true,
+  });
+
+  return { ok: true, factId: parsed.factId, state: decidedState };
 });
+
+export const confirmMemoryFact = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    const parsed = z
+      .object({ factId: z.string().min(1) })
+      .parse(request.data);
+
+    // Idempotent: even if already confirmed, refresh lastConfirmedAt and
+    // clear any expiresAt that lingered from a prior proposed state.
+    await db.doc(memoryFactPath(userId, parsed.factId)).set(
+      {
+        state: "confirmed",
+        lastConfirmedAt: new Date().toISOString(),
+        expiresAt: FieldValue.delete(),
+        serverUpdatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+
+    return { ok: true, factId: parsed.factId };
+  },
+);
 
 export const deleteMemoryFact = onCall({ region: "us-central1" }, async (request) => {
   const userId = requireUserId(request.auth);

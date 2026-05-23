@@ -201,6 +201,69 @@ describe("coach context bundle", () => {
     expect(system).not.toContain("systemOverride");
   });
 
+  it("bundle_surfaces_pendingProposalCount_and_filters_proposed_facts", () => {
+    // Phase 2 Task 2.3 — proposed-but-unconfirmed facts must NOT appear in
+    // memoryFacts (so they don't steer the reply), but the count must be
+    // surfaced so the coach can mention there are items waiting for review.
+    const bundle = buildCoachContextBundle(
+      {
+        profile: { ageYears: 30 },
+        // Caller (loadCoachContext) already filtered to confirmed-for-prompt.
+        // pendingProposalCount is the separate count of proposed-state facts.
+        recentFacts: [
+          {
+            factId: "confirmed-1",
+            category: "preference",
+            content: "Prefers morning sessions.",
+            state: "confirmed",
+          },
+        ],
+        recentLogs: [],
+        sessionHistory: [],
+        pendingProposalCount: 3,
+      },
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-05-22T12:00:00.000Z",
+      },
+    );
+
+    expect(bundle.memoryFacts).toHaveLength(1);
+    expect(bundle.memoryFacts[0].content).toBe("Prefers morning sessions.");
+    expect(bundle.pendingProposalCount).toBe(3);
+
+    const { userMessage, system } = assembleCoachPrompt(
+      coachConfig,
+      bundle,
+      "hi",
+    );
+    // The count is exposed to the model inside its named tag.
+    expect(userMessage).toContain("<pending_proposal_count>3</pending_proposal_count>");
+    // The system tells the model not to act on proposed facts.
+    expect(system).toContain("<pending_proposal_count>");
+    expect(system).toContain("Proposed-but-unconfirmed facts are summarized as a count");
+  });
+
+  it("bundle_defaults_pendingProposalCount_to_zero_for_legacy_contexts", () => {
+    // Bundles built before Phase 2.3 had no pendingProposalCount field.
+    // The builder coerces undefined to 0 so legacy callers don't break.
+    const bundle = buildCoachContextBundle(
+      {
+        profile: null,
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+      } as never,
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-05-22T12:00:00.000Z",
+      },
+    );
+    expect(bundle.pendingProposalCount).toBe(0);
+  });
+
   it("context_bundle_tolerates_empty_or_malformed_context_docs", () => {
     const bundle = buildCoachContextBundle(
       {

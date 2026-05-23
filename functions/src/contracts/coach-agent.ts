@@ -164,6 +164,17 @@ export const UserHealthProfile = z.object({
   updatedAt: ISODateTime,
 }).strict();
 
+// Phase 2 Task 2.3 — Memory proposal queue.
+// Coach-inferred facts default to "proposed" and don't enter the prompt
+// until confirmed (either by user_stated source on upsert, or by an
+// explicit confirmMemoryFact call). "rejected" is reserved for future
+// user-rejection UI; today the alternative is deleteMemoryFact.
+export const CoachMemoryFactState = z.enum([
+  "proposed",
+  "confirmed",
+  "rejected",
+]);
+
 export const CoachMemoryFact = z.object({
   userId: z.string().min(1),
   factId: z.string().min(1),
@@ -185,6 +196,14 @@ export const CoachMemoryFact = z.object({
     "healthkit_derived",
   ]),
   confidence: z.number().min(0).max(1),
+  // Phase 2 Task 2.3 — proposal queue fields.
+  // `state` is optional in the contract to keep client callers backward
+  // compatible; the server upsert decides the final state based on `source`.
+  state: CoachMemoryFactState.optional(),
+  sourceMessageId: z.string().optional(),
+  evidenceExcerpt: z.string().max(500).optional(),
+  expiresAt: ISODateTime.optional(),
+  lastConfirmedAt: ISODateTime.optional(),
   createdAt: ISODateTime,
   lastReinforcedAt: ISODateTime.optional(),
   userEditable: z.literal(true),

@@ -10,6 +10,10 @@ export type CoachContextBundleV1 = {
   assembledAt: string;
   profile: Record<string, unknown> | null;
   memoryFacts: CoachContextMemoryFact[];
+  // Phase 2 Task 2.3 — count of proposed-but-unconfirmed facts. The coach
+  // should NOT act on these in this turn, but knowing there are some lets it
+  // mention "there are N items I'd like to confirm next time you have a sec."
+  pendingProposalCount: number;
   recentWorkouts: CoachContextWorkout[];
   conversationWindow: CoachContextMessage[];
   healthSummary: {
@@ -89,6 +93,7 @@ export function buildCoachContextBundle(
       .slice(0, 20)
       .map(memoryFactForPrompt)
       .filter((fact): fact is CoachContextMemoryFact => hasText(fact.content)),
+    pendingProposalCount: context.pendingProposalCount ?? 0,
     recentWorkouts: context.recentLogs
       .slice(0, 10)
       .map(workoutForPrompt)
