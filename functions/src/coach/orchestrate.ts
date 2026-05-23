@@ -12,7 +12,7 @@ import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { selectCoachModelProvider } from "./modelProvider.js";
-import { assembleCoachSystemPrompt } from "./prompt.js";
+import { assembleCoachPrompt } from "./prompt.js";
 import {
   classifyUserMessage,
   refusalForVerdict,
@@ -139,7 +139,11 @@ export async function orchestrateCoachTurn({
       sessionId,
       retrievedCorpus,
     });
-    const system = assembleCoachSystemPrompt(coach as never, contextBundle);
+    const { system, userMessage } = assembleCoachPrompt(
+      coach as never,
+      contextBundle,
+      userContent,
+    );
     const provider = selectCoachModelProvider({ geminiApiKey });
 
     if (!provider) {
@@ -173,7 +177,9 @@ export async function orchestrateCoachTurn({
     try {
       result = await provider.generateCoachReply({
         system,
-        userContent,
+        // Phase 1.1 — userContent on the wire is the XML-tagged userMessage,
+        // not the raw user turn. The boundary contract is in `system`.
+        userContent: userMessage,
         signal: modelAbort.signal,
         onText: async (partialContent) => {
           await assistantRef.set(
