@@ -302,28 +302,27 @@ export const USER_SCOPED = {
 
 **Rollback:** Drop `hasOnly` clauses.
 
-### Task 2.3 — Memory proposal queue (Task #12)
+### Task 2.3 — Memory proposal queue (Task #12) ✅ SHIPPED 2026-05-22 (commit c6fc0c5)
 
-**Files:** `functions/src/contracts/coach-agent.ts:129` (extend schema), `functions/src/index.ts:193` (upsert), `functions/src/coach/context.ts:19` (filter), new `confirmMemoryFact` callable, new iOS UI surface (separate task).
+**Files modified:** `functions/src/contracts/coach-agent.ts`, `functions/src/index.ts`, `functions/src/coach/context.ts`, `functions/src/coach/contextBundle.ts`, `functions/src/coach/prompt.ts`, `functions/test/security/coach/contextBundle.test.ts`.
 
-**Schema additions to `CoachMemoryFact`:**
-```ts
-state: z.enum(["proposed", "confirmed", "rejected"]).default("proposed"),
-sourceMessageId: z.string().optional(),
-evidenceExcerpt: z.string().max(500).optional(),
-expiresAt: ISODateTime.optional(),
-lastConfirmedAt: ISODateTime.optional(),
-```
+**What shipped:**
+- `CoachMemoryFactState` enum (proposed | confirmed | rejected). `state`, `sourceMessageId`, `evidenceExcerpt`, `expiresAt`, `lastConfirmedAt` added to `CoachMemoryFact` (all optional in contract — server decides final state).
+- `upsertMemoryFact`: state is **server-decided**, never trusted from the client. `user_stated` → `confirmed` with `lastConfirmedAt`; everything else → `proposed` with 14-day `expiresAt`. Self-confirmation explicitly blocked: a client sending `state: "confirmed"` on a `coach_inferred` upsert is overridden to `proposed`.
+- New `confirmMemoryFact({ factId })` callable — flips state to confirmed, sets `lastConfirmedAt`, clears `expiresAt`. Idempotent.
+- `loadCoachContext` filters to confirmed-for-prompt (state === "confirmed" OR state === undefined for legacy backward compat). Returns new `pendingProposalCount` separately.
+- Bundle gains `pendingProposalCount: number` field; prompt's userMessage tags it as `<pending_proposal_count>N</pending_proposal_count>` and the system data-boundary block adds a rule: "do not act on them, but you may mention there are items waiting for the user to review."
 
-**Server logic:**
-- `upsertMemoryFact`: if `source === "user_stated"`, default state to `confirmed`. Otherwise default to `proposed` with `expiresAt = createdAt + 14d`.
-- New `confirmMemoryFact({ factId })` callable that flips `state` to `confirmed` and sets `lastConfirmedAt`.
-- `loadCoachContext`: filter to `state === "confirmed"`. Surface a `pendingProposalCount` field in the bundle.
-- New scheduled function `decayProposedMemory` (runs daily) that deletes proposed facts past `expiresAt`.
+**Test coverage (+2):**
+- `bundle_surfaces_pendingProposalCount_and_filters_proposed_facts` — bundle has the count, prompt has the tag, system has the rule
+- `bundle_defaults_pendingProposalCount_to_zero_for_legacy_contexts` — legacy callers without the new field don't break
 
-**Test:** Insert coach-inferred fact, assert state=proposed and not in bundle. Confirm via callable, assert state=confirmed and now in bundle. Insert with expiresAt in past, run decay, assert deleted.
+**Verified:** 65/65 full security suite.
 
-**Rollback:** Set default state to `confirmed`; loadContext filter becomes a passthrough.
+**Deferred to follow-up:**
+- `decayProposedMemory` scheduled function. Needs a Firestore composite index on the `memoryFacts` collection group (state + expiresAt) and the firebase-functions/scheduler import. Not urgent — the 14-day `expiresAt` field is already being set, ready to be enforced once decay lands.
+- Emulator-level callable tests for `upsertMemoryFact` + `confirmMemoryFact`. Defer until a callable-test harness exists.
+- iOS UI surface for reviewing proposed facts (audit explicitly listed this as separate task; tracked under Phase 3 client work).
 
 ### Task 2.4 — HealthKit ingestion at event-sample granularity (no task created yet; create when starting Phase 2)
 
