@@ -257,50 +257,36 @@ Goal: replace the implicit user-data layout with one access-policy module that d
 
 Estimated effort: 3 to 5 days.
 
-### Task 2.1 — Build `userScopedSchema.ts` and compile rules from it (Task #11)
+### Task 2.1 — `userScopedSchema.ts` SSOT (Task #11) ✅ SHIPPED 2026-06-02 (commit 224d4dc)
 
-**New file:** `functions/src/access/userScopedSchema.ts`.
+**Files shipped:** `functions/src/access/userScopedSchema.ts` (new), drift test at `functions/test/security/rules/userScopedSchemaDrift.test.ts` (new).
 
-```ts
-export type WriteTier =
-  | { tier: "client_owner"; ruleShape: RuleShape; runtimeSchema: ZodSchema }
-  | { tier: "server_only"; runtimeSchema: ZodSchema }
-  | { tier: "owner_decision"; allowedKeys: string[] };
+**What shipped:**
+- `USER_SCOPED` typed table covers every collection under `users/{uid}/...` — 14 entries. Each declares `pathPattern`, `read` tier (`owner` | `signed_in`), `write` tier (`server_only` | `client_owner` with Zod runtimeSchema | `owner_decision` with allowedKeys), and `contextRole` (`primary` for coach-context-feeding | `internal`).
+- References existing Zod schemas in `contracts/coach-agent.ts` (no duplication).
+- `clientOwnerWriteKeys(key)` derives the allowed-key list from the Zod schema's `.shape`. Adding a field in contracts/ propagates here automatically.
+- `listClientWritableCollections()` filters the table to just client_owner entries.
 
-export const USER_SCOPED = {
-  profile: {
-    path: "users/{uid}/profile/current",
-    read: "owner",
-    write: { tier: "client_owner", ruleShape: profileRuleShape, runtimeSchema: UserHealthProfile },
-    contextRole: "primary",
-  },
-  workoutLogs: {
-    path: "users/{uid}/workoutLogs/{logId}",
-    read: "owner",
-    write: { tier: "client_owner", ruleShape: workoutLogRuleShape, runtimeSchema: WorkoutLog },
-    contextRole: "primary",
-  },
-  // ... etc
-} as const;
-```
+**Out of scope (intentional):**
+- Full TypeScript → `firestore.rules` code generation (`compileRules.ts` from the original spec). Multi-day infrastructure. The drift test catches divergence cheaply without the compiler.
+- Replacing `src/firestore/userScopedCollections.ts` (the older flat string list used by existing security tests). It coexists for now; can be derived from `USER_SCOPED` in a follow-up.
 
-**New file:** `functions/scripts/compileRules.ts` that emits `firestore.rules` from `USER_SCOPED`. Existing `firestore.rules` becomes generated; a CI check fails if it's out of sync.
+### Task 2.2 — Rule-level field allowlists (Task #11 continued) ✅ SHIPPED 2026-06-02 (commit 224d4dc)
 
-**Replace:** `functions/src/firestore/userScopedCollections.ts` becomes a one-liner that derives from `USER_SCOPED`. Existing security tests should pass unchanged because the surface stays the same.
+**Files modified:** `firestore.rules`, plus the drift + behavior tests in `userScopedSchemaDrift.test.ts`.
 
-**Test:** Existing security suite. Add a test that the compiled rules match what's checked in.
+**What shipped:**
+- For 5 client-writable collections (`workoutLogs`, `workoutPlans`, `dailyChecks`, `metricSnapshots`, `consentRecords`), the previous `allow read, write: if owns(userId)` is replaced with a `request.resource.data.keys().hasOnly([…])` allowlist plus a `request.resource.data.userId == userId` payload check. Together these close the path-vs-payload identity gap — you can no longer write a doc into your own subtree that claims to belong to another user.
+- `profile/current` and `memoryFacts` were already `allow write: if false` (server-only) and stay that way; spec called them client-writable but the deployed rules disagree, and the server-only stance is the safer one.
+- No field-level type checks in rules. Zod parsing in callable handlers does that; rule-level allowlists are the cheap line of defense against shape pollution.
 
-**Rollback:** Keep hand-written `firestore.rules`; module exists but isn't the source of truth yet.
+**Test coverage (+4):**
+- `userScopedSchema ↔ firestore.rules drift` — parses `firestore.rules` for each `onlyKeys([…])` list, asserts it matches `clientOwnerWriteKeys(key)` from the schema module. Catches divergence either direction.
+- `workoutLog with only allowed keys succeeds` (positive)
+- `workoutLog with an unknown extra field fails` (rejects shape pollution)
+- `workoutLog with a mismatched userId fails` (closes path-vs-payload gap)
 
-### Task 2.2 — Rule-level schema validation for client-writable docs (Task #11 continued)
-
-**Files:** generated `firestore.rules`.
-
-**Change:** For `profile/current`, `workoutLogs`, `workoutPlans`, `dailyChecks`, `metricSnapshots`, `consentRecords` (the actual client-writable set), add `request.resource.data.keys().hasOnly([...])` + per-field type checks generated from `runtimeSchema`. Same Zod schema feeds Firestore rules and callable handlers.
-
-**Test:** Add security tests that direct client writes with extra fields are rejected; writes with wrong types are rejected; valid shapes pass.
-
-**Rollback:** Drop `hasOnly` clauses.
+**Verified:** 69/69 full security suite (was 65, +4 new tests).
 
 ### Task 2.3 — Memory proposal queue (Task #12) ✅ SHIPPED 2026-05-22 (commit c6fc0c5)
 
