@@ -53,16 +53,36 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Phase 2 Task 2.2 — client-owner writes enforce field allowlists
+      // derived from the Zod schemas in functions/src/contracts/coach-agent.ts
+      // via functions/src/access/userScopedSchema.ts. The hasOnly() list
+      // here is verified against the schemas by a drift test
+      // (test/security/rules/userScopedSchemaDrift.test.ts). DO NOT edit
+      // the allowed keys here without also updating the schema or the test
+      // will fail.
+
       match /workoutLogs/{logId} {
-        allow read, write: if owns(userId);
+        allow read: if owns(userId);
+        allow write: if owns(userId)
+          && request.resource.data.userId == userId
+          && onlyKeys([
+            "userId", "sessionId", "date", "source", "exercises",
+            "durationSec", "perceivedEffort", "postSessionNotes", "createdAt"
+          ]);
       }
 
       match /workoutPlans/{planId} {
-        allow read, write: if owns(userId);
+        allow read: if owns(userId);
+        allow write: if owns(userId)
+          && request.resource.data.userId == userId
+          && onlyKeys(["userId", "planId", "source", "days", "updatedAt"]);
       }
 
       match /dailyChecks/{date} {
-        allow read, write: if owns(userId);
+        allow read: if owns(userId);
+        allow write: if owns(userId)
+          && request.resource.data.userId == userId
+          && onlyKeys(["userId", "date", "checks", "updatedAt"]);
       }
 
       match /activeWorkout/{docId} {
@@ -76,7 +96,13 @@ service cloud.firestore {
       }
 
       match /metricSnapshots/{snapshotId} {
-        allow read, write: if owns(userId);
+        allow read: if owns(userId);
+        allow write: if owns(userId)
+          && request.resource.data.userId == userId
+          && onlyKeys([
+            "userId", "snapshotId", "capturedAt", "source",
+            "metrics", "interpretationPolicy"
+          ]);
       }
 
       match /coachSessions/{sessionId} {
@@ -103,7 +129,13 @@ service cloud.firestore {
       }
 
       match /consentRecords/{recordId} {
-        allow read, write: if owns(userId);
+        allow read: if owns(userId);
+        allow write: if owns(userId)
+          && request.resource.data.userId == userId
+          && onlyKeys([
+            "userId", "recordId", "category", "purpose", "granted",
+            "grantedAt", "revokedAt", "scope", "policyVersion"
+          ]);
       }
 
       match /usage/{date} {
