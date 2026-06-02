@@ -12,7 +12,7 @@ import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { selectCoachModelProvider } from "./modelProvider.js";
-import { assembleCoachPrompt } from "./prompt.js";
+import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import {
   classifyUserMessage,
   refusalForVerdict,
@@ -21,7 +21,7 @@ import {
 
 type OrchestrateCoachTurnArgs = {
   db: Firestore;
-  coach: Record<string, unknown>;
+  coach: CoachConfig;
   userId: string;
   sessionId: string;
   messageId: string;
@@ -140,7 +140,7 @@ export async function orchestrateCoachTurn({
       retrievedCorpus,
     });
     const { system, userMessage } = assembleCoachPrompt(
-      coach as never,
+      coach,
       contextBundle,
       userContent,
     );

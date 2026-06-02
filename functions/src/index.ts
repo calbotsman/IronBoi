@@ -8,6 +8,7 @@ import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { z } from "zod";
 import { auth, db } from "./firebase.js";
 import { orchestrateCoachTurn } from "./coach/orchestrate.js";
+import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
   CoachInputMode,
@@ -50,7 +51,10 @@ import {
 
 const require = createRequire(import.meta.url);
 
-const coach = require("./coach/ironboi-coach.v0.json");
+// Cast at the JSON boundary — validate-phase0 enforces the JSON conforms
+// to CoachAgentContract at build time, so we trust the shape downstream
+// and carry a real type through. Avoids `as never` later.
+const coach = require("./coach/ironboi-coach.v0.json") as CoachConfig;
 const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const IosCoachMessageRequest = z.object({

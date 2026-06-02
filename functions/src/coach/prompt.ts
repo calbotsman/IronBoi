@@ -1,6 +1,9 @@
 import type { CoachContextBundleV1 } from "./contextBundle.js";
 
-type CoachConfig = {
+// Exported so the orchestrator can carry a real type all the way from the
+// JSON load to the prompt assembler. Without this, callers have to either
+// re-declare the same shape or cast — neither catches schema drift early.
+export type CoachConfig = {
   identity: {
     displayName?: string;
     role: string;
@@ -44,15 +47,12 @@ function bullet(items: string[]) {
 //                     the current user turn inside <current_user_message>.
 //
 // The system role carries trusted policy; the user role carries user data
-// (which both Gemini and Anthropic treat with lower trust). The closing
-// "data boundary" block in the system message names each <tag> in the
-// userMessage and declares its content evidence-not-instruction. This is
-// the structural defense against prompt injection — a hostile string in a
-// memory fact lands in the user role, inside named tags the model has been
-// told to ignore as instruction.
-//
-// Stop reading the old assembleCoachSystemPrompt; it's gone. Any caller
-// that needs the prompt must take both halves.
+// (provider treats user-role content with lower trust than system). The
+// closing "data boundary" block in the system message names each <tag> in
+// the userMessage and declares its content evidence-not-instruction. This
+// is the structural defense against prompt injection — a hostile string
+// in a memory fact lands in the user role, inside named tags the model
+// has been told to ignore as instruction.
 
 export function assembleCoachPrompt(
   coach: CoachConfig,
