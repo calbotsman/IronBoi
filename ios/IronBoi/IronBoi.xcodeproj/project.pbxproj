@@ -15,22 +15,22 @@
 		28C9D2CA7124C268C8AC5E2D /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
 		3CC76B586DFB89D458F96661 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
-		4A9C5F0510B6438F9A1D6B22 /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9C5F0410B6438F9A1D6B22 /* ExerciseSequence.swift */; };
-		4A9C5F0710B6438F9A1D6B22 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4A9C5F0610B6438F9A1D6B22 /* Assets.xcassets */; };
 		61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8251B627C5781604E47176FE /* CoachView.swift */; };
 		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
 		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
 		8075B31225F93AF14C6E1298 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
 		8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE8CC59433E740F466264C6 /* AppModel.swift */; };
 		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
+		B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */; };
+		CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */; };
 		D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */; };
+		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		039EE3F780882104FBD9CC48 /* OnboardingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingModels.swift; sourceTree = "<group>"; };
 		07DECCF4FA552889A83248A3 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
-		4A9C5F0410B6438F9A1D6B22 /* ExerciseSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSequence.swift; sourceTree = "<group>"; };
-		4A9C5F0610B6438F9A1D6B22 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSequence.swift; sourceTree = "<group>"; };
 		5041EB6152324AB118525DA6 /* IronBoiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IronBoiApp.swift; sourceTree = "<group>"; };
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
 		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
@@ -39,9 +39,11 @@
 		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
+		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		F1145525E9C3C34837805B9B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,10 +74,11 @@
 		329346F30DA766EAE94903E2 /* IronBoi */ = {
 			isa = PBXGroup;
 			children = (
+				ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */,
 				8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */,
 				967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */,
-				4A9C5F0610B6438F9A1D6B22 /* Assets.xcassets */,
 				5041EB6152324AB118525DA6 /* IronBoiApp.swift */,
+				FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */,
 				19CFD00FAA0244356AEB5FAB /* Features */,
 				EB7EACBAA54C1AEDD69C4121 /* Models */,
 				71E5E003852F3BCDAB8248E7 /* Services */,
@@ -129,7 +132,7 @@
 			children = (
 				B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */,
 				681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */,
-				4A9C5F0410B6438F9A1D6B22 /* ExerciseSequence.swift */,
+				444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */,
 				039EE3F780882104FBD9CC48 /* OnboardingModels.swift */,
 				07DECCF4FA552889A83248A3 /* WorkoutModels.swift */,
 			);
@@ -208,8 +211,9 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				4A9C5F0710B6438F9A1D6B22 /* Assets.xcassets in Resources */,
+				E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */,
 				243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */,
+				B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -224,7 +228,7 @@
 				7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */,
 				61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */,
 				D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */,
-				4A9C5F0510B6438F9A1D6B22 /* ExerciseSequence.swift in Sources */,
+				CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */,
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
 				8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */,
 				0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */,
@@ -358,13 +362,12 @@
 		};
 		C9801A01B2FA8A3AC57F2502 /* Debug */ = {
 			isa = XCBuildConfiguration;
-				buildSettings = {
-					CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
-					CODE_SIGN_IDENTITY = "iPhone Developer";
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = SGQ2WLB6M9;
-					GENERATE_INFOPLIST_FILE = YES;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = IronBoi;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
@@ -386,13 +389,12 @@
 		};
 		FD926C5E7306A0CA03EE1618 /* Release */ = {
 			isa = XCBuildConfiguration;
-				buildSettings = {
-					CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
-					CODE_SIGN_IDENTITY = "iPhone Developer";
-					CODE_SIGN_STYLE = Automatic;
-					CURRENT_PROJECT_VERSION = 1;
-					DEVELOPMENT_TEAM = SGQ2WLB6M9;
-					GENERATE_INFOPLIST_FILE = YES;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = IronBoi;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
