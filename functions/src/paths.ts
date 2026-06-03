@@ -62,6 +62,21 @@ export function coachSessionMessagePath(
   return `${coachSessionPath(userId, sessionId)}/messages/${messageId}`;
 }
 
+// Phase 3 Task 3.4 — Audit log for sensitive writes.
+// Server-only collection; one doc per event with a UUID id. Lives under
+// the user's root so it's wiped automatically on account deletion.
+export function auditLogPath(userId: string, eventId: string) {
+  return `${userRoot(userId)}/auditLog/${eventId}`;
+}
+
+// Phase 3 Task 3.1 — Account deletion tombstone.
+// Lives OUTSIDE users/ so it survives the recursive delete of the user's
+// data. Holds the deletion timestamp and who requested it; never holds
+// any of the deleted data itself.
+export function deletedAccountPath(userId: string) {
+  return `deletedAccounts/${userId}`;
+}
+
 // Phase 2 Task 2.4 — HealthKit ingestion.
 // Document ID IS the sampleHash. iOS computes it deterministically from
 // {category, startDate, endDate, sourceBundleId, deviceUUID, value} so

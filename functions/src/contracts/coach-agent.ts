@@ -400,6 +400,41 @@ export const DerivedHealthContext = z.object({
   updatedAt: ISODateTime,
 }).strict();
 
+// Phase 3 Task 3.4 — Audit log for sensitive writes.
+//
+// Records WHAT happened (eventType + actor) and WHEN, never WHAT VALUE. The
+// audit log is for "did the user grant consent on X date" type questions —
+// not for replaying values, which would leak PII into a log surface.
+//
+// payloadHash is a 16-char prefix of sha256(JSON(payload)). Enough to detect
+// "two events refer to the same payload" without exposing the payload itself.
+
+export const AuditEventType = z.enum([
+  "memory_fact_written",
+  "memory_fact_confirmed",
+  "memory_fact_deleted",
+  "consent_granted",
+  "consent_revoked",
+  "health_samples_ingested",
+  "daily_spend_cap_reached",
+  "account_deletion_requested",
+]);
+
+export const AuditActor = z.enum(["user", "coach", "system"]);
+
+export const AuditEvent = z.object({
+  eventId: z.string().min(1),
+  eventType: AuditEventType,
+  actor: AuditActor,
+  timestamp: ISODateTime,
+  payloadHash: z.string().optional(),
+  // Correlates audit events back to the coach turn that produced them.
+  turnId: z.string().optional(),
+  // Lets a multi-step user action (e.g. consent grant + healthkit init)
+  // get grouped under one ID for later review.
+  correlationId: z.string().optional(),
+}).strict();
+
 export const ConsentRecord = z.object({
   userId: z.string().min(1),
   recordId: z.string().min(1),
@@ -581,3 +616,6 @@ export type IngestHealthSampleInput = z.infer<typeof IngestHealthSampleInput>;
 export type IngestHealthSamplesRequest = z.infer<typeof IngestHealthSamplesRequest>;
 export type IngestHealthSamplesResult = z.infer<typeof IngestHealthSamplesResult>;
 export type DerivedHealthContext = z.infer<typeof DerivedHealthContext>;
+export type AuditEventType = z.infer<typeof AuditEventType>;
+export type AuditActor = z.infer<typeof AuditActor>;
+export type AuditEvent = z.infer<typeof AuditEvent>;

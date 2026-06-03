@@ -120,6 +120,13 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Phase 3 Task 3.4 — audit log. Owner can read their own history
+      // (FTC HBNR / CCPA transparency). Server-only writes.
+      match /auditLog/{eventId} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
       match /coachSessions/{sessionId} {
         allow read: if owns(userId);
         allow write: if false;
@@ -157,6 +164,15 @@ service cloud.firestore {
         allow read: if owns(userId);
         allow write: if false;
       }
+    }
+
+    // Phase 3 Task 3.1 — Account deletion tombstone. Server-only — the
+    // tombstone is the audit trail of "this user's data was deleted on
+    // X date." Users don't read it directly (sessions are revoked at
+    // deletion); if we ever need to expose deletion status, add a
+    // callable instead.
+    match /deletedAccounts/{userId} {
+      allow read, write: if false;
     }
 
     match /corpus/{entryId} {

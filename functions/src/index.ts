@@ -22,10 +22,16 @@ import {
 } from "./contracts/coach-agent.js";
 import { ingestHealthSamples as ingestHealthKitSamples } from "./health/ingest.js";
 import {
+  recordAuditEvent,
+  recordAuditEventBestEffort,
+} from "./audit/log.js";
+import { getAuth } from "firebase-admin/auth";
+import {
   coachSessionMessagePath,
   coachSessionPath,
   consentRecordPath,
   dailyCheckPath,
+  deletedAccountPath,
   memoryFactPath,
   profilePath,
   userRoot,
@@ -277,6 +283,49 @@ async function deleteCollectionTree(collection: CollectionReference) {
   }
 }
 
+// Phase 3 Task 3.1 — Account deletion.
+//
+// User-initiated wipe. Writes a tombstone at deletedAccounts/{uid} BEFORE
+// the destructive ops (so the audit trail survives the deletion of the
+// user's data), then recursively deletes users/{uid}/**, then revokes all
+// refresh tokens so any signed-in clients can't keep using the session.
+//
+// Required by Apple App Store guideline 5.1.1(v) and CCPA/GDPR Article 17.
+export const deleteAccount = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+
+    // Tombstone first — this is the audit-of-record for deletion and must
+    // outlive the user's data. Use a separate path collection outside
+    // users/ so it survives the recursive delete below.
+    const now = new Date().toISOString();
+    await db.doc(deletedAccountPath(userId)).set({
+      userId,
+      deletedAt: now,
+      requestedBy: "user",
+    });
+
+    // Then the audit log inside the user tree (this entry will be wiped
+    // along with everything else, but it's worth writing so any external
+    // pipeline watching audit events gets a deletion signal too).
+    await recordAuditEventBestEffort(db, {
+      userId,
+      eventType: "account_deletion_requested",
+      actor: "user",
+    });
+
+    // Recursive delete of all user-scoped data.
+    await deleteDocumentTree(db.doc(userRoot(userId)));
+
+    // Finally, revoke refresh tokens so any active client sessions
+    // can't continue making authenticated calls.
+    await getAuth().revokeRefreshTokens(userId);
+
+    return { ok: true, userId, deletedAt: now };
+  },
+);
+
 export const getCoachBootstrap = onCall({ region: "us-central1" }, async (request) => {
   requireUserId(request.auth);
   return {
@@ -369,6 +418,19 @@ export const recordConsent = onCall({ region: "us-central1" }, async (request) =
   await db.doc(consentRecordPath(userId, parsed.recordId)).set({
     ...parsed,
     serverRecordedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Phase 3.4 — audit log. Best-effort: a failed audit must not block the
+  // consent write that just succeeded.
+  await recordAuditEventBestEffort(db, {
+    userId,
+    eventType: parsed.granted ? "consent_granted" : "consent_revoked",
+    actor: "user",
+    payload: {
+      recordId: parsed.recordId,
+      category: parsed.category,
+      granted: parsed.granted,
+    },
   });
 
   return { ok: true, recordId: parsed.recordId };
@@ -550,6 +612,21 @@ export const upsertMemoryFact = onCall({ region: "us-central1" }, async (request
     merge: true,
   });
 
+  // Phase 3.4 — audit log. Actor is "user" for user_stated upserts, "coach"
+  // for everything else (coach_inferred, log_derived, healthkit_derived).
+  // We hash {factId, category, source, state} — never the content.
+  await recordAuditEventBestEffort(db, {
+    userId,
+    eventType: "memory_fact_written",
+    actor: parsed.source === "user_stated" ? "user" : "coach",
+    payload: {
+      factId: parsed.factId,
+      category: parsed.category,
+      source: parsed.source,
+      state: decidedState,
+    },
+  });
+
   return { ok: true, factId: parsed.factId, state: decidedState };
 });
 
@@ -573,6 +650,13 @@ export const confirmMemoryFact = onCall(
       { merge: true },
     );
 
+    await recordAuditEventBestEffort(db, {
+      userId,
+      eventType: "memory_fact_confirmed",
+      actor: "user",
+      payload: { factId: parsed.factId },
+    });
+
     return { ok: true, factId: parsed.factId };
   },
 );
@@ -588,6 +672,13 @@ export const deleteMemoryFact = onCall({ region: "us-central1" }, async (request
     },
     { merge: true },
   );
+
+  await recordAuditEventBestEffort(db, {
+    userId,
+    eventType: "memory_fact_deleted",
+    actor: "user",
+    payload: { factId: parsed.factId },
+  });
 
   return { ok: true, factId: parsed.factId };
 });
@@ -605,6 +696,19 @@ export const ingestHealthSamples = onCall(
     const result = await ingestHealthKitSamples(db, userId, {
       samples: parsed.samples,
     });
+
+    // Phase 3.4 — audit log per batch (not per sample). Counts only.
+    await recordAuditEventBestEffort(db, {
+      userId,
+      eventType: "health_samples_ingested",
+      actor: "user",
+      payload: {
+        inserted: result.inserted,
+        duplicates: result.duplicates,
+        rejectedCount: result.rejectedNoConsent.length,
+      },
+    });
+
     return { ok: true, ...result };
   },
 );
@@ -623,6 +727,13 @@ export const revokeConsent = onCall({ region: "us-central1" }, async (request) =
     },
     { merge: true },
   );
+
+  await recordAuditEventBestEffort(db, {
+    userId,
+    eventType: "consent_revoked",
+    actor: "user",
+    payload: { recordId: parsed.recordId },
+  });
 
   return { ok: true, recordId: parsed.recordId };
 });

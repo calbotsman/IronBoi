@@ -1,6 +1,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { safeLogger } from "../logging/safeLogger.js";
+import { recordAuditEventBestEffort } from "../audit/log.js";
 import { coachSessionMessagePath } from "../paths.js";
 import {
   checkDailyUsageCap,
@@ -125,6 +126,15 @@ export async function orchestrateCoachTurn({
         messageId,
         turnId,
         outcome: usageCap.reason,
+      });
+      // Phase 3.4 — audit log. System-initiated, correlated to the coach
+      // turn that hit the cap.
+      await recordAuditEventBestEffort(db, {
+        userId,
+        eventType: "daily_spend_cap_reached",
+        actor: "system",
+        turnId,
+        payload: { reason: usageCap.reason, dateKey: usageCap.dateKey },
       });
       return;
     }

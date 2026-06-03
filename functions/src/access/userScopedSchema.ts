@@ -127,6 +127,15 @@ export const USER_SCOPED = {
     write: { kind: "server_only" },
     contextRole: "primary",
   },
+  // Phase 3 Task 3.4 — audit log. Owner reads, server writes only.
+  // Records sensitive events (memory writes, consent changes, health
+  // ingestion, spend cap hits) for FTC HBNR / CCPA transparency.
+  auditLog: {
+    pathPattern: "users/{uid}/auditLog/{eventId}",
+    read: "owner",
+    write: { kind: "server_only" },
+    contextRole: "internal",
+  },
   consentRecords: {
     pathPattern: "users/{uid}/consentRecords/{recordId}",
     read: "owner",
