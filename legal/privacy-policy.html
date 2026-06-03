@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MYO Privacy Policy</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --ink: #1a1a1f;
+    --muted: #5a5a64;
+    --rule: #e6e0d2;
+    --accent: #c3503c;
+    --code-bg: #ede7d8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14141a;
+      --ink: #efeee8;
+      --muted: #9d9d96;
+      --rule: #26262e;
+      --accent: #e07a64;
+      --code-bg: #1f1f27;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  h1 {
+    font-size: 2rem;
+    line-height: 1.15;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 1.25rem;
+    margin: 2.5rem 0 0.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+    letter-spacing: -0.005em;
+  }
+  h2:first-of-type { border-top: 0; padding-top: 0; }
+  h3 { font-size: 1rem; margin: 1.5rem 0 0.5rem; }
+  p, ul, ol { margin: 0 0 1rem; }
+  ul, ol { padding-left: 1.25rem; }
+  li { margin-bottom: 0.25rem; }
+  .meta {
+    color: var(--muted);
+    font-size: 0.875rem;
+    margin-bottom: 2rem;
+  }
+  .meta strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  code, kbd {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.95rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th { font-weight: 600; color: var(--muted); }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 2rem 0; }
+  .tldr {
+    background: var(--code-bg);
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    border-radius: 4px;
+    margin: 1.5rem 0 2rem;
+  }
+  .tldr ul { margin: 0; }
+  footer {
+    color: var(--muted);
+    font-size: 0.875rem;
+    margin-top: 4rem;
+    border-top: 1px solid var(--rule);
+    padding-top: 1rem;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>MYO Privacy Policy</h1>
+<p class="meta"><strong>Effective date:</strong> 2026-06-02 &nbsp;·&nbsp; <strong>Last updated:</strong> 2026-06-02</p>
+
+<p>This is the privacy policy for <strong>MYO</strong> ("MYO," "we," "us"), an AI fitness coaching app for iOS published under the App Store name "IronBoi" by The Combination Rule (bundle identifier <code>com.thecombinationrule.ironboi</code>).</p>
+
+<p>If you have questions about this policy or your data, contact us at <a href="mailto:support@thecombinationrule.com">support@thecombinationrule.com</a>.</p>
+
+<h2>1. The short version</h2>
+<div class="tldr">
+<ul>
+  <li>We collect only the data we need to coach you. No advertising, no data brokers, no cross-app tracking.</li>
+  <li>Your data lives in your own private corner of Google Firebase. Other users cannot read it.</li>
+  <li>You can delete your account and all your data from the app at any time: <strong>Account menu → Delete Account…</strong>.</li>
+  <li>We do not sell your data to anyone.</li>
+  <li>We will tell you within 60 days if a security incident affects your data (FTC Health Breach Notification Rule).</li>
+</ul>
+</div>
+<p>The rest of this document spells out the details.</p>
+
+<h2>2. What we collect</h2>
+<table>
+  <tr><th>Category</th><th>Source</th><th>Why</th></tr>
+  <tr><td><strong>Email address and name</strong></td><td>Apple Sign In (only if you share them)</td><td>Identify your account so the coach is talking to <em>you</em> and only you</td></tr>
+  <tr><td><strong>User ID</strong> (Firebase Auth UID)</td><td>Apple Sign In</td><td>Tie all your data together server-side</td></tr>
+  <tr><td><strong>Workouts and daily checks</strong></td><td>You enter them in the app</td><td>Show your history, let the coach see what you've actually done</td></tr>
+  <tr><td><strong>Coach conversation history</strong></td><td>You chat with the coach</td><td>Let the coach maintain context across sessions</td></tr>
+  <tr><td><strong>Memory facts</strong> (e.g., "prefers morning sessions")</td><td>Either you tell the coach, or the coach infers them from a chat</td><td>Personalize advice. Inferred facts are marked "proposed" and don't influence advice until you confirm them. They auto-expire after 14 days if unconfirmed.</td></tr>
+  <tr><td><strong>Voice audio</strong></td><td>You hold the mic button to dictate to the coach</td><td>Convert speech to text using Apple's on-device speech recognition. <strong>The audio itself is not sent to our servers</strong> — only the transcribed text.</td></tr>
+  <tr><td><strong>Usage counters</strong></td><td>App activity (number of messages, token counts per day)</td><td>Enforce per-user daily caps so one account can't run up an enormous bill or be abused.</td></tr>
+  <tr><td><strong>Audit log</strong></td><td>Server-side, every consent change, memory write, health-ingest, and spend-cap hit</td><td>Internal records of what changed and when. The actual content of what changed is never logged — only a one-way hash.</td></tr>
+</table>
+
+<p>We do NOT currently collect:</p>
+<ul>
+  <li><strong>HealthKit data</strong> — the iOS app has no HealthKit integration yet. When we add it (planned), we will ask for explicit permission per data type (steps, heart rate, sleep, body weight, HRV, workouts) before reading anything.</li>
+  <li><strong>Location</strong> — we don't ask for it and don't use it.</li>
+  <li><strong>Contacts, photos, or anything else outside our own app's data</strong>.</li>
+</ul>
+
+<h2>3. How we use your data</h2>
+<ul>
+  <li><strong>To run the coaching feature.</strong> Every chat turn sends what you wrote plus your profile, recent workouts, and confirmed memory facts to a third-party large language model (currently Google Gemini) so it can produce a reply. Google does not retain that content for training their models when accessed via the Vertex AI API.</li>
+  <li><strong>To save your progress.</strong> Workouts, daily checks, and your custom plan are stored so you can see them across devices and sessions.</li>
+  <li><strong>To enforce safety limits.</strong> A per-user daily message and token cap prevents abuse. Hitting the cap is recorded in your audit log.</li>
+  <li><strong>To respond if something goes wrong.</strong> Errors are logged with your account ID so we can debug; no chat content or personal data appears in error logs.</li>
+</ul>
+<p>We do <strong>not</strong> use your data:</p>
+<ul>
+  <li>to train AI models</li>
+  <li>to sell to advertisers, data brokers, or affiliates</li>
+  <li>to profile you for cross-app tracking</li>
+  <li>to target you with ads</li>
+</ul>
+
+<h2>4. Where your data lives</h2>
+<p>Backend infrastructure is <strong>Google Firebase</strong> (Firestore database, Cloud Functions, Firebase Auth, Firebase App Check). Servers are in the <strong>us-central1</strong> region in the United States.</p>
+<p>If you are outside the United States, your data will be transferred to and processed in the U.S. We rely on Standard Contractual Clauses (SCCs) and Google's terms of service to cover those transfers.</p>
+
+<h2>5. How long we keep it</h2>
+<table>
+  <tr><th>Category</th><th>Retention</th></tr>
+  <tr><td>Account, workouts, daily checks, coach history, confirmed memory</td><td>Until you delete your account, or stop using the app for 18 months (we'll email you before deletion).</td></tr>
+  <tr><td><strong>Proposed memory facts</strong> (coach-inferred, not yet confirmed)</td><td>14 days from creation, then auto-deleted.</td></tr>
+  <tr><td>Audit log entries</td><td>As long as the rest of your account; deleted with it.</td></tr>
+  <tr><td>Crash and error logs</td><td>90 days.</td></tr>
+  <tr><td>Deletion tombstone (<code>{ userId, deletedAt, requestedBy }</code>)</td><td>7 years, for our records that a deletion request was processed. Never includes the deleted content itself.</td></tr>
+</table>
+
+<h2>6. How to delete your data</h2>
+<p>Two paths:</p>
+<ol>
+  <li><strong>In-app.</strong> Open the app → Coach tab → tap the account icon (top-right) → <strong>Delete Account…</strong> → confirm twice. We immediately:
+    <ul>
+      <li>Wipe everything under <code>users/{your_uid}/</code> (profile, memory, workouts, daily checks, coach history, audit log)</li>
+      <li>Revoke all your sign-in sessions so any other devices can't keep using your account</li>
+      <li>Write a tombstone at <code>deletedAccounts/{your_uid}</code> with the deletion timestamp</li>
+    </ul>
+  </li>
+  <li><strong>Email.</strong> Send a deletion request from the email address associated with your account to <a href="mailto:support@thecombinationrule.com">support@thecombinationrule.com</a>. We will process it within 30 days.</li>
+</ol>
+<p>Deletion is permanent. We cannot recover the data once it's gone.</p>
+
+<h2>7. Your rights</h2>
+<p>Depending on where you live, you may have additional rights:</p>
+<ul>
+  <li><strong>Right to access.</strong> Request a copy of the data we hold about you. Email us.</li>
+  <li><strong>Right to correct.</strong> Most fields are editable in-app (profile, workouts). For coach memory, you can confirm or delete proposed facts.</li>
+  <li><strong>Right to delete.</strong> Via in-app <strong>Delete Account</strong> or by emailing us.</li>
+  <li><strong>Right to portability.</strong> Email us; we can export your data as JSON.</li>
+  <li><strong>California (CCPA/CPRA).</strong> Same rights as above, plus the right to know what categories of data we collect, the right to opt out of any sale (we don't sell), and the right not to be discriminated against for exercising your rights.</li>
+  <li><strong>EEA/UK (GDPR).</strong> Same rights, plus right to lodge a complaint with your local supervisory authority. Lawful basis for our processing is "performance of a contract" (you asked us to coach you) and "legitimate interests" (security and abuse prevention, balanced against your privacy).</li>
+</ul>
+
+<h2>8. Children</h2>
+<p>MYO is intended for users aged <strong>18 and older</strong>. We do not knowingly collect data from anyone under 13 (under 16 in the EEA). If we learn that we have collected data from a child below that age, we will delete it. Contact us if you believe this has happened.</p>
+
+<h2>9. Security</h2>
+<ul>
+  <li>All data is encrypted in transit (TLS) and at rest (Firebase default encryption).</li>
+  <li>Apple App Attest + Firebase App Check verify that only legitimate MYO app builds running on real Apple devices can talk to our backend.</li>
+  <li>Per-user write-rule allowlists prevent one user's malicious client from writing into another user's data.</li>
+  <li>Coach replies are filtered through pre- and post-flight safety classifiers before reaching you.</li>
+  <li>We do not encrypt your data with a key only you hold. If a court orders us to disclose your data, we are technically able to do so.</li>
+</ul>
+<p>Despite these measures, no system is perfect.</p>
+
+<h2>10. Breach notification (FTC HBNR)</h2>
+<p>MYO is a "vendor of personal health records" under the FTC's Health Breach Notification Rule. If we discover a breach of security affecting unsecured user-identifiable health information (e.g., your workouts, daily checks, voice transcripts containing health detail, future HealthKit data), we will:</p>
+<ol>
+  <li>Notify affected users within <strong>60 days</strong> of discovery, by email and an in-app notice.</li>
+  <li>If more than 500 users are affected, notify the FTC within 60 days and post a notice on our website.</li>
+  <li>Include in the notice: what happened, what information was involved, what we are doing about it, what you can do to protect yourself, and how to contact us.</li>
+</ol>
+
+<h2>11. Third parties we share data with</h2>
+<p>We share data only with the service providers that operate our backend:</p>
+<ul>
+  <li><strong>Google LLC</strong> (Firebase / Google Cloud) — hosts our database, authentication, and serverless functions. Google's privacy policy: <a href="https://policies.google.com/privacy">https://policies.google.com/privacy</a></li>
+  <li><strong>Apple Inc.</strong> — when you Sign In with Apple, Apple gives us a user identifier and (if you share) your name and a relay email. Apple's policy: <a href="https://www.apple.com/legal/privacy/">https://www.apple.com/legal/privacy/</a></li>
+</ul>
+<p>We have no other third-party data processors. We do not share data with advertisers, data brokers, or affiliated entities.</p>
+
+<h2>12. Changes to this policy</h2>
+<p>When we materially change this policy, we will:</p>
+<ol>
+  <li>Update the <strong>Effective date</strong> at the top.</li>
+  <li>Post a notice in the app the next time you open it.</li>
+  <li>For changes that expand what we collect or how we share it, get your explicit consent before applying the new terms to existing accounts.</li>
+</ol>
+<p>Minor wording changes (clarifications, typos, structural cleanup) we will silently update.</p>
+
+<h2>13. Contact</h2>
+<p><strong>The Combination Rule</strong><br>
+<a href="mailto:support@thecombinationrule.com">support@thecombinationrule.com</a></p>
+<p>For privacy-specific requests (access, deletion, portability), put "Privacy request" in the subject line and we will respond within 30 days.</p>
+
+<footer>
+This page is self-contained — no external scripts, no trackers, no fonts loaded from the network. Drop it anywhere that serves HTML.
+</footer>
+
+</main>
+</body>
+</html>
