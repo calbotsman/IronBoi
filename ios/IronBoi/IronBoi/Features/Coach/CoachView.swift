@@ -4,6 +4,8 @@ struct CoachView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var voiceInput = VoiceInputEngine()
     @State private var draft = ""
+    @State private var showDeleteAccountConfirm = false
+    @State private var showDeleteAccountFinalConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -19,11 +21,45 @@ struct CoachView: View {
             .navigationTitle("Coach")
             .toolbar {
                 if appModel.user != nil {
-                    Button("Sign Out") {
-                        appModel.signOut()
+                    Menu {
+                        Button {
+                            appModel.signOut()
+                        } label: {
+                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+
+                        Divider()
+
+                        Button(role: .destructive) {
+                            showDeleteAccountConfirm = true
+                        } label: {
+                            Label("Delete Account…", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                            .accessibilityLabel("Account")
                     }
-                    .font(.caption.weight(.semibold))
                 }
+            }
+            // Phase 3 Task 3.1 — two-step confirmation for account deletion.
+            // Apple's guideline 5.1.1(v) requires deletion to be
+            // discoverable; we keep the two-step pattern so accidental
+            // taps don't wipe data.
+            .alert("Delete account?", isPresented: $showDeleteAccountConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Continue", role: .destructive) {
+                    showDeleteAccountFinalConfirm = true
+                }
+            } message: {
+                Text("This will permanently delete your MYO account, all your workouts, daily checks, coach history, and memory facts the coach has saved about you. This cannot be undone.")
+            }
+            .alert("Are you sure?", isPresented: $showDeleteAccountFinalConfirm) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete forever", role: .destructive) {
+                    Task { await appModel.deleteAccount() }
+                }
+            } message: {
+                Text("Last chance. Tapping \"Delete forever\" signs you out and wipes everything within the next few minutes.")
             }
             .alert("MYO", isPresented: Binding(
                 get: { appModel.errorMessage != nil || voiceInput.errorMessage != nil },

@@ -2,6 +2,7 @@ import AuthenticationServices
 import CryptoKit
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseFunctions
 import Foundation
 import SwiftUI
 
@@ -119,6 +120,37 @@ final class AppModel: NSObject, ObservableObject {
     func signOut() {
         do {
             try Auth.auth().signOut()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // Phase 3 Task 3.1 — Account deletion.
+    //
+    // Calls the backend's `deleteAccount` onCall via the Firebase
+    // Functions SDK. The SDK automatically attaches the App Check token
+    // (Phase 3.2) and the Firebase Auth ID token. The backend tombstones
+    // the account at deletedAccounts/{uid}, recursively wipes
+    // users/{uid}/**, then revokes refresh tokens so any other
+    // signed-in sessions can't keep making calls.
+    //
+    // After backend success we signOut locally — that triggers the auth
+    // state listener which clears all subscriptions + cached state.
+    //
+    // Required by Apple App Store guideline 5.1.1(v).
+    func deleteAccount() async {
+        guard !isOnboardingBusy else { return }
+        isOnboardingBusy = true
+        defer { isOnboardingBusy = false }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let callable = functions.httpsCallable("deleteAccount")
+            _ = try await callable.call([:] as [String: Any])
+            // Server wipe succeeded — locally drop the session. The auth
+            // state listener attached in start() will fire user=nil and
+            // tear down listeners + clear cached state.
+            try? Auth.auth().signOut()
         } catch {
             errorMessage = error.localizedDescription
         }
