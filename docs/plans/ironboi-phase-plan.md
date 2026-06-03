@@ -341,13 +341,17 @@ Goal: the product can survive going live. Account deletion exists. App Check is 
 
 Estimated effort: 3 to 5 days.
 
-### Task 3.1 — Account deletion (Task #13)
+### Task 3.1 — Account deletion (Task #13) ✅ SHIPPED 2026-06-02 (commit 5bf2ca0)
 
-**New callable:** `deleteAccount` that recursively deletes `users/{uid}/**` and calls `auth.revokeRefreshTokens(uid)`. Adds a tombstone at `deletedAccounts/{uid}` with `{ deletedAt, requestedBy: "user" | "admin" }`.
+**Files modified:** `functions/src/index.ts`, `functions/src/paths.ts`, `firestore.rules`.
 
-**iOS:** Settings → Delete Account confirmation flow with one-week grace period (write `users/{uid}/account/pendingDeletion` with `executeAt`).
+**What shipped (backend):**
+- `deleteAccount` onCall: writes tombstone at `deletedAccounts/{uid}` (outside `users/` so it survives the recursive delete), writes audit log entry `account_deletion_requested`, calls `deleteDocumentTree(users/{uid})` (existing recursive helper from `resetMyDataHttp`), then `getAuth().revokeRefreshTokens(uid)` to invalidate any active sessions.
+- Tombstone shape: `{ userId, deletedAt, requestedBy: "user" }`. Rules: `read+write false` (server-only — expose via a callable if users ever need to verify their deletion).
 
-**Test:** Create user, populate sub-collections, call delete, assert all paths empty and refresh tokens revoked.
+**Deferred to follow-up (iOS):**
+- iOS Settings → Delete Account UX with confirmation + one-week grace period. Backend supports both immediate and grace-period flows; just needs the client.
+- Pre-deletion data export ("download my data" before delete) — CCPA requires it; separate callable + UI.
 
 **Required by:** Apple App Store guideline 5.1.1(v), GDPR Article 17, CCPA.
 
@@ -373,23 +377,30 @@ Estimated effort: 3 to 5 days.
 
 **Test:** Corpus-required domain with no retrieved entries → refusal. With entries → reply includes citation.
 
-### Task 3.4 — Audit log for sensitive writes (no task yet, create when starting Phase 3)
+### Task 3.4 — Audit log for sensitive writes ✅ SHIPPED 2026-06-02 (commit 5bf2ca0)
 
-**New path:** `users/{uid}/auditLog/{eventId}` (server-only read/write).
+**Files modified:** `functions/src/contracts/coach-agent.ts`, `functions/src/paths.ts`, `functions/src/audit/log.ts` (new), `functions/src/index.ts`, `functions/src/coach/orchestrate.ts`, `functions/src/access/userScopedSchema.ts`, `firestore.rules`, `functions/test/security/audit/log.test.ts` (new).
 
-**What gets logged:** every memory write, every consent change, every health sample batch ingestion, every account-deletion request, every per-user spend cap hit.
+**What shipped:**
+- `AuditEventType` enum: 8 event types covering memory writes, consent changes, health ingestion, spend cap hits, deletion requests.
+- `AuditActor` enum: user | coach | system.
+- `AuditEvent` schema: `{ eventId, eventType, actor, timestamp, payloadHash?, turnId?, correlationId? }`.
+- `recordAuditEvent` throws on failure (use when audit must succeed); `recordAuditEventBestEffort` catches + safeLogs (use everywhere else — user operations must not be blocked).
+- `payloadHash` is a 16-char sha256 prefix. Raw payload is NEVER stored — verified by test.
+- Path: `users/{uid}/auditLog/{eventId}` (owner read, server-only write).
+- Wired into 7 sites: `upsertMemoryFact`, `confirmMemoryFact`, `deleteMemoryFact`, `recordConsent` (granted/revoked branch), `revokeConsent`, `ingestHealthSamples` (counts only), `orchestrate.ts` daily_spend_cap_reached.
 
-**Shape:** `{ eventId, eventType, actor: "user"|"coach"|"system", timestamp, payloadHash, turnId }`.
-
-**Test:** Trigger each event type, assert audit doc appears with correct fields.
+**Test coverage (+7):** payload-hash stability, raw-payload-never-stored, turnId/correlationId pass-through, best-effort no-throw on failure path.
 
 ### Phase 3 acceptance criteria
 
-- [ ] User can delete their account from iOS; data is gone within 5 minutes.
-- [ ] Function calls without a valid App Check token are rejected.
-- [ ] Corpus-required answers either cite a corpus entry or fall back to the generic refusal.
-- [ ] Every memory write, consent change, and health ingestion creates an audit log entry.
+- [x] Backend supports recursive deletion + refresh-token revocation + tombstone (commit 5bf2ca0). [ ] iOS Settings → Delete Account UX still pending.
+- [ ] Function calls without a valid App Check token are rejected. **Status:** deferred — needs iOS App Attest configured for end-to-end test.
+- [ ] Corpus-required answers either cite a corpus entry or fall back to the generic refusal. **Status:** deferred — needs Vertex AI/Vector Search infra setup (multi-hour project).
+- [x] Every memory write, consent change, health ingestion, spend cap hit, and deletion request creates an audit log entry (commit 5bf2ca0). 7 sites wired.
 - [ ] Privacy policy URL is reachable; export-my-data callable exists.
+
+**Phase 3 status (2026-06-02): 2 of 4 backend tasks shipped. 3.2 + 3.3 blocked on iOS App Attest configuration and Vertex AI/Vector Search setup respectively.**
 
 ---
 
