@@ -15,10 +15,12 @@ import {
   CoachMessage,
   ConsentRecord,
   DailyCheck,
+  IngestHealthSamplesRequest,
   UserHealthProfile,
   WorkoutLog,
   WorkoutPlan,
 } from "./contracts/coach-agent.js";
+import { ingestHealthSamples as ingestHealthKitSamples } from "./health/ingest.js";
 import {
   coachSessionMessagePath,
   coachSessionPath,
@@ -589,6 +591,23 @@ export const deleteMemoryFact = onCall({ region: "us-central1" }, async (request
 
   return { ok: true, factId: parsed.factId };
 });
+
+// Phase 2 Task 2.4 — HealthKit sample ingestion.
+// iOS posts samples in batches (max 500); server gates on per-category
+// consent, dedupes via sampleHash as the doc ID, batch-writes the new ones.
+// Returns { inserted, duplicates, rejectedNoConsent: [hash,...] } so the
+// client can surface state without re-reading.
+export const ingestHealthSamples = onCall(
+  { region: "us-central1" },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    const parsed = IngestHealthSamplesRequest.parse(request.data);
+    const result = await ingestHealthKitSamples(db, userId, {
+      samples: parsed.samples,
+    });
+    return { ok: true, ...result };
+  },
+);
 
 export const revokeConsent = onCall({ region: "us-central1" }, async (request) => {
   const userId = requireUserId(request.auth);

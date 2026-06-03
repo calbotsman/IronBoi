@@ -61,3 +61,17 @@ export function coachSessionMessagePath(
 ) {
   return `${coachSessionPath(userId, sessionId)}/messages/${messageId}`;
 }
+
+// Phase 2 Task 2.4 — HealthKit ingestion.
+// Document ID IS the sampleHash. iOS computes it deterministically from
+// {category, startDate, endDate, sourceBundleId, deviceUUID, value} so
+// re-ingesting the same HealthKit sample = same path = idempotent write.
+export function healthSamplePath(userId: string, sampleHash: string) {
+  return `${userRoot(userId)}/healthSamples/${sampleHash}`;
+}
+
+// Daily rollup of HealthKit samples for a given UTC date. Rebuilder is a
+// separate follow-up; path defined now so consumers can take a dependency.
+export function healthContextSummaryPath(userId: string, date: string) {
+  return `${userRoot(userId)}/derivedSummaries/healthContext_${date}`;
+}

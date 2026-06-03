@@ -109,6 +109,24 @@ export const USER_SCOPED = {
     write: { kind: "client_owner", runtimeSchema: MetricSnapshot },
     contextRole: "internal",
   },
+  // Phase 2 Task 2.4 — raw HealthKit samples. Server-only write because
+  // the ingestion path enforces consent gating, dedupe via sampleHash as
+  // doc ID, and provenance fields. iOS calls ingestHealthSamples instead
+  // of writing directly.
+  healthSamples: {
+    pathPattern: "users/{uid}/healthSamples/{sampleHash}",
+    read: "owner",
+    write: { kind: "server_only" },
+    contextRole: "primary",
+  },
+  // Phase 2 Task 2.4 — daily rollups. Doc id is "healthContext_{date}".
+  // Rebuilt by a follow-up rollup function from the raw samples.
+  derivedSummaries: {
+    pathPattern: "users/{uid}/derivedSummaries/{summaryId}",
+    read: "owner",
+    write: { kind: "server_only" },
+    contextRole: "primary",
+  },
   consentRecords: {
     pathPattern: "users/{uid}/consentRecords/{recordId}",
     read: "owner",

@@ -315,6 +315,91 @@ export const MetricSnapshot = z.object({
   interpretationPolicy: z.literal("context_only_not_deterministic"),
 }).strict();
 
+// Phase 2 Task 2.4 — HealthKit ingestion at event-sample granularity.
+//
+// Per audit D7: replaces the lossy "one MetricSnapshot doc per day" pattern
+// for HealthKit data. Each iOS HealthKit sample lands at
+// users/{uid}/healthSamples/{sampleHash} with full provenance. Daily roll-
+// ups will land in users/{uid}/derivedSummaries/ as healthContext_{date}
+// docs once the rollup function ships (separate follow-up).
+//
+// MetricSnapshot stays for manual entries (weigh-ins typed in by hand).
+
+export const HealthSampleCategory = z.enum([
+  "steps",
+  "active_energy_kcal",
+  "resting_heart_rate_bpm",
+  "sleep_duration_min",
+  "body_weight_kg",
+  "hrv_ms",
+  "workout",
+]);
+
+// `sampleHash` is the document ID. iOS must compute it deterministically
+// from {category, startDate, endDate, sourceBundleId, deviceUUID, value}
+// so re-ingesting the same HealthKit sample is idempotent. Length ≥ 12
+// (hex) keeps collisions negligible at expected sample volumes.
+export const HealthSample = z.object({
+  userId: z.string().min(1),
+  category: HealthSampleCategory,
+  value: z.number(),
+  unit: z.string().min(1),
+  startDate: ISODateTime,
+  endDate: ISODateTime,
+  sourceBundleId: z.string().optional(),
+  deviceUUID: z.string().optional(),
+  sampleHash: z.string().min(12),
+  ingestedAt: ISODateTime,
+}).strict();
+
+// Client sends samples without userId/ingestedAt — server injects both.
+export const IngestHealthSampleInput = HealthSample.omit({
+  userId: true,
+  ingestedAt: true,
+}).strict();
+
+export const IngestHealthSamplesRequest = z.object({
+  samples: z.array(IngestHealthSampleInput).min(1).max(500),
+}).strict();
+
+export const IngestHealthSamplesResult = z.object({
+  inserted: z.number().int().nonnegative(),
+  duplicates: z.number().int().nonnegative(),
+  rejectedNoConsent: z.array(z.string()).default([]),
+}).strict();
+
+// Daily rollup shape. Builder is a separate follow-up; defining the type
+// now so callers (coach context bundle, etc.) can take a dependency.
+export const DerivedHealthContext = z.object({
+  userId: z.string().min(1),
+  date: z.string().date(),
+  totals: z.object({
+    steps: z.number().nonnegative().optional(),
+    activeEnergyKcal: z.number().nonnegative().optional(),
+    sleepMinutes: z.number().nonnegative().optional(),
+    workoutCount: z.number().int().nonnegative().optional(),
+  }).strict(),
+  ranges: z.object({
+    restingHeartRateBpm: z.object({
+      min: z.number(),
+      max: z.number(),
+      avg: z.number(),
+    }).strict().optional(),
+    hrvMs: z.object({
+      min: z.number(),
+      max: z.number(),
+      avg: z.number(),
+    }).strict().optional(),
+    bodyWeightKg: z.object({
+      min: z.number(),
+      max: z.number(),
+      avg: z.number(),
+    }).strict().optional(),
+  }).strict(),
+  sampleCount: z.number().int().nonnegative(),
+  updatedAt: ISODateTime,
+}).strict();
+
 export const ConsentRecord = z.object({
   userId: z.string().min(1),
   recordId: z.string().min(1),
@@ -490,3 +575,9 @@ export type CoachResponse = z.infer<typeof CoachResponse>;
 export type ProgramProposal = z.infer<typeof ProgramProposal>;
 export type PlanAdjustmentProposal = z.infer<typeof PlanAdjustmentProposal>;
 export type ResearchCorpusEntry = z.infer<typeof ResearchCorpusEntry>;
+export type HealthSampleCategory = z.infer<typeof HealthSampleCategory>;
+export type HealthSample = z.infer<typeof HealthSample>;
+export type IngestHealthSampleInput = z.infer<typeof IngestHealthSampleInput>;
+export type IngestHealthSamplesRequest = z.infer<typeof IngestHealthSamplesRequest>;
+export type IngestHealthSamplesResult = z.infer<typeof IngestHealthSamplesResult>;
+export type DerivedHealthContext = z.infer<typeof DerivedHealthContext>;
