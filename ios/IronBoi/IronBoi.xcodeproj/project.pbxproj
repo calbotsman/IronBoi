@@ -10,21 +10,23 @@
 		0752C42577AF71BE965F924A /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DECCF4FA552889A83248A3 /* WorkoutModels.swift */; };
 		0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5041EB6152324AB118525DA6 /* IronBoiApp.swift */; };
 		0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1145525E9C3C34837805B9B /* OnboardingView.swift */; };
-		12EBE51165738CD08093CB14 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */; };
+		12EBE51165738CD08093CB14 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5FCFEBC0D756CC3AF9E87B /* FirebaseAppCheck */; };
 		243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */; };
-		28C9D2CA7124C268C8AC5E2D /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
-		3CC76B586DFB89D458F96661 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
+		28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
+		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
+		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
 		61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8251B627C5781604E47176FE /* CoachView.swift */; };
 		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
 		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
-		8075B31225F93AF14C6E1298 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
+		8075B31225F93AF14C6E1298 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */; };
 		8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE8CC59433E740F466264C6 /* AppModel.swift */; };
 		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
 		B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */; };
 		CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */; };
 		D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */; };
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
+		EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +45,7 @@
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		F1145525E9C3C34837805B9B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCheckProviderFactory.swift; sourceTree = "<group>"; };
 		FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -51,10 +54,11 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				12EBE51165738CD08093CB14 /* FirebaseAuth in Frameworks */,
-				8075B31225F93AF14C6E1298 /* FirebaseCore in Frameworks */,
-				3CC76B586DFB89D458F96661 /* FirebaseFirestore in Frameworks */,
-				28C9D2CA7124C268C8AC5E2D /* FirebaseFunctions in Frameworks */,
+				12EBE51165738CD08093CB14 /* FirebaseAppCheck in Frameworks */,
+				8075B31225F93AF14C6E1298 /* FirebaseAuth in Frameworks */,
+				3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */,
+				28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */,
+				EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -89,6 +93,7 @@
 		71E5E003852F3BCDAB8248E7 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */,
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
 				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
 			);
@@ -164,6 +169,7 @@
 			);
 			name = IronBoi;
 			packageProductDependencies = (
+				0A5FCFEBC0D756CC3AF9E87B /* FirebaseAppCheck */,
 				3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */,
 				09A65CA69F32F34D53A925B5 /* FirebaseCore */,
 				8323F6678C89F93E8A1AB75E /* FirebaseFirestore */,
@@ -224,6 +230,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */,
 				8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */,
 				7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */,
 				61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */,
@@ -455,6 +462,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseCore;
+		};
+		0A5FCFEBC0D756CC3AF9E87B /* FirebaseAppCheck */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1246D83EB106468AB9C7C8AA /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAppCheck;
 		};
 		3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;

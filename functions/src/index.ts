@@ -50,6 +50,28 @@ import {
   maybeCreatePlanAdjustmentProposal,
 } from "./workouts/planAdjustments.js";
 import { safeLogger } from "./logging/safeLogger.js";
+
+// Phase 3 Task 3.2 — App Check enforcement.
+//
+// Every callable function REQUIRES a valid App Check token from the
+// client. iOS clients vend tokens via AppAttestProvider (Release) or
+// AppCheckDebugProvider (Debug); the Firebase iOS SDK ships them in
+// the request automatically once configured. Requests without a token
+// or with a token Firebase can't verify get rejected at the platform
+// before our handler runs.
+//
+// consumeAppCheckToken: true means each token is one-shot — the same
+// token can't be replayed. Costs a Firestore-side check; cheap.
+//
+// HTTP endpoints (onRequest) are NOT yet covered. The PWA (Iron Lab)
+// may still be calling them and doesn't ship App Check tokens. Migrate
+// the PWA OR retire the HTTP endpoints, then flip enforcement on them
+// in a follow-up PR.
+export const CALLABLE_OPTS = {
+  region: "us-central1",
+  enforceAppCheck: true,
+  consumeAppCheckToken: true,
+} as const;
 import {
   AcceptProgramProposalRequest,
   OnboardingAnswerRequest,
@@ -292,7 +314,7 @@ async function deleteCollectionTree(collection: CollectionReference) {
 //
 // Required by Apple App Store guideline 5.1.1(v) and CCPA/GDPR Article 17.
 export const deleteAccount = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
 
@@ -326,7 +348,7 @@ export const deleteAccount = onCall(
   },
 );
 
-export const getCoachBootstrap = onCall({ region: "us-central1" }, async (request) => {
+export const getCoachBootstrap = onCall(CALLABLE_OPTS, async (request) => {
   requireUserId(request.auth);
   return {
     coach,
@@ -371,7 +393,7 @@ export const resetMyDataHttp = onRequest(
   },
 );
 
-export const getUserState = onCall({ region: "us-central1" }, async (request) => {
+export const getUserState = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const today = z
     .object({ today: z.string().date().optional() })
@@ -396,7 +418,7 @@ export const getUserState = onCall({ region: "us-central1" }, async (request) =>
   };
 });
 
-export const upsertProfile = onCall({ region: "us-central1" }, async (request) => {
+export const upsertProfile = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = UserHealthProfile.parse(stripUserId(request.data, userId));
 
@@ -411,7 +433,7 @@ export const upsertProfile = onCall({ region: "us-central1" }, async (request) =
   return { ok: true, userId };
 });
 
-export const recordConsent = onCall({ region: "us-central1" }, async (request) => {
+export const recordConsent = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = ConsentRecord.parse(stripUserId(request.data, userId));
 
@@ -436,7 +458,7 @@ export const recordConsent = onCall({ region: "us-central1" }, async (request) =
   return { ok: true, recordId: parsed.recordId };
 });
 
-export const logWorkout = onCall({ region: "us-central1" }, async (request) => {
+export const logWorkout = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = WorkoutLog.parse(stripUserId(request.data, userId));
 
@@ -449,7 +471,7 @@ export const logWorkout = onCall({ region: "us-central1" }, async (request) => {
 });
 
 export const upsertWorkoutPlan = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = WorkoutPlan.parse(stripUserId(request.data, userId));
@@ -467,7 +489,7 @@ export const upsertWorkoutPlan = onCall(
 );
 
 export const recordDailyCheck = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = DailyCheck.parse(stripUserId(request.data, userId));
@@ -485,7 +507,7 @@ export const recordDailyCheck = onCall(
 );
 
 export const startWorkoutSessionCallable = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = StartWorkoutSessionRequest.parse(request.data ?? {});
@@ -495,7 +517,7 @@ export const startWorkoutSessionCallable = onCall(
 );
 
 export const finishWorkoutSessionCallable = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = FinishWorkoutSessionRequest.parse(request.data ?? {});
@@ -575,7 +597,7 @@ export const finishWorkoutSessionHttp = onRequest(
 // enough that stale guesses don't accumulate forever.
 const PROPOSED_FACT_TTL_MS = 14 * 24 * 60 * 60 * 1_000;
 
-export const upsertMemoryFact = onCall({ region: "us-central1" }, async (request) => {
+export const upsertMemoryFact = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = CoachMemoryFact.parse(stripUserId(request.data, userId));
 
@@ -631,7 +653,7 @@ export const upsertMemoryFact = onCall({ region: "us-central1" }, async (request
 });
 
 export const confirmMemoryFact = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = z
@@ -661,7 +683,7 @@ export const confirmMemoryFact = onCall(
   },
 );
 
-export const deleteMemoryFact = onCall({ region: "us-central1" }, async (request) => {
+export const deleteMemoryFact = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = z.object({ factId: z.string().min(1) }).parse(request.data);
 
@@ -689,7 +711,7 @@ export const deleteMemoryFact = onCall({ region: "us-central1" }, async (request
 // Returns { inserted, duplicates, rejectedNoConsent: [hash,...] } so the
 // client can surface state without re-reading.
 export const ingestHealthSamples = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = IngestHealthSamplesRequest.parse(request.data);
@@ -713,7 +735,7 @@ export const ingestHealthSamples = onCall(
   },
 );
 
-export const revokeConsent = onCall({ region: "us-central1" }, async (request) => {
+export const revokeConsent = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = z.object({ recordId: z.string().min(1) }).parse(request.data);
 
@@ -739,7 +761,7 @@ export const revokeConsent = onCall({ region: "us-central1" }, async (request) =
 });
 
 export const createCoachSession = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = z
@@ -764,7 +786,7 @@ export const createCoachSession = onCall(
   },
 );
 
-export const sendCoachMessage = onCall({ region: "us-central1" }, async (request) => {
+export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = CoachMessage.extend({
     sessionId: z.string().min(1),
@@ -970,7 +992,7 @@ const SafetyEvalResult = z.object({
 });
 
 export const recordSafetyEvalResult = onCall(
-  { region: "us-central1" },
+  CALLABLE_OPTS,
   async (request) => {
     requireAdmin(request.auth);
     const userId = request.auth?.uid ?? "unknown";

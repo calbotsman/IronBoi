@@ -15,6 +15,8 @@ targets:
       - path: IronBoi
     dependencies:
       - package: Firebase
+        product: FirebaseAppCheck
+      - package: Firebase
         product: FirebaseAuth
       - package: Firebase
         product: FirebaseCore
@@ -50,3 +52,8 @@ targets:
       properties:
         com.apple.developer.applesignin:
           - Default
+        # Phase 3 Task 3.2 — App Attest. Use "development" while testing
+        # via TestFlight; switch to "production" when shipping to public
+        # App Store. The Firebase AppAttestProvider reads this and routes
+        # to Apple's matching attestation endpoint.
+        com.apple.developer.devicecheck.appattest-environment: production

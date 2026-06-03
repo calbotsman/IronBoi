@@ -1,3 +1,4 @@
+import FirebaseAppCheck
 import FirebaseCore
 import SwiftUI
 
@@ -6,6 +7,12 @@ struct IronBoiApp: App {
     @StateObject private var appModel = AppModel()
 
     init() {
+        // Phase 3 Task 3.2 — App Check provider MUST be set BEFORE
+        // FirebaseApp.configure(). After configure() runs, the factory
+        // can't be swapped without app restart. See
+        // Services/AppCheckProviderFactory.swift for the Debug/Release
+        // provider choice + first-run setup steps.
+        AppCheck.setAppCheckProviderFactory(IronBoiAppCheckProviderFactory())
         FirebaseApp.configure()
     }
 
