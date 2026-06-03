@@ -37,6 +37,14 @@ targets:
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: MYO uses speech recognition to turn your voice into coach messages.
         SWIFT_VERSION: 5.10
         TARGETED_DEVICE_FAMILY: 1
+      configs:
+        # Debug builds (Xcode Run, internal device builds) talk to staging.
+        Debug:
+          INFOPLIST_KEY_IronBoiCallableBaseURL: https://us-central1-ironboi-staging.cloudfunctions.net
+        # Release builds (archive → TestFlight → App Store) talk to prod.
+        # Change this URL if the prod Firebase project id differs.
+        Release:
+          INFOPLIST_KEY_IronBoiCallableBaseURL: https://us-central1-ironboi-prod.cloudfunctions.net
     entitlements:
       path: IronBoi/IronBoi.entitlements
       properties:

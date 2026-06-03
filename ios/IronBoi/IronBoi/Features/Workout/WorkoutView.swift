@@ -475,13 +475,38 @@ private struct PlannedExerciseDetailSheet: View {
     }
 
     private var videoURL: URL {
-        if let videoId = knowledge.youtubeVideoId {
-            return URL(string: "https://www.youtube.com/watch?v=\(videoId)")!
+        // Prefer the curated YouTube videoId when we have one. Build the
+        // URL with URLComponents + URLQueryItem so any special characters
+        // in the videoId (`&`, `=`, `?`, ` `, etc.) get properly percent-
+        // encoded. String interpolation does NOT escape and YouTube would
+        // read an unescaped `&` as a separate query parameter.
+        if let videoId = knowledge.youtubeVideoId,
+           !videoId.isEmpty,
+           var components = URLComponents(string: "https://www.youtube.com/watch") {
+            components.queryItems = [URLQueryItem(name: "v", value: videoId)]
+            if let watchURL = components.url {
+                return watchURL
+            }
         }
 
-        let query = "\(exercise.name) exercise form tutorial"
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? exercise.name
-        return URL(string: "https://www.youtube.com/results?search_query=\(query)")!
+        // Fall back to a YouTube search. Same URLComponents pattern —
+        // URLQueryItem handles the spaces, ampersands, and unicode in
+        // the exercise name correctly. No manual percent-encoding needed.
+        if var components = URLComponents(string: "https://www.youtube.com/results") {
+            components.queryItems = [
+                URLQueryItem(
+                    name: "search_query",
+                    value: "\(exercise.name) exercise form tutorial"
+                ),
+            ]
+            if let searchURL = components.url {
+                return searchURL
+            }
+        }
+
+        // Last resort: YouTube homepage. The string is a known-good
+        // literal so the trailing `!` cannot crash here.
+        return URL(string: "https://www.youtube.com")!
     }
 }
 
@@ -744,13 +769,38 @@ private struct ExerciseDetailSheet: View {
     }
 
     private var videoURL: URL {
-        if let videoId = knowledge.youtubeVideoId {
-            return URL(string: "https://www.youtube.com/watch?v=\(videoId)")!
+        // Prefer the curated YouTube videoId when we have one. Build the
+        // URL with URLComponents + URLQueryItem so any special characters
+        // in the videoId (`&`, `=`, `?`, ` `, etc.) get properly percent-
+        // encoded. String interpolation does NOT escape and YouTube would
+        // read an unescaped `&` as a separate query parameter.
+        if let videoId = knowledge.youtubeVideoId,
+           !videoId.isEmpty,
+           var components = URLComponents(string: "https://www.youtube.com/watch") {
+            components.queryItems = [URLQueryItem(name: "v", value: videoId)]
+            if let watchURL = components.url {
+                return watchURL
+            }
         }
 
-        let query = "\(exercise.name) exercise form tutorial"
-            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? exercise.name
-        return URL(string: "https://www.youtube.com/results?search_query=\(query)")!
+        // Fall back to a YouTube search. Same URLComponents pattern —
+        // URLQueryItem handles the spaces, ampersands, and unicode in
+        // the exercise name correctly. No manual percent-encoding needed.
+        if var components = URLComponents(string: "https://www.youtube.com/results") {
+            components.queryItems = [
+                URLQueryItem(
+                    name: "search_query",
+                    value: "\(exercise.name) exercise form tutorial"
+                ),
+            ]
+            if let searchURL = components.url {
+                return searchURL
+            }
+        }
+
+        // Last resort: YouTube homepage. The string is a known-good
+        // literal so the trailing `!` cannot crash here.
+        return URL(string: "https://www.youtube.com")!
     }
 }
 

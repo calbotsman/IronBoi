@@ -30,7 +30,36 @@ final class AppModel: NSObject, ObservableObject {
     @Published var errorMessage: String?
 
     private let sessionId = "general"
-    private let callableBaseURL = URL(string: "https://us-central1-ironboi-staging.cloudfunctions.net")!
+    // Resolved from Info.plist's `IronBoiCallableBaseURL` key, which is set
+    // per build configuration in project.yml:
+    //   Debug   → ironboi-staging cloudfunctions
+    //   Release → ironboi-prod cloudfunctions
+    // If the Info.plist value is missing or malformed (corrupted build,
+    // unit test target), we log and fall back to staging so the app keeps
+    // working instead of crashing on launch. The fallback is a literal
+    // checked at build time, so the trailing `!` is safe.
+    private let callableBaseURL: URL = AppModel.resolveCallableBaseURL()
+
+    private static func resolveCallableBaseURL() -> URL {
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "IronBoiCallableBaseURL") as? String {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, let url = URL(string: trimmed) {
+                return url
+            }
+        }
+        // Debug: log and fall back to staging so the dev loop keeps working
+        // if project.yml is being edited.
+        // Release: fail loud. Silently routing TestFlight or App Store users
+        // to staging would be a real-world data + auth leak, so we want
+        // the build pipeline to halt at first launch instead.
+        #if DEBUG
+        NSLog("[IronBoi] Info.plist missing or invalid IronBoiCallableBaseURL — falling back to staging (Debug).")
+        return URL(string: "https://us-central1-ironboi-staging.cloudfunctions.net")!
+        #else
+        fatalError("Info.plist is missing IronBoiCallableBaseURL for a non-Debug build — check project.yml's Release configuration before shipping.")
+        #endif
+    }
+
     private lazy var db = Firestore.firestore()
     private var authHandle: AuthStateDidChangeListenerHandle?
     private var messageListener: ListenerRegistration?
