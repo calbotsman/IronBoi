@@ -56,12 +56,13 @@ After enabling capabilities you must regenerate the Distribution provisioning pr
 
 ### B.2 GoogleService-Info.plist switching
 
-Currently the project has ONE `GoogleService-Info.plist` (`ios/IronBoi/IronBoi/GoogleService-Info.plist`) pointing at staging. For Release builds we want prod. Two patterns:
+✅ **Shipped 2026-06-02 (commit 7d37e6e).** The `preBuildScripts` block in `ios/IronBoi/project.yml` picks the right plist per `$CONFIGURATION`:
+- **Debug** → `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Staging.plist` (real staging credentials, tracked)
+- **Release** → `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` (placeholder until you replace it)
 
-- **Manual swap (simplest, error-prone):** keep two files (`GoogleService-Info-Staging.plist`, `GoogleService-Info-Prod.plist`), rename the right one before each archive. Risky.
-- **Build phase script (recommended):** put both files in `ios/IronBoi/IronBoi/Firebase/`, add a Run Script build phase to project.yml that copies the right one based on `$CONFIGURATION`.
+The canonical `ios/IronBoi/IronBoi/GoogleService-Info.plist` is `.gitignore`'d and regenerated at the start of every build.
 
-This isn't shipped yet. ⬜ Set this up before the first prod archive.
+Until you replace `GoogleService-Info-Prod.plist` with the real prod download, **Release builds emit a loud warning** during xcodebuild and Firebase will fail at first API call. See `ios/IronBoi/IronBoi/Firebase/README.md` for the populate steps.
 
 ### B.3 App Check registration
 
