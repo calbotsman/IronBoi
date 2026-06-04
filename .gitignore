@@ -29,6 +29,12 @@ ios/**/DerivedData/
 ios/**/Pods/
 ios/**/.swiftpm/
 
+# Phase 3 follow-up — the canonical GoogleService-Info.plist is
+# generated at the start of every iOS build by project.yml's
+# preBuildScripts. The committed source-of-truth files live under
+# ios/IronBoi/IronBoi/Firebase/ as -Staging.plist and -Prod.plist.
+ios/IronBoi/IronBoi/GoogleService-Info.plist
+
 # Editor scratch
 *.swp
 .idea/

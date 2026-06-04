@@ -13,6 +13,47 @@ targets:
     platform: iOS
     sources:
       - path: IronBoi
+    preBuildScripts:
+      - name: "Select GoogleService-Info.plist for $CONFIGURATION"
+        script: |
+          # Phase 3 follow-up — pick staging or prod GoogleService-Info.plist
+          # based on the active build configuration. The Firebase SDK reads
+          # this file at FirebaseApp.configure() time; one wrong file =
+          # users routed to the wrong project.
+          set -euo pipefail
+
+          case "$CONFIGURATION" in
+            Debug)   SUFFIX=Staging ;;
+            Release) SUFFIX=Prod ;;
+            *)       SUFFIX=Staging ;;  # ad-hoc / custom configs default to staging
+          esac
+
+          SOURCE="$PROJECT_DIR/IronBoi/Firebase/GoogleService-Info-$SUFFIX.plist"
+          DEST="$PROJECT_DIR/IronBoi/GoogleService-Info.plist"
+
+          if [ ! -f "$SOURCE" ]; then
+            echo "error: $SOURCE not found — see ios/IronBoi/IronBoi/Firebase/README.md"
+            exit 1
+          fi
+
+          # Warn if prod plist still has placeholder sentinels. Don't fail
+          # the build (you might be doing a Release test before populating
+          # prod), but make it loud.
+          if [ "$SUFFIX" = "Prod" ] && grep -q "REPLACE_WITH_PROD" "$SOURCE"; then
+            echo "warning: $SOURCE still contains REPLACE_WITH_PROD_* sentinels — Firebase init will fail at runtime. See ios/IronBoi/IronBoi/Firebase/README.md to populate from the real ironboi-prod project."
+          fi
+
+          # Only copy if different — avoids touching mtime + forcing
+          # unnecessary downstream rebuilds.
+          if ! cmp -s "$SOURCE" "$DEST"; then
+            cp -f "$SOURCE" "$DEST"
+            echo "Selected $SUFFIX → GoogleService-Info.plist"
+          fi
+        inputFiles:
+          - $(PROJECT_DIR)/IronBoi/Firebase/GoogleService-Info-Staging.plist
+          - $(PROJECT_DIR)/IronBoi/Firebase/GoogleService-Info-Prod.plist
+        outputFiles:
+          - $(PROJECT_DIR)/IronBoi/GoogleService-Info.plist
     dependencies:
       - package: Firebase
         product: FirebaseAppCheck

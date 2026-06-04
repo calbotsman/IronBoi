@@ -16,15 +16,18 @@
 		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
 		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
+		5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 241473A5576E7F94D3F1BA1E /* README.md */; };
 		61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8251B627C5781604E47176FE /* CoachView.swift */; };
 		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
 		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
 		8075B31225F93AF14C6E1298 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */; };
 		8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE8CC59433E740F466264C6 /* AppModel.swift */; };
 		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
+		AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */ = {isa = PBXBuildFile; fileRef = D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */; };
 		B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */; };
 		CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */; };
 		D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */; };
+		D6444B3E1D84C06921141B78 /* GoogleService-Info-Staging.plist in Resources */ = {isa = PBXBuildFile; fileRef = 213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */; };
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
 		EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
 /* End PBXBuildFile section */
@@ -32,6 +35,8 @@
 /* Begin PBXFileReference section */
 		039EE3F780882104FBD9CC48 /* OnboardingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingModels.swift; sourceTree = "<group>"; };
 		07DECCF4FA552889A83248A3 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
+		213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Staging.plist"; sourceTree = "<group>"; };
+		241473A5576E7F94D3F1BA1E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSequence.swift; sourceTree = "<group>"; };
 		5041EB6152324AB118525DA6 /* IronBoiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IronBoiApp.swift; sourceTree = "<group>"; };
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
@@ -44,6 +49,7 @@
 		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Prod.plist"; sourceTree = "<group>"; };
 		F1145525E9C3C34837805B9B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCheckProviderFactory.swift; sourceTree = "<group>"; };
 		FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -84,6 +90,7 @@
 				5041EB6152324AB118525DA6 /* IronBoiApp.swift */,
 				FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */,
 				19CFD00FAA0244356AEB5FAB /* Features */,
+				B058F2785C85B6410DB9C733 /* Firebase */,
 				EB7EACBAA54C1AEDD69C4121 /* Models */,
 				71E5E003852F3BCDAB8248E7 /* Services */,
 			);
@@ -114,6 +121,16 @@
 				8251B627C5781604E47176FE /* CoachView.swift */,
 			);
 			path = Coach;
+			sourceTree = "<group>";
+		};
+		B058F2785C85B6410DB9C733 /* Firebase */ = {
+			isa = PBXGroup;
+			children = (
+				D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */,
+				213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */,
+				241473A5576E7F94D3F1BA1E /* README.md */,
+			);
+			path = Firebase;
 			sourceTree = "<group>";
 		};
 		B7425B7D04DF34D0B24A2A10 = {
@@ -159,6 +176,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 905B861087323AF22003A7CB /* Build configuration list for PBXNativeTarget "IronBoi" */;
 			buildPhases = (
+				EAA3A21E0CD9BEC957F0918C /* Select GoogleService-Info.plist for $CONFIGURATION */,
 				77A7C5F14639844B81178345 /* Sources */,
 				0346E1F963A6A68EE66D5E2F /* Resources */,
 				299051222659FE63A5EADF20 /* Frameworks */,
@@ -218,12 +236,39 @@
 			buildActionMask = 2147483647;
 			files = (
 				E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */,
+				AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */,
+				D6444B3E1D84C06921141B78 /* GoogleService-Info-Staging.plist in Resources */,
 				243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */,
 				B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */,
+				5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		EAA3A21E0CD9BEC957F0918C /* Select GoogleService-Info.plist for $CONFIGURATION */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(PROJECT_DIR)/IronBoi/Firebase/GoogleService-Info-Staging.plist",
+				"$(PROJECT_DIR)/IronBoi/Firebase/GoogleService-Info-Prod.plist",
+			);
+			name = "Select GoogleService-Info.plist for $CONFIGURATION";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(PROJECT_DIR)/IronBoi/GoogleService-Info.plist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Phase 3 follow-up — pick staging or prod GoogleService-Info.plist\n# based on the active build configuration. The Firebase SDK reads\n# this file at FirebaseApp.configure() time; one wrong file =\n# users routed to the wrong project.\nset -euo pipefail\n\ncase \"$CONFIGURATION\" in\n  Debug)   SUFFIX=Staging ;;\n  Release) SUFFIX=Prod ;;\n  *)       SUFFIX=Staging ;;  # ad-hoc / custom configs default to staging\nesac\n\nSOURCE=\"$PROJECT_DIR/IronBoi/Firebase/GoogleService-Info-$SUFFIX.plist\"\nDEST=\"$PROJECT_DIR/IronBoi/GoogleService-Info.plist\"\n\nif [ ! -f \"$SOURCE\" ]; then\n  echo \"error: $SOURCE not found — see ios/IronBoi/IronBoi/Firebase/README.md\"\n  exit 1\nfi\n\n# Warn if prod plist still has placeholder sentinels. Don't fail\n# the build (you might be doing a Release test before populating\n# prod), but make it loud.\nif [ \"$SUFFIX\" = \"Prod\" ] && grep -q \"REPLACE_WITH_PROD\" \"$SOURCE\"; then\n  echo \"warning: $SOURCE still contains REPLACE_WITH_PROD_* sentinels — Firebase init will fail at runtime. See ios/IronBoi/IronBoi/Firebase/README.md to populate from the real ironboi-prod project.\"\nfi\n\n# Only copy if different — avoids touching mtime + forcing\n# unnecessary downstream rebuilds.\nif ! cmp -s \"$SOURCE\" \"$DEST\"; then\n  cp -f \"$SOURCE\" \"$DEST\"\n  echo \"Selected $SUFFIX → GoogleService-Info.plist\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		77A7C5F14639844B81178345 /* Sources */ = {
