@@ -75,6 +75,11 @@ targets:
         product: FirebaseFunctions
     settings:
       base:
+        # Team ID baked in so xcodegen doesn't wipe it on regenerate.
+        # If you're a different developer, change to your team's ID
+        # (Apple Developer → Membership) or pass via xcconfig override.
+        DEVELOPMENT_TEAM: SGQ2WLB6M9
+        CODE_SIGN_STYLE: Automatic
         PRODUCT_BUNDLE_IDENTIFIER: com.thecombinationrule.ironboi
         PRODUCT_NAME: IronBoi
         GENERATE_INFOPLIST_FILE: YES
