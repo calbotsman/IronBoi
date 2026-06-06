@@ -20,6 +20,12 @@ struct IronBoiApp: App {
         WindowGroup {
             AppRootView()
                 .environmentObject(appModel)
+                // The design uses a fixed cream paper background that
+                // doesn't switch on Dark Mode. Force the app into light
+                // scheme so SwiftUI doesn't auto-pick white text on
+                // cream and make everything unreadable. Revisit when
+                // we ship real Dark Mode color assets.
+                .preferredColorScheme(.light)
         }
     }
 }
