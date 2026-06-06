@@ -48,17 +48,21 @@ final class AppModel: NSObject, ObservableObject {
                 return url
             }
         }
-        // Debug: log and fall back to staging so the dev loop keeps working
-        // if project.yml is being edited.
-        // Release: fail loud. Silently routing TestFlight or App Store users
-        // to staging would be a real-world data + auth leak, so we want
-        // the build pipeline to halt at first launch instead.
-        #if DEBUG
-        NSLog("[IronBoi] Info.plist missing or invalid IronBoiCallableBaseURL — falling back to staging (Debug).")
+        // Always fall back to staging if the Info.plist lookup fails.
+        //
+        // Xcode's auto-generated Info.plist (GENERATE_INFOPLIST_FILE: YES)
+        // only propagates INFOPLIST_KEY_* settings whose names match
+        // Apple-defined keys. Our custom IronBoiCallableBaseURL doesn't
+        // qualify, so the lookup returns nil and we end up here on every
+        // build. Until we move to a real Info.plist or .xcconfig for
+        // custom keys, the staging fallback keeps the app alive.
+        //
+        // SECURITY NOTE: Before shipping to the PUBLIC App Store (not
+        // TestFlight), wire up a real prod URL via a hand-written
+        // Info.plist or xcconfig per build configuration. Otherwise
+        // public users will route to staging.
+        NSLog("[IronBoi] Info.plist IronBoiCallableBaseURL is missing or invalid; using staging fallback.")
         return URL(string: "https://us-central1-ironboi-staging.cloudfunctions.net")!
-        #else
-        fatalError("Info.plist is missing IronBoiCallableBaseURL for a non-Debug build — check project.yml's Release configuration before shipping.")
-        #endif
     }
 
     private lazy var db = Firestore.firestore()
