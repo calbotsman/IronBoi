@@ -11,6 +11,7 @@
 		0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5041EB6152324AB118525DA6 /* IronBoiApp.swift */; };
 		0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1145525E9C3C34837805B9B /* OnboardingView.swift */; };
 		12EBE51165738CD08093CB14 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5FCFEBC0D756CC3AF9E87B /* FirebaseAppCheck */; };
+		22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */; };
 		243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */; };
 		28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
 		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
@@ -23,6 +24,7 @@
 		8075B31225F93AF14C6E1298 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */; };
 		8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE8CC59433E740F466264C6 /* AppModel.swift */; };
 		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
+		971478636E13DB8A91D04639 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */; };
 		AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */ = {isa = PBXBuildFile; fileRef = D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */; };
 		B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */; };
 		CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */; };
@@ -35,8 +37,10 @@
 /* Begin PBXFileReference section */
 		039EE3F780882104FBD9CC48 /* OnboardingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingModels.swift; sourceTree = "<group>"; };
 		07DECCF4FA552889A83248A3 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
+		0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
 		213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Staging.plist"; sourceTree = "<group>"; };
 		241473A5576E7F94D3F1BA1E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
 		444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSequence.swift; sourceTree = "<group>"; };
 		5041EB6152324AB118525DA6 /* IronBoiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IronBoiApp.swift; sourceTree = "<group>"; };
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
@@ -76,9 +80,18 @@
 			children = (
 				78A34F132C3B3631FBD2E56C /* Coach */,
 				E54C72839FA7F4784F37A70F /* Onboarding */,
+				2806FA6DB7CE8551C8BB36F3 /* Profile */,
 				77C28A7363F1DDA1ED78B184 /* Workout */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		2806FA6DB7CE8551C8BB36F3 /* Profile */ = {
+			isa = PBXGroup;
+			children = (
+				0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */,
+			);
+			path = Profile;
 			sourceTree = "<group>";
 		};
 		329346F30DA766EAE94903E2 /* IronBoi */ = {
@@ -156,6 +169,7 @@
 				681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */,
 				444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */,
 				039EE3F780882104FBD9CC48 /* OnboardingModels.swift */,
+				42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */,
 				07DECCF4FA552889A83248A3 /* WorkoutModels.swift */,
 			);
 			path = Models;
@@ -288,6 +302,8 @@
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
 				8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */,
 				0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */,
+				22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */,
+				971478636E13DB8A91D04639 /* UserProfile.swift in Sources */,
 				672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */,
 				0752C42577AF71BE965F924A /* WorkoutModels.swift in Sources */,
 				3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */,

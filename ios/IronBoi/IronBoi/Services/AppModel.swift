@@ -12,6 +12,7 @@ final class AppModel: NSObject, ObservableObject {
         case coach
         case workout
         case progress
+        case you
     }
 
     @Published private(set) var user: User?
@@ -24,9 +25,11 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var pendingPlanAdjustmentProposal: PlanAdjustmentProposalSummary?
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
     @Published private(set) var activeWorkout: ActiveWorkoutSession?
+    @Published private(set) var profile: UserProfile = .empty
     @Published private(set) var isSending = false
     @Published private(set) var isOnboardingBusy = false
     @Published private(set) var isWorkoutBusy = false
+    @Published private(set) var isSavingProfile = false
     @Published var selectedTab: AppTab = .coach
     @Published var errorMessage: String?
 
@@ -496,8 +499,32 @@ final class AppModel: NSObject, ObservableObject {
                     self?.onboardingStatus = OnboardingStatus(rawValue: rawStatus) ?? .notStarted
                     self?.onboardingStep = data["onboardingStep"] as? String ?? "goals"
                     self?.onboardingMissingFields = data["onboardingMissingFields"] as? [String] ?? []
+                    // Full profile struct — Preferences view reads from this
+                    // and pre-fills its form fields.
+                    self?.profile = UserProfile.from(firestoreData: data)
                 }
             }
+    }
+
+    // MARK: - Preferences / profile editing
+
+    /// Send the entire profile to the upsertProfile callable. The backend
+    /// (`functions/src/index.ts:upsertProfile`) validates the payload with
+    /// the UserHealthProfile Zod schema and writes to
+    /// `users/{uid}/profile/current`. The profile listener picks up the
+    /// change and republishes via @Published.
+    func upsertProfile(_ next: UserProfile) async {
+        guard !isSavingProfile else { return }
+        isSavingProfile = true
+        defer { isSavingProfile = false }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let callable = functions.httpsCallable("upsertProfile")
+            _ = try await callable.call(next.firestorePayload())
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func listenForOnboardingMessages(userId: String?) {

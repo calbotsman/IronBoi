@@ -56,6 +56,12 @@ struct AppRootView: View {
                             Label("Progress", systemImage: "chart.bar.fill")
                         }
                         .tag(AppModel.AppTab.progress)
+
+                    PreferencesView()
+                        .tabItem {
+                            Label("You", systemImage: "person.crop.circle")
+                        }
+                        .tag(AppModel.AppTab.you)
                 }
             }
         }
