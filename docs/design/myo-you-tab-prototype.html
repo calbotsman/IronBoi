@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MYO Coach — You Tab</title>
+<style>
+  /* ─── Reset + Base ──────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --cream:       #FCF4E8;
+    --cream-dark:  #F2E8D4;
+    --cream-mid:   #EDE0C8;
+    --ink:         #1A1410;
+    --ink-2:       #3D2F22;
+    --ink-3:       #7A6552;
+    --ink-4:       #B8A690;
+    --ochre:       #C4892A;
+    --ochre-light: #E8B858;
+    --brick:       #A04030;
+    --brick-light: #D4614A;
+    --sage:        #6B7C5E;
+    --selected-bg: #3D2F22;
+    --selected-fg: #FCF4E8;
+    --chip-bg:     #EDE0C8;
+    --chip-border: #C8B89A;
+    --rule:        rgba(58,34,18,0.12);
+    --rule-strong: rgba(58,34,18,0.22);
+    --shadow:      0 1px 4px rgba(26,20,16,0.08), 0 0 0 1px rgba(26,20,16,0.06);
+    --shadow-card: 0 2px 12px rgba(26,20,16,0.10), 0 0 0 1px rgba(26,20,16,0.07);
+    --radius-sm:   8px;
+    --radius:      14px;
+    --radius-lg:   20px;
+    --font: -apple-system, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+
+  html, body {
+    background: #D4C8B4;
+    min-height: 100vh;
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Desktop Scene ─────────────────────────────────────────────── */
+  .scene {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 48px 20px 80px;
+    min-height: 100vh;
+  }
+
+  /* ─── Phone Shell ───────────────────────────────────────────────── */
+  .phone {
+    position: relative;
+    width: 390px;
+    min-width: 390px;
+    background: #1A1410;
+    border-radius: 54px;
+    padding: 14px;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.12),
+      0 40px 100px rgba(0,0,0,0.45),
+      0 8px 24px rgba(0,0,0,0.30),
+      inset 0 0 0 1px rgba(255,255,255,0.04);
+  }
+
+  .phone-inner {
+    border-radius: 42px;
+    overflow: hidden;
+    background: var(--cream);
+    position: relative;
+  }
+
+  /* Dynamic Island */
+  .dynamic-island {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 126px;
+    height: 37px;
+    background: #1A1410;
+    border-radius: 20px;
+    z-index: 100;
+  }
+
+  /* Status bar */
+  .status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px 0;
+    height: 59px;
+    background: var(--cream);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+
+  .status-time {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.3px;
+  }
+
+  .status-icons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Signal bars */
+  .signal {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5px;
+    height: 12px;
+  }
+  .signal span {
+    background: var(--ink);
+    width: 3px;
+    border-radius: 1px;
+  }
+  .signal span:nth-child(1) { height: 4px; }
+  .signal span:nth-child(2) { height: 7px; }
+  .signal span:nth-child(3) { height: 10px; }
+  .signal span:nth-child(4) { height: 12px; }
+
+  /* Battery */
+  .battery {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+  .battery-body {
+    width: 24px;
+    height: 12px;
+    border: 1.5px solid var(--ink);
+    border-radius: 2.5px;
+    padding: 1.5px;
+    position: relative;
+  }
+  .battery-body::after {
+    content: '';
+    position: absolute;
+    right: -4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 5px;
+    background: var(--ink);
+    border-radius: 0 1px 1px 0;
+  }
+  .battery-fill {
+    height: 100%;
+    width: 78%;
+    background: var(--ink);
+    border-radius: 1px;
+  }
+
+  /* ─── Nav Bar ───────────────────────────────────────────────────── */
+  .nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px 12px;
+    background: var(--cream);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .nav-title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.3px;
+  }
+
+  .nav-save-btn {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ochre);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 0;
+    letter-spacing: -0.2px;
+    transition: opacity 0.15s;
+  }
+  .nav-save-btn:active { opacity: 0.5; }
+
+  /* ─── Scrollable Content ────────────────────────────────────────── */
+  .scroll-content {
+    height: calc(844px - 59px - 53px - 83px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--cream);
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+  .scroll-content::-webkit-scrollbar { display: none; }
+
+  /* ─── Header Block ──────────────────────────────────────────────── */
+  .profile-header {
+    padding: 24px 20px 20px;
+    background: var(--cream);
+    border-bottom: 1px solid var(--rule);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .profile-header::before {
+    content: '';
+    position: absolute;
+    top: -30px;
+    right: -30px;
+    width: 160px;
+    height: 160px;
+    background: radial-gradient(circle, rgba(196,137,42,0.08) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  .coach-eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ochre);
+    margin-bottom: 6px;
+  }
+
+  .coach-headline {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -0.5px;
+    line-height: 1.2;
+    margin-bottom: 10px;
+  }
+
+  .coach-subline {
+    font-size: 13px;
+    color: var(--ink-3);
+    line-height: 1.5;
+    letter-spacing: -0.1px;
+  }
+
+  /* Completion ring */
+  .completion-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .completion-ring-wrap {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+  }
+
+  .ring-svg {
+    width: 44px;
+    height: 44px;
+    transform: rotate(-90deg);
+  }
+
+  .ring-track {
+    fill: none;
+    stroke: var(--cream-mid);
+    stroke-width: 3.5;
+  }
+
+  .ring-fill {
+    fill: none;
+    stroke: var(--ochre);
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    stroke-dasharray: 113.1;
+    stroke-dashoffset: 28.3;
+    transition: stroke-dashoffset 1s cubic-bezier(0.4,0,0.2,1);
+  }
+
+  .ring-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .completion-text { flex: 1; }
+
+  .completion-pct {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.2px;
+  }
+
+  .completion-detail {
+    font-size: 12px;
+    color: var(--ink-3);
+    margin-top: 1px;
+  }
+
+  /* ─── Section ───────────────────────────────────────────────────── */
+  .section { padding: 0 0 2px; }
+
+  .section-header {
+    padding: 20px 20px 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  .section-rule {
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+    margin-top: 1px;
+  }
+
+  .section-card {
+    margin: 0 16px;
+    background: #FEFAF4;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  /* ─── Row ───────────────────────────────────────────────────────── */
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 16px;
+    gap: 12px;
+    position: relative;
+  }
+
+  .row + .row { border-top: 1px solid var(--rule); }
+
+  .row-label {
+    font-size: 15px;
+    color: var(--ink);
+    letter-spacing: -0.2px;
+    flex-shrink: 0;
+  }
+
+  .row-value {
+    font-size: 15px;
+    color: var(--ink-3);
+    letter-spacing: -0.2px;
+    text-align: right;
+  }
+
+  /* ─── Stepper ───────────────────────────────────────────────────── */
+  .stepper {
+    display: flex;
+    align-items: center;
+    background: var(--cream-dark);
+    border: 1px solid var(--chip-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .stepper-btn {
+    width: 34px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 18px;
+    font-weight: 300;
+    color: var(--ink);
+    transition: background 0.12s;
+    flex-shrink: 0;
+  }
+  .stepper-btn:active { background: var(--cream-mid); }
+
+  .stepper-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--chip-border);
+    flex-shrink: 0;
+  }
+
+  .stepper-val {
+    min-width: 40px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--ink);
+    padding: 0 8px;
+    letter-spacing: -0.2px;
+  }
+
+  /* ─── Chip Grid ─────────────────────────────────────────────────── */
+  .chip-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 16px 16px;
+  }
+
+  .chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 12px;
+    border-radius: 100px;
+    border: 1.5px solid var(--chip-border);
+    background: var(--cream);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-2);
+    cursor: pointer;
+    letter-spacing: -0.1px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  .chip:active { transform: scale(0.96); }
+
+  .chip.goal-chip.selected {
+    background: var(--ochre);
+    border-color: var(--ochre);
+    color: #fff;
+  }
+
+  /* ─── Experience Pills ──────────────────────────────────────────── */
+  .exp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 14px 16px 16px;
+  }
+
+  .exp-pill {
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    border: 1.5px solid var(--chip-border);
+    background: var(--cream);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    user-select: none;
+  }
+
+  .exp-pill:active { transform: scale(0.97); }
+
+  .exp-pill.selected {
+    background: var(--selected-bg);
+    border-color: var(--selected-bg);
+  }
+
+  .exp-pill-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.2px;
+    margin-bottom: 2px;
+    transition: color 0.15s;
+  }
+
+  .exp-pill.selected .exp-pill-name { color: var(--cream); }
+
+  .exp-pill-desc {
+    font-size: 11.5px;
+    color: var(--ink-3);
+    letter-spacing: -0.1px;
+    line-height: 1.4;
+    transition: color 0.15s;
+  }
+
+  .exp-pill.selected .exp-pill-desc { color: rgba(252,244,232,0.65); }
+
+  /* ─── Tag List ──────────────────────────────────────────────────── */
+  .tag-wrap {
+    padding: 10px 16px 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 10px;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px 5px 12px;
+    border-radius: 100px;
+    background: var(--cream-dark);
+    border: 1px solid var(--chip-border);
+    font-size: 13px;
+    color: var(--ink-2);
+    cursor: pointer;
+    letter-spacing: -0.1px;
+    transition: opacity 0.2s, transform 0.15s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .tag-text { pointer-events: none; }
+
+  .tag-x {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--ink-4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--cream);
+    flex-shrink: 0;
+    pointer-events: none;
+    transition: background 0.12s;
+  }
+
+  .tag:active .tag-x { background: var(--brick); }
+
+  .tag.removing {
+    opacity: 0;
+    transform: scale(0.85);
+    transition: opacity 0.2s, transform 0.2s;
+  }
+
+  /* ─── Tag Input ─────────────────────────────────────────────────── */
+  .tag-input-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 14px;
+  }
+
+  .tag-input {
+    flex: 1;
+    height: 36px;
+    background: var(--cream-dark);
+    border: 1px solid var(--chip-border);
+    border-radius: var(--radius-sm);
+    padding: 0 12px;
+    font-family: var(--font);
+    font-size: 13.5px;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    -webkit-appearance: none;
+  }
+  .tag-input::placeholder { color: var(--ink-4); }
+  .tag-input:focus {
+    border-color: var(--ochre);
+    box-shadow: 0 0 0 2px rgba(196,137,42,0.15);
+    background: var(--cream);
+  }
+
+  .tag-add-btn {
+    height: 36px;
+    padding: 0 14px;
+    background: var(--ink-2);
+    color: var(--cream);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: -0.1px;
+    transition: background 0.12s, transform 0.1s;
+    flex-shrink: 0;
+  }
+  .tag-add-btn:active { background: var(--ink); transform: scale(0.97); }
+  .tag-add-btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* ─── Section footer note ───────────────────────────────────────── */
+  .section-note {
+    font-size: 12px;
+    color: var(--ink-4);
+    padding: 6px 20px 4px;
+    letter-spacing: -0.05px;
+    line-height: 1.5;
+  }
+
+  /* ─── Notes textarea ────────────────────────────────────────────── */
+  .notes-textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--rule);
+    padding: 13px 16px;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--ink-2);
+    line-height: 1.5;
+    resize: none;
+    outline: none;
+    min-height: 64px;
+    letter-spacing: -0.1px;
+  }
+  .notes-textarea::placeholder { color: var(--ink-4); }
+
+  /* ─── Time chips (horizontal scroll) ────────────────────────────── */
+  .time-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--rule);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .time-row::-webkit-scrollbar { display: none; }
+
+  .time-chip {
+    flex-shrink: 0;
+    padding: 7px 14px;
+    border-radius: 100px;
+    border: 1.5px solid var(--chip-border);
+    background: var(--cream);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-2);
+    cursor: pointer;
+    letter-spacing: -0.1px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .time-chip.selected {
+    background: var(--selected-bg);
+    border-color: var(--selected-bg);
+    color: var(--selected-fg);
+  }
+
+  /* ─── Coaching style cards ──────────────────────────────────────── */
+  .style-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    padding: 14px 16px 16px;
+  }
+
+  .style-card {
+    border: 1.5px solid var(--chip-border);
+    border-radius: var(--radius-sm);
+    padding: 10px 8px;
+    text-align: center;
+    cursor: pointer;
+    background: var(--cream);
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .style-card:active { transform: scale(0.96); }
+
+  .style-card.selected {
+    background: var(--ink-2);
+    border-color: var(--ink-2);
+  }
+
+  .style-card-icon { font-size: 18px; margin-bottom: 5px; line-height: 1; }
+
+  .style-card-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+    letter-spacing: -0.1px;
+    display: block;
+    transition: color 0.15s;
+  }
+
+  .style-card.selected .style-card-name { color: var(--cream); }
+
+  .style-card-desc {
+    font-size: 10.5px;
+    color: var(--ink-3);
+    margin-top: 2px;
+    display: block;
+    line-height: 1.3;
+    transition: color 0.15s;
+  }
+
+  .style-card.selected .style-card-desc { color: rgba(252,244,232,0.55); }
+
+  /* Methodology chips */
+  .subsection-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-4);
+    padding: 12px 16px 0;
+    display: block;
+    border-top: 1px solid var(--rule);
+  }
+
+  .method-scroll {
+    display: flex;
+    gap: 6px;
+    padding: 8px 16px 14px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .method-scroll::-webkit-scrollbar { display: none; }
+
+  .method-chip {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    border-radius: 100px;
+    border: 1.5px solid var(--chip-border);
+    background: var(--cream);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink-2);
+    cursor: pointer;
+    letter-spacing: -0.1px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .method-chip.selected {
+    background: var(--selected-bg);
+    border-color: var(--selected-bg);
+    color: var(--selected-fg);
+  }
+
+  /* ─── Empty state hint ──────────────────────────────────────────── */
+  .empty-hint {
+    padding: 10px 16px 4px;
+    font-size: 13px;
+    color: var(--ink-4);
+    font-style: italic;
+  }
+
+  /* ─── Bottom spacer ─────────────────────────────────────────────── */
+  .bottom-spacer { height: 32px; }
+
+  /* ─── Tab Bar ───────────────────────────────────────────────────── */
+  .tab-bar {
+    height: 83px;
+    background: var(--cream);
+    border-top: 1px solid var(--rule-strong);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-around;
+    padding-top: 8px;
+  }
+
+  .tab-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 0 12px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    flex: 1;
+  }
+
+  .tab-icon { font-size: 22px; line-height: 1; transition: transform 0.15s; }
+
+  .tab-label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    color: var(--ink-4);
+  }
+
+  .tab-item.active .tab-label {
+    color: var(--ochre);
+    font-weight: 600;
+  }
+
+  /* ─── Save Toast ────────────────────────────────────────────────── */
+  .save-toast {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--ink);
+    color: var(--cream);
+    font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: -0.1px;
+    padding: 10px 20px;
+    border-radius: 100px;
+    opacity: 0;
+    transition: opacity 0.25s, transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    pointer-events: none;
+    white-space: nowrap;
+    z-index: 9999;
+    box-shadow: 0 4px 20px rgba(26,20,16,0.30);
+  }
+
+  .save-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* ─── Mobile adjustments ────────────────────────────────────────── */
+  @media (max-width: 500px) {
+    body { background: var(--cream); }
+    .scene { padding: 0; }
+    .phone {
+      width: 100%;
+      min-width: unset;
+      border-radius: 0;
+      padding: 0;
+      box-shadow: none;
+      background: var(--cream);
+    }
+    .phone-inner { border-radius: 0; }
+    .dynamic-island { display: none; }
+    .status-bar { height: 44px; padding: 10px 20px 0; }
+    .scroll-content { height: calc(100dvh - 44px - 53px - 83px); }
+    .save-toast { bottom: 100px; }
+  }
+
+  /* ─── Micro-animation: ripple ───────────────────────────────────── */
+  @keyframes ripple {
+    from { transform: scale(0); opacity: 0.35; }
+    to   { transform: scale(3); opacity: 0; }
+  }
+  .ripple-host { position: relative; overflow: hidden; }
+  .ripple-el {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(196,137,42,0.35);
+    width: 60px;
+    height: 60px;
+    margin-left: -30px;
+    margin-top: -30px;
+    animation: ripple 0.55s ease-out forwards;
+    pointer-events: none;
+  }
+
+  /* ─── Save pulse ─────────────────────────────────────────────────── */
+  @keyframes savePulse {
+    0%   { box-shadow: 0 0 0 0 rgba(196,137,42,0.5); }
+    70%  { box-shadow: 0 0 0 10px rgba(196,137,42,0); }
+    100% { box-shadow: 0 0 0 0 rgba(196,137,42,0); }
+  }
+  .nav-save-btn.pulse { animation: savePulse 0.6s ease-out; }
+
+  /* Inline number input */
+  .inline-input {
+    background: var(--cream-dark);
+    border: 1px solid var(--chip-border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-family: var(--font);
+    font-size: 15px;
+    color: var(--ink);
+    width: 68px;
+    text-align: right;
+    outline: none;
+    -webkit-appearance: none;
+    -moz-appearance: textfield;
+  }
+  .inline-input:focus {
+    border-color: var(--ochre);
+    box-shadow: 0 0 0 2px rgba(196,137,42,0.15);
+  }
+  .inline-input::-webkit-inner-spin-button,
+  .inline-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .row-unit { font-size: 13px; color: var(--ink-3); margin-left: -4px; }
+
+  /* Picker select */
+  .row-select {
+    background: var(--cream-dark);
+    border: 1px solid var(--chip-border);
+    border-radius: 6px;
+    padding: 5px 28px 5px 10px;
+    font-family: var(--font);
+    font-size: 14px;
+    color: var(--ink);
+    outline: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237A6552' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    cursor: pointer;
+    max-width: 160px;
+  }
+</style>
+</head>
+<body>
+
+<div class="scene">
+  <div class="phone">
+    <div class="phone-inner">
+      <div class="dynamic-island"></div>
+
+      <!-- Status Bar -->
+      <div class="status-bar">
+        <span class="status-time">9:41</span>
+        <div class="status-icons">
+          <div class="signal">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <svg width="16" height="12" viewBox="0 0 16 12" fill="none" aria-hidden="true" style="display:block;">
+            <path d="M8 9.5a1.5 1.5 0 110 3 1.5 1.5 0 010-3z" fill="#1A1410"/>
+            <path d="M4.2 7C5.3 5.9 6.6 5.3 8 5.3c1.4 0 2.7.6 3.8 1.7" stroke="#1A1410" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+            <path d="M1.5 4.3C3.3 2.5 5.5 1.5 8 1.5c2.5 0 4.7 1 6.5 2.8" stroke="#1A1410" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+          </svg>
+          <div class="battery">
+            <div class="battery-body"><div class="battery-fill"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nav Bar -->
+      <div class="nav-bar">
+        <span class="nav-title">You</span>
+        <button class="nav-save-btn" id="saveBtn">Save</button>
+      </div>
+
+      <!-- Scrollable content -->
+      <div class="scroll-content" id="scrollContent">
+
+        <!-- ── Header ── -->
+        <div class="profile-header">
+          <div class="coach-eyebrow">MYO Coach</div>
+          <div class="coach-headline">Here's what I know<br>about you so far.</div>
+          <div class="coach-subline">The more you fill in, the better I can coach you.<br>This is your file — you control it.</div>
+          <div class="completion-row">
+            <div class="completion-ring-wrap">
+              <svg class="ring-svg" viewBox="0 0 44 44" aria-hidden="true">
+                <circle class="ring-track" cx="22" cy="22" r="18"/>
+                <circle class="ring-fill" id="ringFill" cx="22" cy="22" r="18"/>
+              </svg>
+              <div class="ring-label" id="ringLabel">75%</div>
+            </div>
+            <div class="completion-text">
+              <div class="completion-pct" id="completionPct">Profile is 75% complete</div>
+              <div class="completion-detail" id="completionDetail">Add injuries and dietary info to finish</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 1. About You ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">About You</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="row">
+              <span class="row-label">Age</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input class="inline-input" type="number" value="28" min="13" max="99" id="ageInput">
+                <span class="row-unit">yrs</span>
+              </div>
+            </div>
+            <div class="row">
+              <span class="row-label">Sex / gender</span>
+              <select class="row-select" id="sexSelect">
+                <option value="">—</option>
+                <option value="male" selected>Male</option>
+                <option value="female">Female</option>
+                <option value="other">Self-described</option>
+              </select>
+            </div>
+            <div class="row">
+              <span class="row-label">Height</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input class="inline-input" type="number" value="178" min="100" max="250" style="width:60px;">
+                <span class="row-unit">cm</span>
+              </div>
+            </div>
+            <div class="row">
+              <span class="row-label">Weight</span>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <input class="inline-input" type="number" value="82" min="30" max="300" style="width:60px;">
+                <span class="row-unit">kg</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 2. Goals ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Goals</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="chip-grid" id="goalsGrid">
+              <div class="chip goal-chip selected">Build muscle</div>
+              <div class="chip goal-chip">Lose fat</div>
+              <div class="chip goal-chip selected">Get stronger</div>
+              <div class="chip goal-chip">Improve cardio</div>
+              <div class="chip goal-chip">Mobility / flexibility</div>
+              <div class="chip goal-chip">Athletic performance</div>
+              <div class="chip goal-chip">Rehab / recover</div>
+              <div class="chip goal-chip selected">General health</div>
+            </div>
+            <textarea class="notes-textarea" id="goalNotes" placeholder='Anything specific? e.g. "squat 2x bodyweight by June"' rows="2">Squat 2x bodyweight by end of year.</textarea>
+          </div>
+        </div>
+
+        <!-- ── 3. Experience ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Experience</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="exp-grid" id="expGrid">
+              <div class="exp-pill" data-val="new">
+                <div class="exp-pill-name">New</div>
+                <div class="exp-pill-desc">Just starting out</div>
+              </div>
+              <div class="exp-pill" data-val="beginner">
+                <div class="exp-pill-name">Beginner</div>
+                <div class="exp-pill-desc">Under 1 year consistent training</div>
+              </div>
+              <div class="exp-pill selected" data-val="intermediate">
+                <div class="exp-pill-name">Intermediate</div>
+                <div class="exp-pill-desc">1–3 years, comfortable with the basics</div>
+              </div>
+              <div class="exp-pill" data-val="advanced">
+                <div class="exp-pill-name">Advanced</div>
+                <div class="exp-pill-desc">3+ years, chasing real numbers</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 4. Schedule ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Schedule</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="row">
+              <span class="row-label">Days per week</span>
+              <div class="stepper">
+                <button class="stepper-btn" id="daysDecBtn" aria-label="Decrease days">&#8722;</button>
+                <div class="stepper-divider"></div>
+                <div class="stepper-val" id="daysVal">4</div>
+                <div class="stepper-divider"></div>
+                <button class="stepper-btn" id="daysIncBtn" aria-label="Increase days">+</button>
+              </div>
+            </div>
+            <div class="row">
+              <span class="row-label">Session length</span>
+              <div class="stepper">
+                <button class="stepper-btn" id="sessionDecBtn" aria-label="Decrease session length">&#8722;</button>
+                <div class="stepper-divider"></div>
+                <div class="stepper-val" id="sessionVal" style="min-width:56px;">45 min</div>
+                <div class="stepper-divider"></div>
+                <button class="stepper-btn" id="sessionIncBtn" aria-label="Increase session length">+</button>
+              </div>
+            </div>
+            <div class="row" style="border-bottom:none; padding-bottom:4px; align-items:flex-start;">
+              <span class="row-label">Preferred time</span>
+            </div>
+            <div class="time-row" id="timeChips">
+              <div class="time-chip" data-val="earlyam">Early AM</div>
+              <div class="time-chip selected" data-val="morning">Morning</div>
+              <div class="time-chip" data-val="midday">Midday</div>
+              <div class="time-chip" data-val="afternoon">Afternoon</div>
+              <div class="time-chip" data-val="evening">Evening</div>
+              <div class="time-chip" data-val="latenight">Late night</div>
+              <div class="time-chip" data-val="flexible">Flexible</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 5. Equipment / Gear ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Equipment / Gear</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="tag-wrap" id="equipmentTags"></div>
+            <div class="empty-hint" id="equipmentEmpty" style="display:none;">Nothing added — tell MYO what you have access to.</div>
+            <div class="tag-input-row">
+              <input class="tag-input" id="equipInput" type="text" placeholder='Add gear, e.g. "barbell"'>
+              <button class="tag-add-btn" id="equipAddBtn" disabled>Add</button>
+            </div>
+          </div>
+          <div class="section-note">What you have access to. MYO picks exercises you can actually do.</div>
+        </div>
+
+        <!-- ── 6. Coaching Style ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Coaching Style</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="style-grid" id="toneGrid">
+              <div class="style-card" data-val="direct">
+                <div class="style-card-icon">&#9889;</div>
+                <span class="style-card-name">Direct</span>
+                <span class="style-card-desc">Clear, concise, no fluff</span>
+              </div>
+              <div class="style-card selected" data-val="balanced">
+                <div class="style-card-icon">&#9878;&#65039;</div>
+                <span class="style-card-name">Balanced</span>
+                <span class="style-card-desc">Default — practical and warm</span>
+              </div>
+              <div class="style-card" data-val="warm">
+                <div class="style-card-icon">&#9728;&#65039;</div>
+                <span class="style-card-name">Warm</span>
+                <span class="style-card-desc">Encouraging, still honest</span>
+              </div>
+            </div>
+            <span class="subsection-label">Methodology</span>
+            <div class="method-scroll" id="methodChips">
+              <div class="method-chip selected" data-val="myo">Let MYO decide</div>
+              <div class="method-chip" data-val="split">Muscle split</div>
+              <div class="method-chip" data-val="fullbody">Full body</div>
+              <div class="method-chip" data-val="sc">Strength and conditioning</div>
+              <div class="method-chip" data-val="mobility">Mobility</div>
+              <div class="method-chip" data-val="endurance">Endurance</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 7. Injuries / Limitations ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Injuries / Limitations</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="tag-wrap" id="injuryTags"></div>
+            <div class="empty-hint" id="injuryEmpty">Nothing flagged — add anything MYO should work around.</div>
+            <div class="tag-input-row">
+              <input class="tag-input" id="injuryInput" type="text" placeholder='e.g. "left knee meniscus"'>
+              <button class="tag-add-btn" id="injuryAddBtn" disabled>Add</button>
+            </div>
+          </div>
+          <div class="section-note">MYO avoids exercises that aggravate these. Be specific — "left shoulder impingement" is more useful than "shoulder."</div>
+        </div>
+
+        <!-- ── 8. Dietary ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Dietary</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="tag-wrap" id="dietaryTags"></div>
+            <div class="empty-hint" id="dietaryEmpty" style="display:none;">Nothing added — optional but helps with nutrition context.</div>
+            <div class="tag-input-row">
+              <input class="tag-input" id="dietaryInput" type="text" placeholder='e.g. "vegan", "gluten-free"'>
+              <button class="tag-add-btn" id="dietaryAddBtn" disabled>Add</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── 9. Disliked Exercises ── -->
+        <div class="section">
+          <div class="section-header">
+            <span class="section-label">Disliked Exercises</span>
+            <div class="section-rule"></div>
+          </div>
+          <div class="section-card">
+            <div class="tag-wrap" id="dislikedTags"></div>
+            <div class="empty-hint" id="dislikedEmpty" style="display:none;">Nothing avoided — add anything you would rather skip.</div>
+            <div class="tag-input-row">
+              <input class="tag-input" id="dislikedInput" type="text" placeholder='e.g. "burpees", "sit-ups"'>
+              <button class="tag-add-btn" id="dislikedAddBtn" disabled>Add</button>
+            </div>
+          </div>
+          <div class="section-note">MYO will try to avoid these — unless you opt in for a session.</div>
+        </div>
+
+        <div class="bottom-spacer"></div>
+      </div>
+
+      <!-- Tab Bar -->
+      <div class="tab-bar">
+        <div class="tab-item" data-tab="coach">
+          <div class="tab-icon">&#128172;</div>
+          <div class="tab-label">Coach</div>
+        </div>
+        <div class="tab-item" data-tab="workout">
+          <div class="tab-icon">&#127947;</div>
+          <div class="tab-label">Workout</div>
+        </div>
+        <div class="tab-item" data-tab="plan">
+          <div class="tab-icon">&#128197;</div>
+          <div class="tab-label">Plan</div>
+        </div>
+        <div class="tab-item active" data-tab="you">
+          <div class="tab-icon">&#128100;</div>
+          <div class="tab-label">You</div>
+        </div>
+      </div>
+
+    </div><!-- phone-inner -->
+  </div><!-- phone -->
+</div><!-- scene -->
+
+<div class="save-toast" id="saveToast">Profile updated. MYO will apply this next session.</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ─── Initial data ───────────────────────────────────────────────── */
+  var initialEquipment  = ['Barbell', 'Squat rack', 'Dumbbells', 'Pull-up bar', 'Cable machine', 'Resistance bands'];
+  var initialDietary    = ['Vegetarian', 'Lactose-free'];
+  var initialDisliked   = ['Burpees'];
+
+  /* ─── Tag system ─────────────────────────────────────────────────── */
+
+  function makeTagEl(text, containerId) {
+    var tag = document.createElement('div');
+    tag.className = 'tag';
+
+    var span = document.createElement('span');
+    span.className = 'tag-text';
+    span.textContent = text;
+
+    var xSpan = document.createElement('span');
+    xSpan.className = 'tag-x';
+    xSpan.setAttribute('aria-hidden', 'true');
+    xSpan.textContent = '✕';
+
+    tag.appendChild(span);
+    tag.appendChild(xSpan);
+
+    tag.addEventListener('click', function () {
+      removeTag(tag, containerId);
+    });
+
+    return tag;
+  }
+
+  function addTagToContainer(text, containerId) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+
+    var tag = makeTagEl(text, containerId);
+    tag.style.opacity = '0';
+    tag.style.transform = 'scale(0.85)';
+    container.appendChild(tag);
+
+    requestAnimationFrame(function () {
+      tag.style.transition = 'opacity 0.2s, transform 0.25s cubic-bezier(0.34,1.56,0.64,1)';
+      tag.style.opacity = '1';
+      tag.style.transform = 'scale(1)';
+    });
+
+    updateEmptyState(containerId);
+    updateCompletion();
+  }
+
+  function removeTag(tagEl, containerId) {
+    tagEl.classList.add('removing');
+    setTimeout(function () {
+      if (tagEl.parentNode) tagEl.parentNode.removeChild(tagEl);
+      updateEmptyState(containerId);
+      updateCompletion();
+    }, 200);
+  }
+
+  function updateEmptyState(containerId) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    var emptyId = containerId.replace('Tags', 'Empty');
+    var emptyEl = document.getElementById(emptyId);
+    if (!emptyEl) return;
+    var hasTags = container.querySelectorAll('.tag').length > 0;
+    emptyEl.style.display = hasTags ? 'none' : 'block';
+  }
+
+  /* ─── Tag input wiring ───────────────────────────────────────────── */
+
+  function wireTagInput(inputId, containerId, addBtnId) {
+    var input  = document.getElementById(inputId);
+    var addBtn = document.getElementById(addBtnId);
+    if (!input || !addBtn) return;
+
+    input.addEventListener('input', function () {
+      addBtn.disabled = input.value.trim().length === 0;
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doAddTag(input, containerId, addBtn);
+      }
+    });
+
+    addBtn.addEventListener('click', function () {
+      doAddTag(input, containerId, addBtn);
+    });
+  }
+
+  function doAddTag(input, containerId, addBtn) {
+    var val = input.value.trim();
+    if (!val) return;
+    addTagToContainer(val, containerId);
+    input.value = '';
+    addBtn.disabled = true;
+  }
+
+  /* ─── Ripple micro-interaction ───────────────────────────────────── */
+
+  function pulseRipple(el) {
+    el.classList.add('ripple-host');
+    var r = document.createElement('div');
+    r.className = 'ripple-el';
+    r.style.left  = Math.round(el.offsetWidth  / 2) + 'px';
+    r.style.top   = Math.round(el.offsetHeight / 2) + 'px';
+    el.appendChild(r);
+    r.addEventListener('animationend', function () {
+      if (r.parentNode) r.parentNode.removeChild(r);
+    });
+  }
+
+  /* ─── Single-select helpers ──────────────────────────────────────── */
+
+  function selectOne(clicked, siblingSelector) {
+    var siblings = clicked.parentElement.querySelectorAll(siblingSelector);
+    siblings.forEach(function (s) { s.classList.remove('selected'); });
+    clicked.classList.add('selected');
+    pulseRipple(clicked);
+  }
+
+  /* ─── Stepper ────────────────────────────────────────────────────── */
+
+  function animateStepper(el) {
+    el.style.transition = 'none';
+    el.style.transform = 'scale(1.18)';
+    requestAnimationFrame(function () {
+      el.style.transition = 'transform 0.14s cubic-bezier(0.34,1.56,0.64,1)';
+      el.style.transform = 'scale(1)';
+    });
+  }
+
+  var daysVal    = 4;
+  var sessionVal = 45;
+
+  function updateDaysDisplay() {
+    var el = document.getElementById('daysVal');
+    if (el) el.textContent = String(daysVal);
+    animateStepper(el);
+  }
+
+  function updateSessionDisplay() {
+    var el = document.getElementById('sessionVal');
+    if (el) el.textContent = sessionVal + ' min';
+    animateStepper(el);
+  }
+
+  /* ─── Completion ring ────────────────────────────────────────────── */
+
+  function updateCompletion() {
+    var score = 0;
+
+    // Age present
+    var ageEl = document.getElementById('ageInput');
+    if (ageEl && ageEl.value.trim().length > 0) score += 15;
+
+    // Goals selected
+    var goalCount = document.querySelectorAll('#goalsGrid .chip.selected').length;
+    if (goalCount > 0) score += 15;
+
+    // Experience selected
+    if (document.querySelector('#expGrid .exp-pill.selected')) score += 15;
+
+    // Schedule always has defaults
+    score += 15;
+
+    // Equipment
+    var equipCount = document.querySelectorAll('#equipmentTags .tag').length;
+    if (equipCount > 0) score += 10;
+
+    // Coaching style always has defaults
+    score += 10;
+
+    // Injuries
+    var injuryCount = document.querySelectorAll('#injuryTags .tag').length;
+    if (injuryCount > 0) score += 10;
+
+    // Dietary
+    var dietaryCount = document.querySelectorAll('#dietaryTags .tag').length;
+    if (dietaryCount > 0) score += 5;
+
+    // Disliked
+    var dislikedCount = document.querySelectorAll('#dislikedTags .tag').length;
+    if (dislikedCount > 0) score += 5;
+
+    score = Math.min(100, score);
+
+    var ring = document.getElementById('ringFill');
+    var labelEl = document.getElementById('ringLabel');
+    var pctEl   = document.getElementById('completionPct');
+    var detailEl = document.getElementById('completionDetail');
+
+    var circumference = 113.1;
+    var offset = circumference - (circumference * score / 100);
+    if (ring) ring.style.strokeDashoffset = String(offset);
+    if (labelEl) labelEl.textContent = score + '%';
+    if (pctEl) pctEl.textContent = 'Profile is ' + score + '% complete';
+    if (detailEl) {
+      if (score >= 100) {
+        detailEl.textContent = 'All set — MYO has everything it needs.';
+      } else if (score >= 75) {
+        detailEl.textContent = 'Almost there — add injuries or dietary info.';
+      } else {
+        detailEl.textContent = 'Add more to help MYO coach you better.';
+      }
+    }
+  }
+
+  /* ─── Save ───────────────────────────────────────────────────────── */
+
+  function handleSave() {
+    var btn = document.getElementById('saveBtn');
+    if (btn) {
+      btn.classList.remove('pulse');
+      void btn.offsetWidth; // reflow to retrigger
+      btn.classList.add('pulse');
+      btn.addEventListener('animationend', function () {
+        btn.classList.remove('pulse');
+      }, { once: true });
+    }
+    var toast = document.getElementById('saveToast');
+    if (toast) {
+      toast.classList.add('visible');
+      setTimeout(function () { toast.classList.remove('visible'); }, 3000);
+    }
+  }
+
+  /* ─── Tab bar ────────────────────────────────────────────────────── */
+
+  function setupTabBar() {
+    var items = document.querySelectorAll('.tab-item');
+    items.forEach(function (item) {
+      item.addEventListener('click', function () {
+        items.forEach(function (t) { t.classList.remove('active'); });
+        item.classList.add('active');
+        var icon = item.querySelector('.tab-icon');
+        if (icon) {
+          icon.style.transition = 'transform 0.18s cubic-bezier(0.34,1.56,0.64,1)';
+          icon.style.transform = 'scale(1.3)';
+          setTimeout(function () { icon.style.transform = 'scale(1)'; }, 200);
+        }
+      });
+    });
+  }
+
+  /* ─── Init ───────────────────────────────────────────────────────── */
+
+  document.addEventListener('DOMContentLoaded', function () {
+
+    /* Seed tag containers */
+    initialEquipment.forEach(function (t) { addTagToContainer(t, 'equipmentTags'); });
+    initialDietary.forEach(function (t)   { addTagToContainer(t, 'dietaryTags'); });
+    initialDisliked.forEach(function (t)  { addTagToContainer(t, 'dislikedTags'); });
+
+    /* Wire tag inputs */
+    wireTagInput('equipInput',   'equipmentTags', 'equipAddBtn');
+    wireTagInput('injuryInput',  'injuryTags',    'injuryAddBtn');
+    wireTagInput('dietaryInput', 'dietaryTags',   'dietaryAddBtn');
+    wireTagInput('dislikedInput','dislikedTags',  'dislikedAddBtn');
+
+    /* Goals chips */
+    document.querySelectorAll('#goalsGrid .chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chip.classList.toggle('selected');
+        pulseRipple(chip);
+        updateCompletion();
+      });
+    });
+
+    /* Experience pills */
+    document.querySelectorAll('#expGrid .exp-pill').forEach(function (pill) {
+      pill.addEventListener('click', function () {
+        selectOne(pill, '.exp-pill');
+        updateCompletion();
+      });
+    });
+
+    /* Tone cards */
+    document.querySelectorAll('#toneGrid .style-card').forEach(function (card) {
+      card.addEventListener('click', function () {
+        selectOne(card, '.style-card');
+      });
+    });
+
+    /* Methodology chips */
+    document.querySelectorAll('#methodChips .method-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        selectOne(chip, '.method-chip');
+      });
+    });
+
+    /* Time chips */
+    document.querySelectorAll('#timeChips .time-chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        selectOne(chip, '.time-chip');
+      });
+    });
+
+    /* Steppers — days */
+    var decDays = document.getElementById('daysDecBtn');
+    var incDays = document.getElementById('daysIncBtn');
+    if (decDays) decDays.addEventListener('click', function () {
+      if (daysVal > 1) { daysVal -= 1; updateDaysDisplay(); }
+    });
+    if (incDays) incDays.addEventListener('click', function () {
+      if (daysVal < 7) { daysVal += 1; updateDaysDisplay(); }
+    });
+
+    /* Steppers — session */
+    var decSession = document.getElementById('sessionDecBtn');
+    var incSession = document.getElementById('sessionIncBtn');
+    if (decSession) decSession.addEventListener('click', function () {
+      if (sessionVal > 15) { sessionVal -= 15; updateSessionDisplay(); }
+    });
+    if (incSession) incSession.addEventListener('click', function () {
+      if (sessionVal < 180) { sessionVal += 15; updateSessionDisplay(); }
+    });
+
+    /* Age change */
+    var ageInput = document.getElementById('ageInput');
+    if (ageInput) ageInput.addEventListener('input', updateCompletion);
+
+    /* Save button */
+    var saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', handleSave);
+
+    /* Tab bar */
+    setupTabBar();
+
+    /* Animate ring in on load */
+    var ring = document.getElementById('ringFill');
+    if (ring) {
+      ring.style.strokeDashoffset = '113.1';
+      requestAnimationFrame(function () {
+        ring.style.transition = 'stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1) 0.4s';
+        ring.style.strokeDashoffset = '28.3';
+      });
+    }
+
+    /* Initial empty state + completion */
+    updateEmptyState('injuryTags');
+    updateCompletion();
+  });
+
+}());
+</script>
+</body>
+</html>
