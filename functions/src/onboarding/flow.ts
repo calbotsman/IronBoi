@@ -412,7 +412,11 @@ function buildProgramProposal(
     userId,
     planId: "current",
     source: "coach_generated",
-    days: selectPlanDays(defaultPlan, profile.schedule.daysPerWeek ?? 3),
+    days: selectPlanDays(
+      defaultPlan,
+      profile.schedule.daysPerWeek ?? 3,
+      profile.schedule.preferredDays,
+    ),
     updatedAt: now,
   });
 
@@ -443,18 +447,77 @@ function questionForStep(step: string, draft: OnboardingDraft) {
   ].join("\n");
 }
 
-function selectPlanDays(defaultPlan: Record<string, PlannedWorkoutDayType>, daysPerWeek: number) {
-  const entries = Object.entries(defaultPlan);
-  let remaining = Math.max(1, Math.min(7, daysPerWeek));
+// Canonical training-day distributions per weekly frequency. These are
+// the splits a real coach would prescribe — front-loading a 3-day plan
+// into Mon/Tue/Wed (the old behavior) gives you three workouts and four
+// straight days off, which is not how anyone trains. The reasoning:
+//
+//   1 day:  Mon                         → start-of-week anchor
+//   2 days: Mon, Thu                    → ~72h between sessions
+//   3 days: Mon, Wed, Fri               → classic Mon/Wed/Fri split
+//   4 days: Mon, Tue, Thu, Fri          → upper/lower or push/pull
+//   5 days: Mon, Tue, Wed, Fri, Sat     → Thu as midweek deload day
+//   6 days: Mon, Tue, Wed, Thu, Fri, Sat → Sunday rest
+//   7 days: Mon..Sun                    → every day, with at least one
+//                                         active-recovery slot
+const CANONICAL_TRAINING_DAYS: Record<number, string[]> = {
+  1: ["Mon"],
+  2: ["Mon", "Thu"],
+  3: ["Mon", "Wed", "Fri"],
+  4: ["Mon", "Tue", "Thu", "Fri"],
+  5: ["Mon", "Tue", "Wed", "Fri", "Sat"],
+  6: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  7: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+};
+
+const WEEK_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+export function selectPlanDays(
+  defaultPlan: Record<string, PlannedWorkoutDayType>,
+  daysPerWeek: number,
+  preferredDays?: string[],
+) {
+  const clamped = Math.max(1, Math.min(7, daysPerWeek));
+  const trainingDays = pickTrainingDays(clamped, preferredDays);
+
+  // For each training day, pull the next day-with-exercises from the seed
+  // plan in seed order. Seed Mon→Sun is a curated rotation so distributing
+  // it by index (not by exact day) keeps the muscle-group rhythm.
+  const seedDaysWithExercises = WEEK_ORDER.map((day) => defaultPlan[day]).filter(
+    (value) => value && (value.exercises?.length ?? 0) > 0,
+  );
+
+  const restDay = { name: "Rest", muscles: [], exercises: [] };
   return Object.fromEntries(
-    entries.map(([day, value]) => {
-      if (remaining > 0 && value.exercises?.length) {
-        remaining -= 1;
-        return [day, value];
-      }
-      return [day, { name: "Rest", muscles: [], exercises: [] }];
+    WEEK_ORDER.map((day) => {
+      const trainingIdx = trainingDays.indexOf(day);
+      if (trainingIdx === -1) return [day, restDay];
+      // Modulo so we wrap when daysPerWeek > seed-day-count.
+      const seed =
+        seedDaysWithExercises[trainingIdx % seedDaysWithExercises.length];
+      return [day, seed ?? restDay];
     }),
   );
+}
+
+// If the user listed preferred days in onboarding and they're well-formed
+// AND there are enough of them to satisfy daysPerWeek, honor them.
+// Otherwise fall back to the canonical schedule.
+function pickTrainingDays(
+  daysPerWeek: number,
+  preferredDays?: string[],
+): string[] {
+  const valid = (preferredDays ?? [])
+    .map((d) => d.slice(0, 3))
+    .filter((d): d is (typeof WEEK_ORDER)[number] =>
+      (WEEK_ORDER as readonly string[]).includes(d),
+    );
+  if (valid.length >= daysPerWeek) {
+    // Take the first N in week order to keep deterministic ordering.
+    const set = new Set(valid);
+    return WEEK_ORDER.filter((d) => set.has(d)).slice(0, daysPerWeek);
+  }
+  return CANONICAL_TRAINING_DAYS[daysPerWeek] ?? CANONICAL_TRAINING_DAYS[3];
 }
 
 function recommendTrainingFocus(draft: OnboardingDraft): z.infer<typeof TrainingFocus> {
