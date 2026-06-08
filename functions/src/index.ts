@@ -76,6 +76,7 @@ import {
   AcceptProgramProposalRequest,
   OnboardingAnswerRequest,
   acceptProgramProposal,
+  buildWorkoutPlanFromProfile,
   processOnboardingAnswer,
 } from "./onboarding/flow.js";
 
@@ -313,6 +314,64 @@ async function deleteCollectionTree(collection: CollectionReference) {
 // refresh tokens so any signed-in clients can't keep using the session.
 //
 // Required by Apple App Store guideline 5.1.1(v) and CCPA/GDPR Article 17.
+// Regenerate the user's workoutPlans/current doc from their CURRENT
+// profile and the seed default plan. Useful when:
+//   - The plan-generation rules change (e.g. the M/W/F vs Mon-Wed
+//     distribution fix in commit 449862b — existing plans don't get
+//     rewritten automatically)
+//   - The user updates preferences on the You tab and wants the plan
+//     to reflect them without re-running the chat-based onboarding
+//
+// Overwrites the existing plan doc. The iOS UI puts a confirm step in
+// front of this — the callable itself doesn't second-guess.
+export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+
+  const profileSnap = await db.doc(profilePath(userId)).get();
+  if (!profileSnap.exists) {
+    throw new HttpsError("failed-precondition", "profile_not_found");
+  }
+  const profileData = profileSnap.data() ?? {};
+  // We only need schedule.daysPerWeek + schedule.preferredDays. Coerce a
+  // minimal object so this works for partial profiles too — a user who
+  // edited daysPerWeek alone on the You tab still gets a plan.
+  const profile = {
+    schedule: {
+      daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
+        ? profileData.schedule.daysPerWeek
+        : 3,
+      preferredDays: Array.isArray(profileData.schedule?.preferredDays)
+        ? (profileData.schedule.preferredDays as string[])
+        : [],
+    },
+  };
+
+  const now = new Date().toISOString();
+  const plan = buildWorkoutPlanFromProfile(
+    userId,
+    profile,
+    seed.DEFAULT_PLAN,
+    now,
+  );
+
+  await db.doc(workoutPlanPath(userId, "current")).set(
+    {
+      ...plan,
+      serverUpdatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: false }, // overwrite — old days that were dropped should go
+  );
+
+  await recordAuditEventBestEffort(db, {
+    userId,
+    eventType: "memory_fact_written", // closest existing audit category
+    actor: "user",
+    payload: { source: "regenerate_plan", daysPerWeek: profile.schedule.daysPerWeek },
+  });
+
+  return { ok: true, daysPerWeek: profile.schedule.daysPerWeek };
+});
+
 export const deleteAccount = onCall(
   CALLABLE_OPTS,
   async (request) => {

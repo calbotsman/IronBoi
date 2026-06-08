@@ -11,6 +11,8 @@ struct PreferencesView: View {
     @State private var newDietaryConstraint: String = ""
     @State private var newDislikedExercise: String = ""
     @State private var saveMessage: String?
+    @State private var showRegenerateConfirm = false
+    @State private var regenerateMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -29,6 +31,34 @@ struct PreferencesView: View {
                     Section {
                         Text(saveMessage).font(.footnote).foregroundStyle(.secondary)
                     }
+                }
+
+                Section {
+                    Button {
+                        showRegenerateConfirm = true
+                    } label: {
+                        HStack {
+                            if appModel.isWorkoutBusy {
+                                ProgressView().padding(.trailing, 4)
+                            }
+                            Text("Rebuild my workout plan")
+                        }
+                    }
+                    .disabled(appModel.isWorkoutBusy)
+
+                    if let regenerateMessage {
+                        Text(regenerateMessage).font(.footnote).foregroundStyle(.secondary)
+                    }
+                } footer: {
+                    Text("Overwrites your current week with a fresh plan that matches your current preferences. Coach-chat customizations will be lost.")
+                }
+                .alert("Rebuild plan?", isPresented: $showRegenerateConfirm) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Rebuild", role: .destructive) {
+                        Task { await regenerate() }
+                    }
+                } message: {
+                    Text("This overwrites your current weekly plan with one built from your preferences. Anything you've adjusted via the coach will be lost.")
                 }
             }
             .navigationTitle("You")
@@ -279,6 +309,14 @@ struct PreferencesView: View {
         await appModel.upsertProfile(draft)
         if appModel.errorMessage == nil {
             saveMessage = "Saved."
+        }
+    }
+
+    private func regenerate() async {
+        regenerateMessage = nil
+        await appModel.regenerateWorkoutPlan()
+        if appModel.errorMessage == nil {
+            regenerateMessage = "Plan rebuilt. Check the Workout tab."
         }
     }
 }

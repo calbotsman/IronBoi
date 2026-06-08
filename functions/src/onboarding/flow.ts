@@ -408,17 +408,7 @@ function buildProgramProposal(
     updatedAt: now,
   });
 
-  const workoutPlan = WorkoutPlan.parse({
-    userId,
-    planId: "current",
-    source: "coach_generated",
-    days: selectPlanDays(
-      defaultPlan,
-      profile.schedule.daysPerWeek ?? 3,
-      profile.schedule.preferredDays,
-    ),
-    updatedAt: now,
-  });
+  const workoutPlan = buildWorkoutPlanFromProfile(userId, profile, defaultPlan, now);
 
   return ProgramProposal.parse({
     userId,
@@ -471,6 +461,30 @@ const CANONICAL_TRAINING_DAYS: Record<number, string[]> = {
 };
 
 const WEEK_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+// Reusable plan builder — used by both the onboarding proposal flow AND
+// the standalone regenerateWorkoutPlan callable. Same logic, same days
+// distribution, same shape. Don't duplicate this elsewhere.
+export function buildWorkoutPlanFromProfile(
+  userId: string,
+  profile: {
+    schedule: { daysPerWeek?: number; preferredDays?: string[] };
+  },
+  defaultPlan: Record<string, PlannedWorkoutDayType>,
+  now: string,
+) {
+  return WorkoutPlan.parse({
+    userId,
+    planId: "current",
+    source: "coach_generated",
+    days: selectPlanDays(
+      defaultPlan,
+      profile.schedule.daysPerWeek ?? 3,
+      profile.schedule.preferredDays,
+    ),
+    updatedAt: now,
+  });
+}
 
 export function selectPlanDays(
   defaultPlan: Record<string, PlannedWorkoutDayType>,

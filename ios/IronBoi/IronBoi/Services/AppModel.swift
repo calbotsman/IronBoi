@@ -527,6 +527,27 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    /// Server-side rebuild of the user's workoutPlans/current doc from
+    /// their currently-saved profile. Used after editing days-per-week
+    /// or preferredDays — the chat-based onboarding generates the plan
+    /// the first time, this lets the user request a fresh one without
+    /// re-running onboarding.
+    func regenerateWorkoutPlan() async {
+        guard !isWorkoutBusy else { return }
+        isWorkoutBusy = true
+        defer { isWorkoutBusy = false }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let callable = functions.httpsCallable("regenerateWorkoutPlan")
+            _ = try await callable.call([:] as [String: Any])
+            // The Firestore listener picks up the new plan and republishes
+            // currentWorkoutPlan automatically — no local mutation needed.
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func listenForOnboardingMessages(userId: String?) {
         onboardingMessageListener?.remove()
         onboardingMessages = []
