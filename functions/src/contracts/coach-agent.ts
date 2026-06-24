@@ -37,6 +37,19 @@ export const GoalType = z.enum([
   "return_to_training",
 ]);
 
+// Explanatory "lens" the user can pick so the coach frames its EXPLANATIONS
+// through a credible authority's emphasis. Per docs/design/myo-personas-*
+// (Rowan's call): lenses are "ways to understand your training," not
+// celebrity worship, and they never override safety or corpus grounding.
+// Kept to the audited top three (Mercer dossier) plus "none".
+export const CoachingLens = z.enum([
+  "none",
+  "huberman", // recovery, circadian, nervous-system framing
+  "schoenfeld", // hypertrophy mechanics: tension, volume, progression
+  "sims", // female-physiology and cycle-aware framing
+  "blueprint", // measurement-driven longevity, consistency (Bryan Johnson)
+]);
+
 export const DataCategory = z.enum([
   "profile",
   "coach_memory",
@@ -155,6 +168,7 @@ export const UserHealthProfile = z.object({
     preferredWorkoutTime: z.enum(["morning", "afternoon", "evening", "flexible"]).default("flexible"),
     dislikedExercises: z.array(z.string()).default([]),
     trainingFocus: TrainingFocus.default("myo_recommended"),
+    coachingLens: CoachingLens.default("none"),
   }).strict(),
   dietaryConstraints: z.array(z.string()).default([]),
   onboardingStatus: OnboardingStatus.default("complete"),

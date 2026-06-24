@@ -22,7 +22,7 @@ struct OnboardingView: View {
                 }
                 composer
             }
-            .background(Color.myoIllustrationPaper.ignoresSafeArea())
+            .background(PaperBackground())
             .navigationTitle("MYO Coach")
             .toolbar {
                 Button("Reset") {
@@ -80,19 +80,19 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(statusLabel)
                         .font(.caption.weight(.bold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                         .textCase(.uppercase)
 
                     Text("Building your private MYO profile")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.45))
                 }
 
                 Spacer()
 
-                Text("\(completedCount)/12")
+                Text("\(completedCount)/13")
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
                 Button {
                     showsResetConfirmation = true
@@ -105,8 +105,8 @@ struct OnboardingView: View {
                 .disabled(appModel.isOnboardingBusy)
             }
 
-            ProgressView(value: Double(completedCount), total: 12)
-                .tint(.yellow)
+            ProgressView(value: Double(completedCount), total: 13)
+                .tint(MyoTheme.Colors.ochre)
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -131,11 +131,11 @@ struct OnboardingView: View {
             }
             .onChange(of: appModel.onboardingMessages) { _, messages in
                 guard let last = messages.last else { return }
-                withAnimation(.snappy) {
+                withAnimation(MyoTheme.Motion.fade) {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            .background(Color.myoIllustrationPaper)
+            .background(MyoTheme.Colors.cream)
         }
     }
 
@@ -166,8 +166,8 @@ struct OnboardingView: View {
                             .font(.subheadline.weight(.semibold))
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
-                            .background(canContinueMultiSelect ? Color.yellow : Color(.tertiarySystemFill))
-                            .foregroundStyle(canContinueMultiSelect ? .black : .secondary)
+                            .background(canContinueMultiSelect ? MyoColor.Surface.selected.color : MyoTheme.Colors.ink.opacity(0.06))
+                            .foregroundStyle(canContinueMultiSelect ? MyoColor.Text.primary.color : MyoColor.Text.tertiary.color)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -188,10 +188,10 @@ struct OnboardingView: View {
                 Image(systemName: voiceInput.isListening ? "mic.circle.fill" : "mic.circle")
                     .font(.system(size: 32))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(voiceInput.isListening ? .red : .primary)
+                    .foregroundStyle(voiceInput.isListening ? MyoTheme.Colors.brick : MyoTheme.Colors.ink)
             }
             .disabled(appModel.isOnboardingBusy)
-            .accessibilityLabel(voiceInput.isListening ? "Stop talk input" : "Talk to MYO Coach")
+            .accessibilityLabel(voiceInput.isListening ? "Stop talk input" : "Talk to Coach")
 
             TextField("Continue by typing...", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
@@ -213,7 +213,7 @@ struct OnboardingView: View {
     }
 
     private var completedCount: Int {
-        max(0, 12 - appModel.onboardingMissingFields.count)
+        max(0, 13 - appModel.onboardingMissingFields.count)
     }
 
     private var statusLabel: String {
@@ -263,11 +263,19 @@ struct OnboardingView: View {
             return [30, 45, 60, 75].map { choice("length_\($0)", "\($0) min", "sessionLengthMin", $0) }
         case "trainingFocus":
             return [
-                choice("myo_recommended", "MYO recommended", "trainingFocus", "myo_recommended"),
+                choice("myo_recommended", "Coach recommended", "trainingFocus", "myo_recommended"),
                 choice("muscle_split", "Muscle split", "trainingFocus", "muscle_split"),
                 choice("full_body", "Full body", "trainingFocus", "full_body"),
                 choice("strength_conditioning", "Strength + conditioning", "trainingFocus", "strength_conditioning"),
                 choice("mobility_recovery", "Mobility/recovery", "trainingFocus", "mobility_recovery"),
+            ]
+        case "coachingLens":
+            return [
+                choice("lens_none", "Coach's default", "coachingLens", "none"),
+                choice("lens_huberman", "Recovery (Huberman)", "coachingLens", "huberman"),
+                choice("lens_schoenfeld", "Hypertrophy (Schoenfeld)", "coachingLens", "schoenfeld"),
+                choice("lens_sims", "Female physiology (Sims)", "coachingLens", "sims"),
+                choice("lens_blueprint", "Longevity (Blueprint)", "coachingLens", "blueprint"),
             ]
         case "injuriesOrLimitations":
             return [
@@ -342,12 +350,12 @@ struct OnboardingView: View {
               let values = choice.structuredAnswer[appModel.onboardingStep] as? [String],
               let first = values.first
         else {
-            return Color.myoIllustrationPaper
+            return MyoTheme.Colors.cream
         }
 
         return multiSelectDraft[appModel.onboardingStep]?.contains(first) == true
-            ? Color.yellow
-            : Color.myoIllustrationPaper
+            ? MyoTheme.Colors.ochreLight
+            : MyoTheme.Colors.cream
     }
 
     private func toggleMultiSelect(_ values: [String]) {
@@ -413,14 +421,14 @@ private struct CoachPromptCard: View {
         VStack(spacing: 12) {
             Image(systemName: "figure.strengthtraining.traditional")
                 .font(.system(size: 44, weight: .bold))
-                .foregroundStyle(.yellow)
+                .foregroundStyle(MyoTheme.Colors.ochre)
 
             Text("Build your MYO plan")
                 .font(.title2.bold())
 
             Text(prompt)
                 .font(.body)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -430,7 +438,7 @@ private struct CoachPromptCard: View {
     private var prompt: String {
         switch step {
         case "goals":
-            return "Tell MYO Coach your goal. You can talk, type, or tap a quick answer."
+            return "Tell Coach your goal. You can talk, type, or tap a quick answer."
         default:
             return "Answer the next question however you want. You can switch between talk, typing, and taps at any time."
         }
@@ -448,9 +456,9 @@ private struct ProposalReviewCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("MYO Plan Review")
                         .font(.title3.bold())
-                    Text("Review what MYO understood before this becomes your active plan.")
+                    Text("Review what Coach understood before this becomes your active plan.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 }
 
                 Spacer()
@@ -458,13 +466,13 @@ private struct ProposalReviewCard: View {
                 Button(action: accept) {
                     Text("Accept")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.black)
+                        .foregroundStyle(MyoColor.Text.primary.color)
                 }
                     .buttonStyle(.borderedProminent)
-                    .tint(.yellow)
+                    .tint(MyoColor.Action.primary.color)
             }
 
-            ReviewSection(title: "What MYO understood") {
+            ReviewSection(title: "What Coach understood") {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                     ProfileFactTile(title: "Goal", value: formattedList(proposal.profile.goals))
                     ProfileFactTile(title: "Experience", value: formattedToken(proposal.profile.trainingExperience))
@@ -484,9 +492,9 @@ private struct ProposalReviewCard: View {
             }
 
             ReviewSection(title: "Starter weekly plan") {
-                Text("This is the first deterministic starter plan. MYO will tailor it as you train and log feedback.")
+                Text("This is the first deterministic starter plan. Coach will tailor it as you train and log feedback.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 10) {
@@ -494,23 +502,23 @@ private struct ProposalReviewCard: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(day.dayKey)
                                 .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                             Text(day.name)
                                 .font(.subheadline.weight(.semibold))
                                 .lineLimit(2)
                             Text(day.exerciseNames.prefix(3).joined(separator: "\n"))
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                                 .lineLimit(4)
                         }
                         .frame(width: 150, alignment: .leading)
                         .padding(10)
-                        .background(Color.myoIllustrationPaper)
+                        .background(MyoTheme.Colors.cream)
                         .overlay {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
                     }
                 }
             }
@@ -544,12 +552,12 @@ private struct ProposalReviewCard: View {
         }
         .frame(maxHeight: 430)
         .padding()
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
     }
 
     private var formattedSchedule: String {
@@ -590,20 +598,20 @@ private struct ReviewSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .font(MyoTheme.Typography.monoLabel)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 .textCase(.uppercase)
 
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
     }
 }
 
@@ -615,7 +623,7 @@ private struct ProfileFactTile: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(2)
@@ -623,12 +631,12 @@ private struct ProfileFactTile: View {
         }
         .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
         .padding(10)
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
     }
 }
 
@@ -640,7 +648,7 @@ private struct ProfileFactRow: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 .frame(width: 78, alignment: .leading)
             Text(value)
                 .font(.subheadline)
@@ -657,7 +665,7 @@ private struct BulletList: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             ForEach(items, id: \.self) { item in
                 HStack(alignment: .top, spacing: 8) {
                     Text("•")
@@ -665,7 +673,7 @@ private struct BulletList: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
         }
     }
@@ -680,18 +688,18 @@ private struct MetricPill: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             Text(rangeText)
                 .font(.subheadline.weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
     }
 
     private var rangeText: String {

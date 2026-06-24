@@ -10,17 +10,20 @@ struct CoachView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if appModel.user == nil {
+                if !appModel.hasSession {
                     signedOutView
                 } else {
+                    if appModel.profile.preferences.coachingLens != .none {
+                        protocolBar
+                    }
                     messageList
                     composer
                 }
             }
-            .background(Color.myoIllustrationPaper.ignoresSafeArea())
+            .background(PaperBackground())
             .navigationTitle("Coach")
             .toolbar {
-                if appModel.user != nil {
+                if appModel.hasSession {
                     Menu {
                         Button {
                             appModel.signOut()
@@ -84,13 +87,49 @@ struct CoachView: View {
         }
     }
 
+    /// The active coaching protocol, surfaced as a hook. Tapping jumps to You
+    /// to change it. Hidden when the protocol is the default.
+    private var protocolBar: some View {
+        let lens = appModel.profile.preferences.coachingLens
+        return Button {
+            appModel.selectedTab = .you
+        } label: {
+            HStack(spacing: MyoTheme.Spacing.sm) {
+                Text("PROTOCOL")
+                    .myoStyle(.label)
+                    .foregroundStyle(MyoColor.redPen)
+                Text(lens.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                if !lens.attribution.isEmpty {
+                    Text(lens.attribution)
+                        .myoStyle(.label)
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                }
+                Spacer()
+                Image(systemName: "slider.horizontal.3")
+                    .font(.footnote)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+            }
+            .padding(.horizontal, MyoTheme.Spacing.md)
+            .padding(.vertical, MyoTheme.Spacing.sm)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(MyoColor.Surface.selected.color.opacity(0.35))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(MyoColor.hairline).frame(height: 1)
+        }
+        .accessibilityHint("Change your coaching protocol in You")
+    }
+
     private var signedOutView: some View {
         VStack(spacing: 24) {
             Spacer()
 
             Image(systemName: "figure.strengthtraining.traditional")
                 .font(.system(size: 56, weight: .bold))
-                .foregroundStyle(.yellow)
+                .foregroundStyle(MyoTheme.Colors.ochre)
 
             VStack(spacing: 8) {
                 Text("MYO Coach")
@@ -98,7 +137,7 @@ struct CoachView: View {
 
                 Text("Sign in to start your private training thread.")
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                     .multilineTextAlignment(.center)
             }
 
@@ -110,8 +149,30 @@ struct CoachView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .tint(.black)
+            .tint(MyoTheme.Colors.ink)
             .padding(.horizontal, 28)
+
+            #if DEBUG
+            VStack(spacing: 10) {
+                Button {
+                    appModel.startPreviewSession()
+                } label: {
+                    Label("Preview the app (no backend)", systemImage: "eye")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .tint(MyoColor.Action.primary.color)
+                .foregroundStyle(MyoColor.Text.primary.color)
+
+                Button("Dev sign-in (anonymous)") {
+                    Task { await appModel.signInAsDeveloper() }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+            }
+            .padding(.top, 4)
+            #endif
 
             Spacer()
         }
@@ -152,11 +213,11 @@ struct CoachView: View {
             }
             .onChange(of: appModel.messages) { _, messages in
                 guard let last = messages.last else { return }
-                withAnimation(.snappy) {
+                withAnimation(MyoTheme.Motion.fade) {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            .background(Color.myoIllustrationPaper)
+            .background(MyoTheme.Colors.cream)
         }
     }
 
@@ -173,7 +234,7 @@ struct CoachView: View {
                 Image(systemName: voiceInput.isListening ? "mic.circle.fill" : "mic.circle")
                     .font(.system(size: 30))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(voiceInput.isListening ? .red : .primary)
+                    .foregroundStyle(voiceInput.isListening ? MyoTheme.Colors.brick : MyoTheme.Colors.ink)
             }
             .disabled(appModel.isSending)
             .accessibilityLabel(voiceInput.isListening ? "Stop voice input" : "Start voice input")
@@ -184,12 +245,18 @@ struct CoachView: View {
                 Image(systemName: appModel.isSending ? "hourglass" : "arrow.up.circle.fill")
                     .font(.system(size: 30))
                     .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(MyoTheme.Colors.brick)
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || appModel.isSending)
             .accessibilityLabel("Send message")
         }
         .padding()
-        .background(.bar)
+        .background(MyoTheme.Colors.cream)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(MyoTheme.Colors.hairline)
+                .frame(height: 1)
+        }
     }
 
     private func sendDraft() {
@@ -214,29 +281,92 @@ struct CoachMessageBubble: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(message.isPendingCoachReply ? "Thinking..." : message.content)
                     .font(.body)
-                    .foregroundStyle(message.isUser ? .black : .primary)
+                    .foregroundStyle(MyoTheme.Colors.ink)
                     .textSelection(.enabled)
 
                 if message.status == .blocked {
                     Text("Safety boundary")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.red)
+                        .font(MyoTheme.Typography.monoLabel)
+                        .foregroundStyle(MyoTheme.Colors.brick)
                         .textCase(.uppercase)
+                }
+
+                if !message.isUser, !message.sources.isEmpty {
+                    CoachSourcesLine(sources: message.sources)
+                        .padding(.top, 2)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
-            .background(message.isUser ? Color.yellow : Color.myoIllustrationPaper)
+            .background(message.isUser ? MyoTheme.Colors.ochreLight : MyoTheme.Colors.cream)
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(message.isUser ? Color.clear : Color.black.opacity(0.06), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                    .stroke(message.isUser ? Color.clear : MyoTheme.Colors.hairline, lineWidth: 1)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
 
             if !message.isUser {
                 Spacer(minLength: 44)
             }
         }
+    }
+}
+
+/// The grounding made visible: a red-pen "Informed by" line under a coach
+/// reply, naming the reviewed sources that were in context for the turn.
+private struct CoachSourcesLine: View {
+    let sources: [CoachSource]
+
+    private var firstURL: URL? { sources.first(where: { $0.url != nil })?.url }
+
+    var body: some View {
+        let content = VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Text("INFORMED BY")
+                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                    .kerning(0.5)
+                    .foregroundStyle(MyoColor.redPen)
+                Text(sources.map(\.label).joined(separator: " · "))
+                    .font(.caption2)
+                    .foregroundStyle(MyoColor.Text.secondary.color)
+                    .lineLimit(2)
+            }
+            // The coach's red pen — a hand-drawn underline under the citation.
+            RedPenUnderline()
+                .stroke(MyoColor.redPen, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .frame(height: 4)
+                .opacity(0.85)
+        }
+        .frame(minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
+
+        // Only interactive when there's actually somewhere to go; otherwise it's
+        // a static, non-misleading label.
+        if let url = firstURL {
+            Button { UIApplication.shared.open(url) } label: { content }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(.isLink)
+                .accessibilityLabel("Informed by \(sources.map(\.label).joined(separator: ", ")). Open source.")
+        } else {
+            content
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Informed by \(sources.map(\.label).joined(separator: ", "))")
+        }
+    }
+}
+
+/// A slightly wavy underline — pen on paper, not a ruler line.
+private struct RedPenUnderline: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let midY = rect.midY
+        path.move(to: CGPoint(x: rect.minX, y: midY))
+        path.addCurve(
+            to: CGPoint(x: rect.maxX, y: midY),
+            control1: CGPoint(x: rect.width * 0.33, y: midY - 1.6),
+            control2: CGPoint(x: rect.width * 0.66, y: midY + 1.6)
+        )
+        return path
     }
 }
 
@@ -265,7 +395,7 @@ struct PlanAdjustmentProposalCard: View {
 
                 Text(proposal.rationale)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
 
             Divider()
@@ -277,20 +407,20 @@ struct PlanAdjustmentProposalCard: View {
                 ForEach(proposal.changes, id: \.self) { change in
                     Label(change, systemImage: "checkmark.circle")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 }
             }
 
             if proposal.requiresFollowUp {
-                Label("MYO needs one more detail before applying this safely.", systemImage: "questionmark.circle")
+                Label("Coach needs one more detail before applying this safely.", systemImage: "questionmark.circle")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(MyoTheme.Colors.ochre)
             }
 
             if !proposal.sourceCorpusEntryIds.isEmpty {
                 Text("Evidence: \(proposal.sourceCorpusEntryIds.joined(separator: ", "))")
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.45))
                     .lineLimit(2)
             }
 
@@ -301,32 +431,32 @@ struct PlanAdjustmentProposalCard: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.yellow)
-                .foregroundStyle(.black)
+                .tint(MyoColor.Action.primary.color)
+                .foregroundStyle(MyoColor.Text.primary.color)
                 .disabled(isApplying)
             } else {
-                Label("Reply with one more detail before MYO changes your plan.", systemImage: "lock.shield")
+                Label("Reply with one more detail before Coach changes your plan.", systemImage: "lock.shield")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
         }
         .padding(14)
-        .background(Color.myoIllustrationPaper)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(MyoTheme.Colors.cream)
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.yellow.opacity(0.55), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.ochre.opacity(0.55), lineWidth: 1)
         )
     }
 
     private var riskColor: Color {
         switch proposal.riskLevel {
         case "high", "blocked":
-            return .red
+            return MyoColor.State.danger.color
         case "medium":
-            return .orange
+            return MyoColor.State.warning.color
         default:
-            return .secondary
+            return MyoColor.Text.secondary.color
         }
     }
 

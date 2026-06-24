@@ -1,5 +1,13 @@
 import Foundation
 
+struct CoachSource: Equatable, Identifiable {
+    var id: String { entryId }
+    let entryId: String
+    let label: String
+    let title: String
+    let url: URL?
+}
+
 struct CoachMessage: Identifiable, Equatable {
     let id: String
     let messageId: String
@@ -8,6 +16,7 @@ struct CoachMessage: Identifiable, Equatable {
     let status: Status
     let timestamp: Date
     let riskLevel: String?
+    var sources: [CoachSource] = []
 
     enum Role: String {
         case user

@@ -223,6 +223,21 @@ export async function orchestrateCoachTurn({
       return;
     }
 
+    // Surface the reviewed sources that grounded this turn so the iOS bubble
+    // can show "Informed by …". These are the top retrieved corpus entries fed
+    // to the model for this reply — the evidence base, not a parsed quote.
+    const sources = retrievedCorpus.slice(0, 2).map((entry) => {
+      const source: Record<string, string> = {
+        entryId: entry.entryId,
+        label: entry.sourceName,
+        title: entry.title,
+      };
+      if (entry.sourceUrl) {
+        source.sourceUrl = entry.sourceUrl;
+      }
+      return source;
+    });
+
     await assistantRef.set(
       {
         content,
@@ -231,6 +246,7 @@ export async function orchestrateCoachTurn({
         requiredUserAction:
           preflight.category === "injury_pain" ? "seek_clinician" : "none",
         postflightCategory: postflight.category,
+        sources,
         promptTokens: result.usage.inputTokens,
         completionTokens: result.usage.outputTokens,
         serverCompletedAt: FieldValue.serverTimestamp(),

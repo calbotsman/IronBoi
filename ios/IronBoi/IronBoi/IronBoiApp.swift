@@ -23,9 +23,13 @@ struct IronBoiApp: App {
                 // The design uses a fixed cream paper background that
                 // doesn't switch on Dark Mode. Force the app into light
                 // scheme so SwiftUI doesn't auto-pick white text on
-                // cream and make everything unreadable. Revisit when
-                // we ship real Dark Mode color assets.
+                // cream and make everything unreadable. Cream-always is
+                // doctrine (Deter ruled forced-light is the intent).
                 .preferredColorScheme(.light)
+                // Doctrine: selection is the coach's red pen. This sets
+                // tab selection, links, and any control without an
+                // explicit tint to brick instead of system blue.
+                .tint(MyoTheme.Colors.brick)
         }
     }
 }
@@ -47,13 +51,13 @@ struct AppRootView: View {
 
                     WorkoutView()
                         .tabItem {
-                            Label("Workout", systemImage: "checklist")
+                            Label("Train", systemImage: "checklist")
                         }
                         .tag(AppModel.AppTab.workout)
 
-                    ProgressPlaceholderView()
+                    RecordView()
                         .tabItem {
-                            Label("Progress", systemImage: "chart.bar.fill")
+                            Label("Record", systemImage: "chart.bar.fill")
                         }
                         .tag(AppModel.AppTab.progress)
 
@@ -71,15 +75,3 @@ struct AppRootView: View {
     }
 }
 
-private struct ProgressPlaceholderView: View {
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                "Progress",
-                systemImage: "chart.bar.fill",
-                description: Text("Workout history, streaks, and metrics land here next.")
-            )
-            .navigationTitle("Progress")
-        }
-    }
-}

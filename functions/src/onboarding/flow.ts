@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import {
   CoachInputMode,
+  CoachingLens,
   GoalType,
   PlannedWorkoutDay,
   ProgramProposal,
@@ -50,6 +51,11 @@ const REQUIRED_FIELDS = [
   "trainingFocus",
   "injuriesOrLimitations",
   "dietaryConstraints",
+  // coachingLens is intentionally LAST: it's a first-run hook (everyone meets
+  // protocols), but ordering it after the core fields keeps the "Last one…"
+  // question honest and stops an in-flight draft that already cleared the core
+  // fields from being bounced backward when this field was added.
+  "coachingLens",
 ] as const;
 
 const QUESTIONS: Record<string, string> = {
@@ -63,6 +69,7 @@ const QUESTIONS: Record<string, string> = {
   daysPerWeek: "How many days per week do you realistically want to train?",
   sessionLengthMin: "How long do you want each workout to be?",
   trainingFocus: "I can recommend the structure from your goal, experience, schedule, and equipment. Do you want to use MYO's recommended focus, or steer it toward a muscle split, full-body training, strength + conditioning, mobility/recovery, or endurance conditioning?",
+  coachingLens: "Last one: how would you like me to explain things? I can keep my own balanced voice, or coach through a protocol — recovery & nervous system (Huberman), hypertrophy science (Schoenfeld), female physiology (Sims), or longevity & measurement (Blueprint). You can change this anytime.",
   injuriesOrLimitations: "Any injuries, pain, limitations, or movements you want me to avoid?",
   dietaryConstraints: "Any nutrition constraints or preferences I should account for?",
 };
@@ -352,6 +359,8 @@ function normalizeStepValue(step: string, content: string) {
       return normalizeTrainingExperience(content);
     case "trainingFocus":
       return normalizeTrainingFocus(content);
+    case "coachingLens":
+      return normalizeCoachingLens(content);
     case "ageYears":
     case "daysPerWeek":
     case "sessionLengthMin":
@@ -399,6 +408,7 @@ function buildProgramProposal(
       preferredWorkoutTime: "flexible",
       dislikedExercises: [],
       trainingFocus: normalizeTrainingFocus(draft.trainingFocus),
+      coachingLens: normalizeCoachingLens(draft.coachingLens),
     },
     dietaryConstraints: draft.dietaryConstraints ?? [],
     onboardingStatus: "proposal_ready",
@@ -735,6 +745,16 @@ function normalizeTrainingExperience(value: string) {
   if (/intermediate/.test(lower)) return "intermediate";
   if (/beginner|some/.test(lower)) return "beginner";
   return "new";
+}
+
+function normalizeCoachingLens(value: unknown): z.infer<typeof CoachingLens> {
+  if (typeof value !== "string") return "none";
+  const lower = value.toLowerCase();
+  if (/huberman|nervous|circadian|sleep/.test(lower)) return "huberman";
+  if (/schoenfeld|hypertroph|tension|volume/.test(lower)) return "schoenfeld";
+  if (/sims|female|cycle|menstru/.test(lower)) return "sims";
+  if (/blueprint|johnson|longevity|measure/.test(lower)) return "blueprint";
+  return "none";
 }
 
 function normalizeTrainingFocus(value: unknown): z.infer<typeof TrainingFocus> {

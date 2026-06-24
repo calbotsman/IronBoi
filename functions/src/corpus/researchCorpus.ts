@@ -314,6 +314,124 @@ const RESEARCH_CORPUS = [
       "Do not increase weekly intensity or volume without considering recovery and schedule.",
     ],
   },
+  {
+    entryId: "protocol_huberman_recovery_v1",
+    title: "Recovery, sleep, and circadian timing for training (Huberman protocol)",
+    sourceName: "Sleep & athletic-performance literature, curated by MYO (Huberman protocol)",
+    sourceUrl: "https://pubmed.ncbi.nlm.nih.gov/21731144/",
+    sourceType: "expert_reviewed_note",
+    reviewedAt: "2026-06-23T00:00:00.000Z",
+    tags: [
+      "huberman",
+      "recovery",
+      "sleep",
+      "circadian",
+      "nervous_system",
+      "low_readiness",
+      "autoregulation",
+    ],
+    appliesTo: ["adult", "general_population"],
+    summary:
+      "The Huberman protocol frames recovery, sleep, and circadian timing as primary training levers: protect sleep, autoregulate load to recovery, and treat the nervous system as something that needs to recover, not just muscles.",
+    claims: [
+      "Short or poor sleep measurably degrades performance and recovery, so low-sleep days are a reason to reduce load before adding work.",
+      "Aligning harder efforts with times of day when the user feels most alert is a reasonable, low-cost optimization when the schedule allows.",
+      "Recovery is a nervous-system state, not only muscle soreness; back off when readiness is low.",
+    ],
+    safetyBoundaries: [
+      "This is training framing, not treatment for sleep disorders; defer insomnia, apnea, or clinical sleep issues to a clinician.",
+      "Do not prescribe supplements, light-therapy devices, or specific sleep medications.",
+    ],
+  },
+  {
+    entryId: "protocol_schoenfeld_hypertrophy_v1",
+    title: "Hypertrophy mechanics: tension, volume, progression (Schoenfeld protocol)",
+    sourceName: "Schoenfeld et al., peer-reviewed hypertrophy research, curated by MYO",
+    sourceUrl: "https://pubmed.ncbi.nlm.nih.gov/27433992/",
+    sourceType: "expert_reviewed_note",
+    reviewedAt: "2026-06-23T00:00:00.000Z",
+    tags: [
+      "schoenfeld",
+      "hypertrophy",
+      "muscle_gain",
+      "volume",
+      "mechanical_tension",
+      "progressive_overload",
+      "resistance_training",
+    ],
+    appliesTo: ["adult", "healthy_adult"],
+    summary:
+      "The Schoenfeld protocol grounds muscle growth in mechanical tension, sufficient weekly volume, and progressive overload — a hypertrophy-science emphasis for the resistance-training portion of a plan.",
+    claims: [
+      "Mechanical tension is a primary driver of hypertrophy; train challenging sets reasonably close to failure.",
+      "Weekly volume shows a dose-response with growth, with roughly 10-20 hard sets per muscle per week a common evidence-based range for many trainees.",
+      "A wide rep range (about 6-30) can build muscle when sets are taken near failure; progressive overload over time is the throughline.",
+    ],
+    safetyBoundaries: [
+      "Applies to healthy adults; do not apply aggressive volume or near-failure training to pain, pregnancy, frailty, uncontrolled conditions, or minors.",
+      "Scale volume to the user's recovery, schedule, and training age; more is not always better.",
+    ],
+  },
+  {
+    entryId: "protocol_sims_female_physiology_v1",
+    title: "Female-physiology-aware training (Sims protocol)",
+    sourceName: "Stacy Sims' work + ISSN female-athlete guidance, curated by MYO",
+    sourceUrl: "https://www.tandfonline.com/doi/abs/10.1080/15502783.2023.2204066",
+    sourceType: "expert_reviewed_note",
+    reviewedAt: "2026-06-23T00:00:00.000Z",
+    tags: [
+      "sims",
+      "female",
+      "female_physiology",
+      "menstrual",
+      "cycle",
+      "menopause",
+      "women",
+      "energy_availability",
+    ],
+    appliesTo: ["adult", "female"],
+    summary:
+      "The Sims protocol emphasizes that women are not small men: fueling, recovery, and life-stage context (menstrual cycle, perimenopause/menopause) can shape how training and recovery are programmed.",
+    claims: [
+      "Adequate energy availability is a primary concern; deficit-first planning can backfire for many female trainees.",
+      "Cycle phase and (peri)menopause can affect recovery, fueling, and how a week is structured, when the user shares that context.",
+      "Strength and higher-intensity work remain valuable; the adjustment is context and fueling, not avoidance.",
+    ],
+    safetyBoundaries: [
+      "Do not infer menstrual status, pregnancy, or menopause from sex/gender alone — ask for user-stated context.",
+      "Escalate for signs of disordered eating, amenorrhea, or medical symptoms; do not diagnose.",
+    ],
+  },
+  {
+    entryId: "protocol_blueprint_longevity_v1",
+    title: "Longevity-first, measurement-minded training (Blueprint protocol)",
+    sourceName: "Cardiorespiratory-fitness & longevity literature, curated by MYO (Blueprint protocol)",
+    sourceUrl: "https://pubmed.ncbi.nlm.nih.gov/30404923/",
+    sourceType: "expert_reviewed_note",
+    reviewedAt: "2026-06-23T00:00:00.000Z",
+    tags: [
+      "blueprint",
+      "johnson",
+      "longevity",
+      "zone_2",
+      "vo2max",
+      "consistency",
+      "measurement",
+      "healthspan",
+    ],
+    appliesTo: ["adult", "general_population"],
+    summary:
+      "The Blueprint protocol frames training around long-term healthspan: a base of easy aerobic (zone-2) work plus moderate strength, with consistency and low injury risk prioritized over peak intensity ('anti-heroic'), and progress tracked over time.",
+    claims: [
+      "Higher cardiorespiratory fitness is strongly associated with lower all-cause mortality, which motivates a durable aerobic base alongside strength work.",
+      "Consistency and injury-avoidance tend to matter more for long-term outcomes than sporadic high-intensity efforts.",
+      "Tracking simple, repeatable markers over time supports sustainable progression rather than chasing single hard sessions.",
+    ],
+    safetyBoundaries: [
+      "Associations are not guarantees; do not promise lifespan, 'measured age,' or age-reversal outcomes.",
+      "Do not prescribe supplements, dosages, brand products, or any medical/biomarker-testing regimen; defer those to a clinician.",
+    ],
+  },
 ] satisfies ResearchCorpusEntry[];
 
 export function retrieveResearchCorpus(input: {
@@ -334,14 +452,14 @@ export function retrieveResearchCorpus(input: {
 
     for (const tag of entry.tags) {
       const normalized = tag.replace(/_/g, " ").toLowerCase();
-      if (queryText.includes(normalized) || queryText.includes(tag.toLowerCase())) {
+      if (matchesTerm(queryText, normalized) || matchesTerm(queryText, tag.toLowerCase())) {
         score += 3;
         matchReasons.push(`tag:${tag}`);
       }
     }
 
     for (const [term, reason] of KEYWORD_REASONS) {
-      if (queryText.includes(term)) {
+      if (matchesTerm(queryText, term)) {
         score += reason.includes("pregnancy") || reason.includes("injury") ? 5 : 2;
         matchReasons.push(reason);
       }
@@ -355,7 +473,8 @@ export function retrieveResearchCorpus(input: {
     return { entry, score, matchReasons: [...new Set(matchReasons)] };
   })
     .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score)
+    // Deterministic order: score desc, then entryId for stable ties.
+    .sort((a, b) => b.score - a.score || a.entry.entryId.localeCompare(b.entry.entryId))
     .slice(0, input.maxEntries ?? 4);
 
   return scored.map(({ entry, matchReasons }) => ({
@@ -374,12 +493,31 @@ export function retrieveResearchCorpus(input: {
   }));
 }
 
+// Word-boundary match so short terms ("back", "65", "fall") don't fire on
+// substrings ("background", "1965", "befall"). Terms may contain spaces
+// ("less time"), which \b handles fine at each end.
+function matchesTerm(haystack: string, term: string): boolean {
+  if (!term) return false;
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|\\W)${escaped}(\\W|$)`).test(haystack);
+}
+
 function profileTerms(profile: Record<string, unknown> | null | undefined) {
   if (!profile) return "";
+  // The chosen coaching protocol lives in preferences.coachingLens. Feeding it
+  // into the query lets the protocol's evidence entry (tagged with the same key,
+  // e.g. "huberman", "blueprint") surface so the coach's protocol framing is
+  // grounded rather than free-styled.
+  const preferences =
+    profile.preferences && typeof profile.preferences === "object"
+      ? (profile.preferences as Record<string, unknown>)
+      : {};
   const fields = [
     profile.sexOrGender,
     profile.sexOrGenderSelfDescription,
     profile.trainingExperience,
+    preferences.coachingLens,
+    preferences.trainingFocus,
     ...(Array.isArray(profile.injuriesOrLimitations) ? profile.injuriesOrLimitations : []),
     ...(Array.isArray(profile.goals) ? profile.goals : []),
   ];

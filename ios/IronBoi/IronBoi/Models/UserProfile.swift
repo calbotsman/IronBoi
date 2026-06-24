@@ -37,7 +37,7 @@ enum TrainingFocus: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
     var displayName: String {
         switch self {
-        case .myoRecommended: return "Let MYO decide"
+        case .myoRecommended: return "Let Coach decide"
         case .muscleSplit: return "Muscle split"
         case .fullBody: return "Full body"
         case .strengthConditioning: return "Strength & conditioning"
@@ -78,6 +78,57 @@ enum CoachingTone: String, CaseIterable, Codable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
+/// Explanatory lens — how the coach frames its reasoning. Mirrors
+/// CoachingLens in functions/src/contracts/coach-agent.ts. Per the personas
+/// strategy: lenses are "ways to understand your training," not celebrity
+/// worship. They shape explanation, never safety.
+/// A coaching protocol — the approach the coach reasons and explains through.
+/// One of the app's hooks. Mirrors CoachingLens in
+/// functions/src/contracts/coach-agent.ts. The enum name stays CoachingLens
+/// for storage continuity; everything user-facing says "protocol."
+enum CoachingLens: String, CaseIterable, Codable, Identifiable {
+    case none
+    case huberman
+    case schoenfeld
+    case sims
+    case blueprint
+
+    var id: String { rawValue }
+
+    /// The protocol's name, attributed.
+    var displayName: String {
+        switch self {
+        case .none: return "Coach's default"
+        case .huberman: return "Recovery & nervous system"
+        case .schoenfeld: return "Hypertrophy science"
+        case .sims: return "Female physiology"
+        case .blueprint: return "Longevity & measurement"
+        }
+    }
+
+    /// The authority the protocol is attributed to (for chips/labels). Empty for default.
+    var attribution: String {
+        switch self {
+        case .none: return ""
+        case .huberman: return "Huberman"
+        case .schoenfeld: return "Schoenfeld"
+        case .sims: return "Sims"
+        case .blueprint: return "Blueprint"
+        }
+    }
+
+    /// One-line description shown under the picker.
+    var blurb: String {
+        switch self {
+        case .none: return "Coach explains in its own balanced voice."
+        case .huberman: return "Framed around recovery, sleep, and circadian timing (Huberman)."
+        case .schoenfeld: return "Framed around tension, volume, and progression (Schoenfeld)."
+        case .sims: return "Framed around female physiology and cycle-aware training (Sims)."
+        case .blueprint: return "Consistency, recovery, and data-driven adjustments — low-stress training for longevity (Blueprint / Johnson)."
+        }
+    }
+}
+
 enum PreferredWorkoutTime: String, CaseIterable, Codable, Identifiable {
     case morning, afternoon, evening, flexible
     var id: String { rawValue }
@@ -112,6 +163,7 @@ struct UserProfile: Equatable {
         var preferredWorkoutTime: PreferredWorkoutTime
         var dislikedExercises: [String]
         var trainingFocus: TrainingFocus
+        var coachingLens: CoachingLens
 
         static var defaults: Preferences {
             Preferences(
@@ -119,6 +171,7 @@ struct UserProfile: Equatable {
                 preferredWorkoutTime: .flexible,
                 dislikedExercises: [],
                 trainingFocus: .myoRecommended,
+                coachingLens: .none,
             )
         }
     }
@@ -181,6 +234,10 @@ extension UserProfile {
                let v = TrainingFocus(rawValue: focus) {
                 profile.preferences.trainingFocus = v
             }
+            if let lens = p["coachingLens"] as? String,
+               let v = CoachingLens(rawValue: lens) {
+                profile.preferences.coachingLens = v
+            }
         }
         profile.dietaryConstraints = data["dietaryConstraints"] as? [String] ?? []
         return profile
@@ -206,6 +263,7 @@ extension UserProfile {
                 "preferredWorkoutTime": preferences.preferredWorkoutTime.rawValue,
                 "dislikedExercises": preferences.dislikedExercises,
                 "trainingFocus": preferences.trainingFocus.rawValue,
+                "coachingLens": preferences.coachingLens.rawValue,
             ],
         ]
         if let ageYears { payload["ageYears"] = ageYears }

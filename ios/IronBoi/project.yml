@@ -85,7 +85,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         MARKETING_VERSION: 0.1.0
         CURRENT_PROJECT_VERSION: 5
-        INFOPLIST_KEY_CFBundleDisplayName: IronBoi
+        INFOPLIST_KEY_CFBundleDisplayName: MYO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
@@ -101,6 +101,18 @@ targets:
         # Change this URL if the prod Firebase project id differs.
         Release:
           INFOPLIST_KEY_IronBoiCallableBaseURL: https://us-central1-ironboi-prod.cloudfunctions.net
+    scheme:
+      testTargets: []
+      environmentVariables:
+        # Pin the App Check debug token so it survives reinstalls and
+        # simulator resets. Register this ONE token in Firebase Console →
+        # App Check → IronBoi (iOS) → Manage debug tokens, once, and Debug
+        # builds authenticate forever after. Without this the SDK mints a
+        # fresh token per install and every console registration goes
+        # stale. Staging-only credential; rotate in console if leaked.
+        - variable: FIRAAppCheckDebugToken
+          value: 7B49E8DA-2CDA-4A4C-8C9E-93D1C5A40F11
+          isEnabled: true
     entitlements:
       path: IronBoi/IronBoi.entitlements
       properties:

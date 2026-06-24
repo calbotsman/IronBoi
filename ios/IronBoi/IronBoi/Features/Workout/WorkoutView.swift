@@ -8,7 +8,7 @@ struct WorkoutView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if appModel.user == nil {
+                if !appModel.hasSession {
                     signedOutView
                 } else if let workout = appModel.activeWorkout {
                     ActiveWorkoutView(workout: workout)
@@ -16,7 +16,7 @@ struct WorkoutView: View {
                     planView
                 }
             }
-            .navigationTitle("Workout")
+            .navigationTitle("Train")
             .alert("MYO", isPresented: Binding(
                 get: { appModel.errorMessage != nil },
                 set: { if !$0 { appModel.errorMessage = nil } }
@@ -45,7 +45,24 @@ struct WorkoutView: View {
                 appModel.signInWithApple()
             }
             .buttonStyle(.borderedProminent)
-            .tint(.black)
+            .tint(MyoTheme.Colors.ink)
+
+            #if DEBUG
+            Button {
+                appModel.startPreviewSession()
+            } label: {
+                Label("Preview the app (no backend)", systemImage: "eye")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(MyoColor.Action.primary.color)
+            .foregroundStyle(MyoColor.Text.primary.color)
+
+            Button("Dev sign-in (anonymous)") {
+                Task { await appModel.signInAsDeveloper() }
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(MyoColor.Text.secondary.color)
+            #endif
         }
     }
 
@@ -62,7 +79,7 @@ struct WorkoutView: View {
             }
             .padding()
         }
-        .background(Color.myoIllustrationPaper.ignoresSafeArea())
+        .background(PaperBackground())
     }
 
     private var kettlebellSwingDemoCard: some View {
@@ -77,19 +94,19 @@ struct WorkoutView: View {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: "figure.strengthtraining.traditional")
                     .font(.title2.weight(.bold))
-                    .foregroundStyle(.black)
+                    .foregroundStyle(MyoTheme.Colors.ink)
                     .frame(width: 48, height: 48)
-                    .background(Color.yellow)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(MyoTheme.Colors.ochreLight)
+                    .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Try the Movement Sequence")
                         .font(.headline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(MyoTheme.Colors.ink)
 
                     Text("Preview the illustrated kettlebell swing frames.")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -97,15 +114,15 @@ struct WorkoutView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
             .padding()
-            .background(Color.myoIllustrationPaper)
+            .background(MyoTheme.Colors.cream)
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.black.opacity(0.06), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                    .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -118,7 +135,7 @@ struct WorkoutView: View {
 
                 Text("Finish onboarding and accept your MYO plan. Your week of workouts will appear here.")
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
 
             Button {
@@ -131,8 +148,8 @@ struct WorkoutView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .tint(.yellow)
-            .foregroundStyle(.black)
+            .tint(MyoColor.Action.primary.color)
+            .foregroundStyle(MyoColor.Text.primary.color)
             .disabled(appModel.isWorkoutBusy)
         }
     }
@@ -155,7 +172,7 @@ private struct WeeklyPlanView: View {
 
                 Text("Your accepted MYO plan. Tap a day to review the work, then start it when you are ready.")
                     .font(.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
 
             ForEach(plan.days) { day in
@@ -185,7 +202,7 @@ private struct PlannedWorkoutDayCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Button {
-                withAnimation(.snappy) {
+                withAnimation(MyoTheme.Motion.fade) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -199,8 +216,8 @@ private struct PlannedWorkoutDayCard: View {
                                 .font(.caption2.weight(.bold))
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 4)
-                                .background(Color.yellow)
-                                .foregroundStyle(.black)
+                                .background(MyoTheme.Colors.ochreLight)
+                                .foregroundStyle(MyoTheme.Colors.ink)
                                 .clipShape(Capsule())
                         }
                     }
@@ -209,19 +226,19 @@ private struct PlannedWorkoutDayCard: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(day.name)
                             .font(.headline)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(MyoTheme.Colors.ink)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Text(summaryText)
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                     }
 
                     Spacer()
 
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.headline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                         .padding(.top, 2)
                 }
             }
@@ -236,7 +253,7 @@ private struct PlannedWorkoutDayCard: View {
                                     .font(.caption.weight(.bold))
                                     .padding(.horizontal, 9)
                                     .padding(.vertical, 6)
-                                    .background(Color.yellow.opacity(0.18))
+                                    .background(MyoTheme.Colors.ochre.opacity(0.18))
                                     .clipShape(Capsule())
                             }
                         }
@@ -249,18 +266,18 @@ private struct PlannedWorkoutDayCard: View {
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Text(exercise.name)
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(MyoTheme.Colors.ink)
                                     .fixedSize(horizontal: false, vertical: true)
 
                                 Spacer()
 
                                 Text(targetText(for: exercise))
                                     .font(.caption.monospacedDigit().weight(.bold))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
                                 Image(systemName: "info.circle.fill")
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                             }
                             .contentShape(Rectangle())
                         }
@@ -273,8 +290,8 @@ private struct PlannedWorkoutDayCard: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.yellow)
-                    .foregroundStyle(.black)
+                    .tint(MyoColor.Action.primary.color)
+                    .foregroundStyle(MyoColor.Text.primary.color)
                     .disabled(isBusy)
                     .padding(.top, 4)
                 }
@@ -282,12 +299,12 @@ private struct PlannedWorkoutDayCard: View {
             }
         }
         .padding()
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
         .sheet(item: $selectedExercise) { exercise in
             PlannedExerciseDetailSheet(dayKey: day.dayKey, exercise: exercise)
                 .presentationDetents([.large])
@@ -336,7 +353,7 @@ private struct PlannedExerciseDetailSheet: View {
                 }
                 .padding()
             }
-            .background(Color.myoIllustrationPaper.ignoresSafeArea())
+            .background(MyoTheme.Colors.cream.ignoresSafeArea())
             .navigationTitle(exercise.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -358,7 +375,7 @@ private struct PlannedExerciseDetailSheet: View {
 
             Text(detailSubtitle)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4)
@@ -376,8 +393,8 @@ private struct PlannedExerciseDetailSheet: View {
     private var musclesSection: some View {
         DetailSection(title: "Muscles Worked") {
             VStack(alignment: .leading, spacing: 12) {
-                MuscleChipGroup(title: "Primary", muscles: knowledge.primary, tint: .yellow)
-                MuscleChipGroup(title: "Secondary", muscles: knowledge.secondary, tint: .blue)
+                MuscleChipGroup(title: "Primary", muscles: knowledge.primary, tint: MyoTheme.Colors.ochre)
+                MuscleChipGroup(title: "Secondary", muscles: knowledge.secondary, tint: MyoTheme.Colors.ink)
             }
         }
     }
@@ -389,9 +406,9 @@ private struct PlannedExerciseDetailSheet: View {
                     HStack(alignment: .top, spacing: 12) {
                         Text("\(index + 1)")
                             .font(.headline.monospacedDigit())
-                            .foregroundStyle(.black)
+                            .foregroundStyle(MyoTheme.Colors.ink)
                             .frame(width: 28, height: 28)
-                            .background(Color.yellow)
+                            .background(MyoTheme.Colors.ochreLight)
                             .clipShape(Circle())
 
                         Text(cue)
@@ -411,11 +428,12 @@ private struct PlannedExerciseDetailSheet: View {
                 .padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
-        .tint(.red)
+        .tint(MyoColor.Action.primary.color)
+        .foregroundStyle(MyoColor.Text.primary.color)
     }
 
     private var askCoachSection: some View {
-        DetailSection(title: "Ask MYO") {
+        DetailSection(title: "Ask Coach") {
             VStack(alignment: .leading, spacing: 12) {
                 TextField("Ask for a swap, weight change, or better demo", text: $coachRequest, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
@@ -444,12 +462,12 @@ private struct PlannedExerciseDetailSheet: View {
                         dismiss()
                     }
                 } label: {
-                    Label(appModel.isSending ? "Sending..." : "Send to MYO", systemImage: "paperplane.fill")
+                    Label(appModel.isSending ? "Sending..." : "Send to Coach", systemImage: "paperplane.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.yellow)
-                .foregroundStyle(.black)
+                .tint(MyoColor.Action.primary.color)
+                .foregroundStyle(MyoColor.Text.primary.color)
                 .disabled(appModel.isSending)
             }
         }
@@ -527,17 +545,18 @@ private struct ActiveWorkoutView: View {
                 }
 
                 Button {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                     Task {
                         await appModel.finishActiveWorkout()
                     }
                 } label: {
-                    Label(appModel.isWorkoutBusy ? "Finishing..." : "Finish Workout", systemImage: "checkmark.circle.fill")
+                    Label(appModel.isWorkoutBusy ? "Finishing..." : "End Workout", systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .tint(.yellow)
-                .foregroundStyle(.black)
+                .tint(MyoColor.Action.primary.color)
+                .foregroundStyle(MyoColor.Text.primary.color)
                 .disabled(appModel.isWorkoutBusy)
                 .padding(.top, 8)
             }
@@ -553,8 +572,8 @@ private struct ActiveWorkoutView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(workout.dayKey)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .font(MyoTheme.Typography.monoLabel)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 .textCase(.uppercase)
 
             Text(workout.workoutName)
@@ -562,10 +581,10 @@ private struct ActiveWorkoutView: View {
 
             Text("\(completedSets)/\(totalSets) sets complete")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
             ProgressView(value: Double(completedSets), total: Double(max(totalSets, 1)))
-                .tint(.yellow)
+                .tint(MyoTheme.Colors.ochre)
         }
     }
 
@@ -590,21 +609,24 @@ private struct WorkoutExerciseCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(exercise.name)
                         .font(.headline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(MyoTheme.Colors.ink)
 
                     Text(targetText)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 }
 
                 Spacer()
 
                 Button {
+                    if !exercise.exerciseDone {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
                     appModel.toggleExerciseDone(exerciseIndex: exercise.exerciseIndex)
                 } label: {
                     Image(systemName: exercise.exerciseDone ? "checkmark.circle.fill" : "circle")
                         .font(.title2)
-                        .foregroundStyle(exercise.exerciseDone ? .green : .secondary)
+                        .foregroundStyle(exercise.exerciseDone ? MyoTheme.Colors.ochre : MyoTheme.Colors.ink.opacity(0.45))
                 }
                 .accessibilityLabel(exercise.exerciseDone ? "Mark exercise not done" : "Mark exercise done")
             }
@@ -612,6 +634,9 @@ private struct WorkoutExerciseCard: View {
             HStack(spacing: 8) {
                 ForEach(exercise.completedSets) { set in
                     Button {
+                        if !set.completed {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
                         appModel.toggleWorkoutSet(
                             exerciseIndex: exercise.exerciseIndex,
                             setIndex: set.setIndex
@@ -622,25 +647,26 @@ private struct WorkoutExerciseCard: View {
                             .frame(maxWidth: .infinity, minHeight: 48)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(set.completed ? .green : Color(.tertiarySystemFill))
-                    .foregroundStyle(set.completed ? .white : .primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .tint(set.completed ? MyoTheme.Colors.ochre : MyoTheme.Colors.ink.opacity(0.06))
+                    .foregroundStyle(set.completed ? MyoTheme.Colors.cream : MyoTheme.Colors.ink)
+                    .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
                     .accessibilityLabel("Toggle set \(set.setIndex + 1)")
                 }
 
                 Image(systemName: "info.circle.fill")
                     .font(.title2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                     .frame(width: 44, height: 48)
+                    .accessibilityHidden(true)
             }
         }
         .padding()
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens exercise details, muscles worked, and form cues.")
@@ -679,7 +705,7 @@ private struct ExerciseDetailSheet: View {
                 }
                 .padding()
             }
-            .background(Color.myoIllustrationPaper.ignoresSafeArea())
+            .background(MyoTheme.Colors.cream.ignoresSafeArea())
             .navigationTitle(exercise.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -701,7 +727,7 @@ private struct ExerciseDetailSheet: View {
 
             Text(detailSubtitle)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4)
@@ -719,8 +745,8 @@ private struct ExerciseDetailSheet: View {
     private var musclesSection: some View {
         DetailSection(title: "Muscles Worked") {
             VStack(alignment: .leading, spacing: 12) {
-                MuscleChipGroup(title: "Primary", muscles: knowledge.primary, tint: .yellow)
-                MuscleChipGroup(title: "Secondary", muscles: knowledge.secondary, tint: .blue)
+                MuscleChipGroup(title: "Primary", muscles: knowledge.primary, tint: MyoTheme.Colors.ochre)
+                MuscleChipGroup(title: "Secondary", muscles: knowledge.secondary, tint: MyoTheme.Colors.ink)
             }
         }
     }
@@ -732,9 +758,9 @@ private struct ExerciseDetailSheet: View {
                     HStack(alignment: .top, spacing: 12) {
                         Text("\(index + 1)")
                             .font(.headline.monospacedDigit())
-                            .foregroundStyle(.black)
+                            .foregroundStyle(MyoTheme.Colors.ink)
                             .frame(width: 28, height: 28)
-                            .background(Color.yellow)
+                            .background(MyoTheme.Colors.ochreLight)
                             .clipShape(Circle())
 
                         Text(cue)
@@ -754,7 +780,8 @@ private struct ExerciseDetailSheet: View {
                 .padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
-        .tint(.red)
+        .tint(MyoColor.Action.primary.color)
+        .foregroundStyle(MyoColor.Text.primary.color)
     }
 
     private var detailSubtitle: String {
@@ -810,7 +837,7 @@ private struct ExerciseSequencePlayer: View {
     @State private var isLooping = false
 
     private let timer = Timer.publish(every: 1.15, on: .main, in: .common).autoconnect()
-    private let paperColor = Color.myoIllustrationPaper
+    private let paperColor = MyoTheme.Colors.cream
 
     private var selectedFrame: ExerciseSequenceFrame {
         sequence.frames[min(selectedIndex, max(sequence.frames.count - 1, 0))]
@@ -830,7 +857,7 @@ private struct ExerciseSequencePlayer: View {
             HStack(spacing: 8) {
                 ForEach(sequence.frames.indices, id: \.self) { index in
                     Button {
-                        withAnimation(.snappy) {
+                        withAnimation(MyoTheme.Motion.fade) {
                             selectedIndex = index
                             isLooping = false
                         }
@@ -840,8 +867,8 @@ private struct ExerciseSequencePlayer: View {
                             .frame(width: 34, height: 34)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(index == selectedIndex ? .yellow : Color(.tertiarySystemFill))
-                    .foregroundStyle(index == selectedIndex ? .black : .primary)
+                    .tint(index == selectedIndex ? MyoTheme.Colors.ochreLight : MyoTheme.Colors.ink.opacity(0.06))
+                    .foregroundStyle(MyoTheme.Colors.ink)
                     .accessibilityLabel("\(sequence.frames[index].title) frame")
                 }
             }
@@ -850,15 +877,15 @@ private struct ExerciseSequencePlayer: View {
         }
         .background(paperColor)
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
         .onReceive(timer) { _ in
             guard isLooping, !sequence.frames.isEmpty else {
                 return
             }
-            withAnimation(.snappy) {
+            withAnimation(MyoTheme.Motion.fade) {
                 selectedIndex = (selectedIndex + 1) % sequence.frames.count
             }
         }
@@ -868,8 +895,8 @@ private struct ExerciseSequencePlayer: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Movement Sequence")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.secondary)
+                    .font(MyoTheme.Typography.monoLabel)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                     .textCase(.uppercase)
 
                 Text(selectedFrame.title)
@@ -886,8 +913,8 @@ private struct ExerciseSequencePlayer: View {
                     .frame(width: 40, height: 40)
             }
             .buttonStyle(.borderedProminent)
-            .tint(isLooping ? .black : .yellow)
-            .foregroundStyle(isLooping ? .white : .black)
+            .tint(isLooping ? MyoTheme.Colors.ink : MyoTheme.Colors.ochreLight)
+            .foregroundStyle(isLooping ? MyoTheme.Colors.cream : MyoTheme.Colors.ink)
             .accessibilityLabel(isLooping ? "Pause movement sequence" : "Loop movement sequence")
         }
         .padding(.horizontal, 16)
@@ -909,12 +936,12 @@ private struct ExerciseSequencePlayer: View {
             .frame(height: 390)
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(Color.black.opacity(0.05))
+                    .fill(MyoTheme.Colors.ink.opacity(0.05))
                     .frame(height: 1)
             }
             .overlay(alignment: .top) {
                 Rectangle()
-                    .fill(Color.black.opacity(0.05))
+                    .fill(MyoTheme.Colors.ink.opacity(0.05))
                     .frame(height: 1)
             }
         } else {
@@ -930,11 +957,6 @@ private struct ExerciseSequencePlayer: View {
     }
 }
 
-extension Color {
-    /// Sampled by Deter from the approved kettlebell illustration edge fields.
-    static let myoIllustrationPaper = Color(red: 0.990, green: 0.957, blue: 0.912)
-}
-
 private struct StatTile: View {
     let label: String
     let value: String
@@ -943,23 +965,23 @@ private struct StatTile: View {
         VStack(spacing: 4) {
             Text(value)
                 .font(.title2.bold())
-                .foregroundStyle(.yellow)
+                .foregroundStyle(MyoTheme.Colors.ochre)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
 
             Text(label)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .font(MyoTheme.Typography.monoLabel)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 .textCase(.uppercase)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
     }
 }
 
@@ -970,20 +992,20 @@ private struct DetailSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
+                .font(MyoTheme.Typography.monoLabel)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                 .textCase(.uppercase)
 
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.myoIllustrationPaper)
+        .background(MyoTheme.Colors.cream)
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
     }
 }
 
@@ -996,12 +1018,12 @@ private struct MuscleChipGroup: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
             if muscles.isEmpty {
                 Text("None listed")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             } else {
                 FlowLayout(spacing: 8) {
                     ForEach(muscles, id: \.self) { muscle in
@@ -1010,53 +1032,11 @@ private struct MuscleChipGroup: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .background(tint.opacity(0.18))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(MyoTheme.Colors.ink)
                             .clipShape(Capsule())
                     }
                 }
             }
-        }
-    }
-}
-
-private struct FlowLayout: Layout {
-    var spacing: CGFloat = 8
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let maxWidth = proposal.width ?? 320
-        var currentX: CGFloat = 0
-        var currentY: CGFloat = 0
-        var lineHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if currentX > 0 && currentX + size.width > maxWidth {
-                currentX = 0
-                currentY += lineHeight + spacing
-                lineHeight = 0
-            }
-            currentX += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-
-        return CGSize(width: maxWidth, height: currentY + lineHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var currentX = bounds.minX
-        var currentY = bounds.minY
-        var lineHeight: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if currentX > bounds.minX && currentX + size.width > bounds.maxX {
-                currentX = bounds.minX
-                currentY += lineHeight + spacing
-                lineHeight = 0
-            }
-            subview.place(at: CGPoint(x: currentX, y: currentY), proposal: ProposedViewSize(size))
-            currentX += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
         }
     }
 }

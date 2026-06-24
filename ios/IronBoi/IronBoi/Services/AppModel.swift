@@ -1,5 +1,6 @@
 import AuthenticationServices
 import CryptoKit
+import FirebaseAppCheck
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseFunctions
@@ -25,6 +26,7 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var pendingPlanAdjustmentProposal: PlanAdjustmentProposalSummary?
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
     @Published private(set) var activeWorkout: ActiveWorkoutSession?
+    @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
     @Published private(set) var profile: UserProfile = .empty
     @Published private(set) var isSending = false
     @Published private(set) var isOnboardingBusy = false
@@ -77,6 +79,7 @@ final class AppModel: NSObject, ObservableObject {
     private var planAdjustmentProposalListener: ListenerRegistration?
     private var workoutPlanListener: ListenerRegistration?
     private var activeWorkoutListener: ListenerRegistration?
+    private var workoutLogListener: ListenerRegistration?
     private var currentNonce: String?
 
     deinit {
@@ -90,6 +93,7 @@ final class AppModel: NSObject, ObservableObject {
         planAdjustmentProposalListener?.remove()
         workoutPlanListener?.remove()
         activeWorkoutListener?.remove()
+        workoutLogListener?.remove()
     }
 
     func start() {
@@ -97,14 +101,21 @@ final class AppModel: NSObject, ObservableObject {
 
         authHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
-                self?.user = user
-                self?.listenForCoachMessages(userId: user?.uid)
-                self?.listenForOnboardingState(userId: user?.uid)
-                self?.listenForOnboardingMessages(userId: user?.uid)
-                self?.listenForPendingProposal(userId: user?.uid)
-                self?.listenForPendingPlanAdjustmentProposal(userId: user?.uid)
-                self?.listenForCurrentWorkoutPlan(userId: user?.uid)
-                self?.listenForActiveWorkout(userId: user?.uid)
+                guard let self else { return }
+                #if DEBUG
+                // In a local preview session, ignore auth events so the
+                // listeners don't clear the seeded data back to empty.
+                if self.isPreviewSession { return }
+                #endif
+                self.user = user
+                self.listenForCoachMessages(userId: user?.uid)
+                self.listenForOnboardingState(userId: user?.uid)
+                self.listenForOnboardingMessages(userId: user?.uid)
+                self.listenForPendingProposal(userId: user?.uid)
+                self.listenForPendingPlanAdjustmentProposal(userId: user?.uid)
+                self.listenForCurrentWorkoutPlan(userId: user?.uid)
+                self.listenForActiveWorkout(userId: user?.uid)
+                self.listenForWorkoutLogs(userId: user?.uid)
             }
         }
     }
@@ -130,6 +141,47 @@ final class AppModel: NSObject, ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    #if DEBUG
+    // Simulator-friendly sign-in. Apple Sign-In on a simulator requires an
+    // Apple ID logged into the sim and fails often; anonymous auth gives a
+    // real Firebase uid against staging so the full flow (onboarding, plan,
+    // coach) is testable. Compiled out of Release builds entirely.
+    // Requires Anonymous auth enabled on the staging Firebase project
+    // (Console → Authentication → Sign-in method → Anonymous).
+    func signInAsDeveloper() async {
+        do {
+            let result = try await Auth.auth().signInAnonymously()
+            user = result.user
+        } catch {
+            errorMessage = "Dev sign-in failed: \(error.localizedDescription) — is Anonymous auth enabled on staging?"
+        }
+    }
+
+    /// Local-only preview: seeds a complete session (profile, plan, coach
+    /// thread, history) so every tab is explorable on the simulator with NO
+    /// Firebase backend, auth, or console toggles. Reads as a session via
+    /// `hasSession`. Nothing here touches the network. Release-stripped.
+    @Published private(set) var isPreviewSession = false
+
+    func startPreviewSession() {
+        isPreviewSession = true
+        onboardingStatus = .complete
+        profile = Self.previewProfile
+        currentWorkoutPlan = Self.previewPlan
+        messages = Self.previewMessages
+        workoutLogs = Self.previewLogs
+    }
+    #endif
+
+    /// True when there's a usable session — a real Firebase user, or (DEBUG)
+    /// the local preview. Views gate their populated states on this.
+    var hasSession: Bool {
+        #if DEBUG
+        if isPreviewSession { return true }
+        #endif
+        return user != nil
     }
 
     // Phase 3 Task 3.1 — Account deletion.
@@ -386,7 +438,10 @@ final class AppModel: NSObject, ObservableObject {
             throw CoachAuthError.missingFirebaseUser
         }
 
-        let idToken = try await currentUser.getIDToken(forcingRefresh: true)
+        // Non-forcing: the SDK returns the cached token and only round-trips to
+        // Firebase when it's within ~5 min of expiry. Forcing a refresh on every
+        // user action added latency and a failure point to each interaction.
+        let idToken = try await currentUser.getIDToken()
         user = currentUser
         return idToken
     }
@@ -400,6 +455,19 @@ final class AppModel: NSObject, ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+
+        // This custom wrapper bypasses the Firebase SDK, so App Check tokens
+        // don't attach automatically. Fetch one and send it in the header the
+        // backend's verifyToken path expects (X-Firebase-AppCheck). Failure to
+        // mint a token is non-fatal until the server enforces App Check on
+        // the *Http endpoints — log and continue rather than block the user.
+        do {
+            let appCheckToken = try await AppCheck.appCheck().token(forcingRefresh: false)
+            request.setValue(appCheckToken.token, forHTTPHeaderField: "X-Firebase-AppCheck")
+        } catch {
+            NSLog("[IronBoi] App Check token unavailable for \(name): \(error.localizedDescription)")
+        }
+
         request.httpBody = try JSONSerialization.data(withJSONObject: ["data": data])
 
         let (responseData, response) = try await URLSession.shared.data(for: request)
@@ -683,11 +751,76 @@ final class AppModel: NSObject, ObservableObject {
             }
     }
 
+    private func listenForWorkoutLogs(userId: String?) {
+        workoutLogListener?.remove()
+        workoutLogs = []
+
+        guard let userId else { return }
+
+        workoutLogListener = db
+            .collection("users")
+            .document(userId)
+            .collection("workoutLogs")
+            .order(by: "date", descending: true)
+            .limit(to: 60)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        self?.errorMessage = error.localizedDescription
+                        return
+                    }
+                    self?.workoutLogs = (snapshot?.documents ?? [])
+                        .compactMap { Self.makeWorkoutLogSummary(from: $0.data()) }
+                }
+            }
+    }
+
+    private static func makeWorkoutLogSummary(from data: [String: Any]) -> WorkoutLogSummary? {
+        guard let sessionId = data["sessionId"] as? String,
+              let date = data["date"] as? String else { return nil }
+
+        // postSessionNotes is written as "dayKey: workoutName" — take the name.
+        let notes = (data["postSessionNotes"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        let title: String
+        if let range = notes.range(of: ": ") {
+            title = String(notes[range.upperBound...])
+        } else {
+            title = notes.isEmpty ? "Workout" : notes
+        }
+
+        let exercises = (data["exercises"] as? [[String: Any]] ?? []).map { ex -> LoggedExercise in
+            let sets = (ex["sets"] as? [[String: Any]] ?? []).map { set in
+                LoggedSet(reps: set["reps"] as? Int, loadKg: set["loadKg"] as? Double)
+            }
+            return LoggedExercise(name: ex["name"] as? String ?? "Exercise", sets: sets)
+        }
+
+        return WorkoutLogSummary(
+            sessionId: sessionId,
+            date: date,
+            title: title.isEmpty ? "Workout" : title,
+            exercises: exercises,
+            durationSec: data["durationSec"] as? Int,
+            perceivedEffort: data["perceivedEffort"] as? Int
+        )
+    }
+
     private static func makeCoachMessage(from document: QueryDocumentSnapshot) -> CoachMessage {
         let data = document.data()
         let rawRole = data["role"] as? String ?? "coach"
         let rawStatus = data["status"] as? String ?? "unknown"
         let timestampString = data["timestamp"] as? String
+
+        let sources = (data["sources"] as? [[String: Any]] ?? []).compactMap { raw -> CoachSource? in
+            guard let entryId = raw["entryId"] as? String,
+                  let label = raw["label"] as? String else { return nil }
+            return CoachSource(
+                entryId: entryId,
+                label: label,
+                title: raw["title"] as? String ?? label,
+                url: (raw["sourceUrl"] as? String).flatMap(URL.init(string:))
+            )
+        }
 
         return CoachMessage(
             id: document.documentID,
@@ -696,7 +829,8 @@ final class AppModel: NSObject, ObservableObject {
             content: data["content"] as? String ?? "",
             status: CoachMessage.Status(rawValue: rawStatus) ?? .unknown,
             timestamp: timestampString.flatMap(Self.parseISODate) ?? Date(),
-            riskLevel: data["riskLevel"] as? String
+            riskLevel: data["riskLevel"] as? String,
+            sources: sources
         )
     }
 
@@ -1041,3 +1175,108 @@ extension AppModel: ASAuthorizationControllerPresentationContextProviding {
         }
     }
 }
+
+#if DEBUG
+// MARK: - Preview seed data (DEBUG only, never networked)
+
+extension AppModel {
+    static var previewProfile: UserProfile {
+        var p = UserProfile.empty
+        p.ageYears = 32
+        p.sexOrGender = .male
+        p.heightCm = 180
+        p.weightKg = 82
+        p.goals = [.strength, .muscleGain]
+        p.trainingExperience = .intermediate
+        p.equipment = ["Barbell", "Dumbbells", "Pull-up bar"]
+        p.injuriesOrLimitations = ["Left knee meniscus"]
+        p.schedule.daysPerWeek = 4
+        p.schedule.sessionLengthMin = 60
+        p.preferences.coachingTone = .balanced
+        p.preferences.trainingFocus = .strengthConditioning
+        p.preferences.coachingLens = .huberman
+        return p
+    }
+
+    static var previewPlan: WorkoutPlanSummary {
+        WorkoutPlanSummary(
+            userId: "preview",
+            planId: "current",
+            source: "preview",
+            updatedAt: "2026-06-22",
+            days: [
+                PlannedWorkoutDay(dayKey: "Mon", name: "Lower Body Strength", muscles: ["Quads", "Glutes", "Hamstrings"], exercises: [
+                    PlannedExercise(name: "Back Squat", sets: 5, reps: 5, weight: 225),
+                    PlannedExercise(name: "Romanian Deadlift", sets: 3, reps: 8, weight: 185),
+                    PlannedExercise(name: "Walking Lunge", sets: 3, reps: 12, weight: 40),
+                ]),
+                PlannedWorkoutDay(dayKey: "Wed", name: "Upper Push", muscles: ["Chest", "Shoulders", "Triceps"], exercises: [
+                    PlannedExercise(name: "Bench Press", sets: 5, reps: 5, weight: 185),
+                    PlannedExercise(name: "Overhead Press", sets: 4, reps: 6, weight: 110),
+                    PlannedExercise(name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 60),
+                ]),
+                PlannedWorkoutDay(dayKey: "Fri", name: "Pull Day", muscles: ["Back", "Biceps"], exercises: [
+                    PlannedExercise(name: "Deadlift", sets: 4, reps: 3, weight: 315),
+                    PlannedExercise(name: "Pull-up", sets: 4, reps: 8, weight: 0),
+                    PlannedExercise(name: "Barbell Row", sets: 3, reps: 10, weight: 155),
+                ]),
+            ]
+        )
+    }
+
+    static var previewMessages: [CoachMessage] {
+        let now = Date()
+        return [
+            CoachMessage(id: "m1", messageId: "m1", role: .user,
+                content: "I only slept about 5 hours and my knee feels a little off. Should I still do legs today?",
+                status: .complete, timestamp: now.addingTimeInterval(-600), riskLevel: nil),
+            CoachMessage(id: "m2", messageId: "m2", role: .coach,
+                content: "From a recovery-first view, let's pull it back today rather than push through. Drop the squat to 3 working sets and skip the lunges — your knee and your short sleep both point the same direction. We can make it up later in the week. (Schoenfeld: volume can be redistributed without losing the adaptation.)",
+                status: .complete, timestamp: now.addingTimeInterval(-560), riskLevel: nil,
+                sources: [
+                    CoachSource(entryId: "protocol_huberman_recovery_v1",
+                        label: "Sleep & athletic-performance literature (Huberman protocol)",
+                        title: "Recovery, sleep, and circadian timing for training",
+                        url: URL(string: "https://pubmed.ncbi.nlm.nih.gov/21731144/")),
+                    CoachSource(entryId: "protocol_schoenfeld_hypertrophy_v1",
+                        label: "Schoenfeld et al., peer-reviewed hypertrophy research",
+                        title: "Hypertrophy mechanics: tension, volume, progression",
+                        url: URL(string: "https://pubmed.ncbi.nlm.nih.gov/27433992/")),
+                ]),
+            CoachMessage(id: "m3", messageId: "m3", role: .user,
+                content: "Okay that works. What should I watch for in the knee?",
+                status: .complete, timestamp: now.addingTimeInterval(-300), riskLevel: nil),
+            CoachMessage(id: "m4", messageId: "m4", role: .coach,
+                content: "Stop the set if you feel sharp pain on the inside of the joint or any catching. A dull ache that fades as you warm up is usually fine. Keep the tempo controlled on the way down — that's where the meniscus complains most.",
+                status: .complete, timestamp: now.addingTimeInterval(-260), riskLevel: nil,
+                sources: [
+                    CoachSource(entryId: "myo_pain_injury_adjustment_v1",
+                        label: "MYO reviewed coaching note — pain & injury",
+                        title: "Pain and injury workout adjustment rule",
+                        url: nil),
+                ]),
+        ]
+    }
+
+    static var previewLogs: [WorkoutLogSummary] {
+        [
+            WorkoutLogSummary(sessionId: "p1", date: "2026-06-20", title: "Lower Body Strength",
+                exercises: [
+                    LoggedExercise(name: "Back Squat", sets: Array(repeating: LoggedSet(reps: 5, loadKg: 102), count: 5)),
+                    LoggedExercise(name: "Romanian Deadlift", sets: Array(repeating: LoggedSet(reps: 8, loadKg: 84), count: 3)),
+                    LoggedExercise(name: "Walking Lunge", sets: Array(repeating: LoggedSet(reps: 12, loadKg: 20), count: 3)),
+                ], durationSec: 3300, perceivedEffort: 7),
+            WorkoutLogSummary(sessionId: "p2", date: "2026-06-18", title: "Upper Push",
+                exercises: [
+                    LoggedExercise(name: "Bench Press", sets: Array(repeating: LoggedSet(reps: 5, loadKg: 84), count: 5)),
+                    LoggedExercise(name: "Overhead Press", sets: Array(repeating: LoggedSet(reps: 6, loadKg: 50), count: 4)),
+                ], durationSec: 2700, perceivedEffort: 6),
+            WorkoutLogSummary(sessionId: "p3", date: "2026-06-16", title: "Pull Day",
+                exercises: [
+                    LoggedExercise(name: "Deadlift", sets: Array(repeating: LoggedSet(reps: 3, loadKg: 140), count: 4)),
+                    LoggedExercise(name: "Pull-up", sets: Array(repeating: LoggedSet(reps: 8, loadKg: nil), count: 4)),
+                ], durationSec: 3000, perceivedEffort: 8),
+        ]
+    }
+}
+#endif
