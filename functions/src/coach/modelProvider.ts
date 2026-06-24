@@ -43,7 +43,7 @@ export class GeminiCoachProvider implements CoachModelProvider {
     onText,
     signal,
   }: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult> {
-    const response = await fetch(
+    const callGemini = (): Promise<Response> => fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
       {
         method: "POST",
@@ -93,6 +93,20 @@ export class GeminiCoachProvider implements CoachModelProvider {
         }),
       },
     );
+
+    // Gemini returns 429/500/503 when the model is momentarily overloaded.
+    // Retry transient failures with backoff (within the orchestrator's 55s
+    // budget) instead of failing the whole coach turn on a blip.
+    const TRANSIENT_STATUS = new Set([429, 500, 503]);
+    const MAX_ATTEMPTS = 3;
+    let response!: Response;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      response = await callGemini();
+      if (response.ok || !TRANSIENT_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+    }
 
     if (!response.ok) {
       throw new Error(`Gemini request failed with HTTP ${response.status}`);
