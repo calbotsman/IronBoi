@@ -226,7 +226,9 @@ export async function acceptProgramProposal(
       {
         decision: "accepted",
         decidedAt: serverDecidedAt,
-        clientDecidedAt: request.decidedAt,
+        // Only write clientDecidedAt when present — Firestore rejects
+        // `undefined`, which 500'd the whole accept when the client omitted it.
+        ...(request.decidedAt !== undefined ? { clientDecidedAt: request.decidedAt } : {}),
         serverDecidedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

@@ -150,7 +150,8 @@ export async function acceptPlanAdjustmentProposal(
       {
         decision: "accepted",
         decidedAt: serverDecidedAt,
-        clientDecidedAt: request.decidedAt,
+        // Firestore rejects `undefined`; only write when the client sent it.
+        ...(request.decidedAt !== undefined ? { clientDecidedAt: request.decidedAt } : {}),
         serverDecidedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
