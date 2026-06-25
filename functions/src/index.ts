@@ -69,8 +69,15 @@ import { safeLogger } from "./logging/safeLogger.js";
 // in a follow-up PR.
 export const CALLABLE_OPTS = {
   region: "us-central1",
-  enforceAppCheck: true,
-  consumeAppCheckToken: true,
+  // App Check enforcement is OFF for now. It was the only thing enforced on
+  // the onCall surface (the *Http endpoints never enforced it), so a Debug
+  // build whose debug token isn't registered had every callable — including
+  // profile save — rejected with app:INVALID while auth was VALID. Auth still
+  // protects every function. RE-ENABLE this (with iOS App Attest configured +
+  // debug tokens registered) before the public App Store launch. See
+  // docs/audits/myo-engineering-qa-2026-06-23.md.
+  enforceAppCheck: false,
+  consumeAppCheckToken: false,
 } as const;
 import {
   AcceptProgramProposalRequest,
