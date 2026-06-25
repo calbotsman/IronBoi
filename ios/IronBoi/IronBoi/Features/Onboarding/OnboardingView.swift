@@ -271,11 +271,11 @@ struct OnboardingView: View {
             ]
         case "coachingLens":
             return [
-                choice("lens_none", "Coach's default", "coachingLens", "none"),
-                choice("lens_huberman", "Recovery (Huberman)", "coachingLens", "huberman"),
-                choice("lens_schoenfeld", "Hypertrophy (Schoenfeld)", "coachingLens", "schoenfeld"),
-                choice("lens_sims", "Female physiology (Sims)", "coachingLens", "sims"),
-                choice("lens_blueprint", "Longevity (Blueprint)", "coachingLens", "blueprint"),
+                choice("lens_none", "MYO default", "coachingLens", "none"),
+                choice("lens_huberman", "Andrew Huberman", "coachingLens", "huberman"),
+                choice("lens_schoenfeld", "Brad Schoenfeld", "coachingLens", "schoenfeld"),
+                choice("lens_sims", "Stacy Sims", "coachingLens", "sims"),
+                choice("lens_blueprint", "Bryan Johnson", "coachingLens", "blueprint"),
             ]
         case "injuriesOrLimitations":
             return [

@@ -95,14 +95,14 @@ enum CoachingLens: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
-    /// The protocol's name, attributed.
+    /// The protocol's name — the famous person leads (it's the hook).
     var displayName: String {
         switch self {
-        case .none: return "Coach's default"
-        case .huberman: return "Recovery & nervous system"
-        case .schoenfeld: return "Hypertrophy science"
-        case .sims: return "Female physiology"
-        case .blueprint: return "Longevity & measurement"
+        case .none: return "MYO Coach (default)"
+        case .huberman: return "Andrew Huberman"
+        case .schoenfeld: return "Brad Schoenfeld"
+        case .sims: return "Stacy Sims"
+        case .blueprint: return "Bryan Johnson"
         }
     }
 
