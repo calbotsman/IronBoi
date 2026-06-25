@@ -587,9 +587,12 @@ final class AppModel: NSObject, ObservableObject {
         defer { isSavingProfile = false }
 
         do {
-            let functions = Functions.functions(region: "us-central1")
-            let callable = functions.httpsCallable("upsertProfile")
-            _ = try await callable.call(next.firestorePayload())
+            // Resilient HTTP endpoint (auth-only), NOT the SDK callable. The
+            // callable attaches an App Check token that's invalid on Debug
+            // builds, and callables reject invalid tokens — which silently
+            // broke every profile save on device. The *Http path checks auth.
+            let idToken = try await requireFreshFirebaseAuthToken()
+            try await callFunction("upsertProfileHttp", idToken: idToken, data: next.firestorePayload())
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -606,9 +609,9 @@ final class AppModel: NSObject, ObservableObject {
         defer { isWorkoutBusy = false }
 
         do {
-            let functions = Functions.functions(region: "us-central1")
-            let callable = functions.httpsCallable("regenerateWorkoutPlan")
-            _ = try await callable.call([:] as [String: Any])
+            // Resilient HTTP endpoint (auth-only), same reason as upsertProfile.
+            let idToken = try await requireFreshFirebaseAuthToken()
+            try await callFunction("regenerateWorkoutPlanHttp", idToken: idToken, data: [:])
             // The Firestore listener picks up the new plan and republishes
             // currentWorkoutPlan automatically — no local mutation needed.
         } catch {

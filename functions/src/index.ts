@@ -1051,6 +1051,123 @@ export const acceptPlanAdjustmentProposalHttp = onRequest(
   },
 );
 
+// HTTP mirror of the upsertProfile onCall. The iOS app attaches a broken
+// App Check token, and onCall callables reject an invalid token even with
+// enforceAppCheck:false. This onRequest endpoint only verifies the Firebase
+// Auth bearer token, matching the resilient pattern of the other *Http
+// endpoints. Same behavior as upsertProfile: userId is always injected from
+// the verified bearer token, never trusted from the body.
+export const upsertProfileHttp = onRequest(
+  { region: "us-central1", invoker: "public" },
+  async (request, response) => {
+    response.set("Access-Control-Allow-Origin", "*");
+    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    if (request.method !== "POST") {
+      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
+      return;
+    }
+
+    const userId = await verifyBearerUserId(request, response);
+    if (!userId) return;
+
+    try {
+      const parsed = UserHealthProfile.parse(
+        stripUserId(request.body?.data ?? request.body, userId),
+      );
+
+      await db.doc(profilePath(userId)).set(
+        {
+          ...parsed,
+          serverUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      writeJsonResponse(response, 200, { ok: true, userId });
+    } catch (error) {
+      writeHttpHandlerError(response, error, "upsert_profile_failed");
+    }
+  },
+);
+
+// HTTP mirror of the regenerateWorkoutPlan onCall. Same App Check rationale
+// as upsertProfileHttp above. Rebuilds workoutPlans/current from the user's
+// current profile and the seed default plan.
+export const regenerateWorkoutPlanHttp = onRequest(
+  { region: "us-central1", invoker: "public" },
+  async (request, response) => {
+    response.set("Access-Control-Allow-Origin", "*");
+    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+
+    if (request.method === "OPTIONS") {
+      response.status(204).send("");
+      return;
+    }
+
+    if (request.method !== "POST") {
+      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
+      return;
+    }
+
+    const userId = await verifyBearerUserId(request, response);
+    if (!userId) return;
+
+    try {
+      const profileSnap = await db.doc(profilePath(userId)).get();
+      if (!profileSnap.exists) {
+        writeJsonResponse(response, 400, { ok: false, error: "profile_not_found" });
+        return;
+      }
+      const profileData = profileSnap.data() ?? {};
+      const profile = {
+        schedule: {
+          daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
+            ? profileData.schedule.daysPerWeek
+            : 3,
+          preferredDays: Array.isArray(profileData.schedule?.preferredDays)
+            ? (profileData.schedule.preferredDays as string[])
+            : [],
+        },
+      };
+
+      const now = new Date().toISOString();
+      const plan = buildWorkoutPlanFromProfile(
+        userId,
+        profile,
+        seed.DEFAULT_PLAN,
+        now,
+      );
+
+      await db.doc(workoutPlanPath(userId, "current")).set(
+        {
+          ...plan,
+          serverUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: false },
+      );
+
+      await recordAuditEventBestEffort(db, {
+        userId,
+        eventType: "memory_fact_written",
+        actor: "user",
+        payload: { source: "regenerate_plan", daysPerWeek: profile.schedule.daysPerWeek },
+      });
+
+      writeJsonResponse(response, 200, { ok: true, daysPerWeek: profile.schedule.daysPerWeek });
+    } catch (error) {
+      writeHttpHandlerError(response, error, "regenerate_workout_plan_failed");
+    }
+  },
+);
+
 const SafetyEvalResult = z.object({
   caseId: z.string().min(1),
   passed: z.boolean(),
