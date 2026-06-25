@@ -7,12 +7,20 @@ struct IronBoiApp: App {
     @StateObject private var appModel = AppModel()
 
     init() {
-        // Phase 3 Task 3.2 — App Check provider MUST be set BEFORE
-        // FirebaseApp.configure(). After configure() runs, the factory
-        // can't be swapped without app restart. See
-        // Services/AppCheckProviderFactory.swift for the Debug/Release
-        // provider choice + first-run setup steps.
+        // App Check provider MUST be set BEFORE FirebaseApp.configure().
+        //
+        // DEBUG: do NOT install a provider. The debug provider can't mint a
+        // valid token unless its (per-install) debug token is registered in
+        // the console, and an *invalid* token is rejected by callables even
+        // when enforcement is off. With no provider, the app sends no token
+        // (app:MISSING), which passes while enforcement is disabled. This is
+        // why profile saves / plan rebuilds were failing on device.
+        //
+        // RELEASE: App Attest, for when App Check enforcement is turned back
+        // on before the public launch. See AppCheckProviderFactory.swift.
+        #if !DEBUG
         AppCheck.setAppCheckProviderFactory(IronBoiAppCheckProviderFactory())
+        #endif
         FirebaseApp.configure()
     }
 
