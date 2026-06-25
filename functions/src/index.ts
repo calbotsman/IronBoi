@@ -1078,9 +1078,21 @@ export const upsertProfileHttp = onRequest(
     if (!userId) return;
 
     try {
-      const parsed = UserHealthProfile.parse(
-        stripUserId(request.body?.data ?? request.body, userId),
-      );
+      // createdAt/updatedAt are required by the schema but server-owned — the
+      // client never sends them. Inject here: preserve the original createdAt
+      // on updates, stamp updatedAt now. (Without this, every save failed
+      // schema validation, masked until now behind the App Check rejection.)
+      const now = new Date().toISOString();
+      const existing = await db.doc(profilePath(userId)).get();
+      const createdAt =
+        existing.exists && typeof existing.data()?.createdAt === "string"
+          ? (existing.data()!.createdAt as string)
+          : now;
+      const parsed = UserHealthProfile.parse({
+        ...stripUserId(request.body?.data ?? request.body, userId),
+        createdAt,
+        updatedAt: now,
+      });
 
       await db.doc(profilePath(userId)).set(
         {
