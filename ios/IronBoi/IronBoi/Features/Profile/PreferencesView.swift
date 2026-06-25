@@ -14,7 +14,6 @@ struct PreferencesView: View {
     @State private var newDietaryConstraint = ""
     @State private var newDislikedExercise = ""
     @State private var showRegenerateConfirm = false
-    @State private var showRebuildOffer = false
     @State private var regenerateMessage: String?
     @State private var lastSaveSucceeded: Bool?
     @State private var saveGeneration = 0
@@ -54,16 +53,6 @@ struct PreferencesView: View {
             .toolbar { ToolbarItem(placement: .principal) { EmptyView() } }
             .safeAreaInset(edge: .top) { header }
             .safeAreaInset(edge: .bottom) { saveBar }
-            .confirmationDialog(
-                "Saved. Rebuild your plan?",
-                isPresented: $showRebuildOffer,
-                titleVisibility: .visible
-            ) {
-                Button("Rebuild plan now") { Task { await regenerate() } }
-                Button("Later", role: .cancel) {}
-            } message: {
-                Text("These changes affect how Coach programs your week. Rebuild now to apply them, or keep your current plan and let Coach adjust as you train.")
-            }
             .onAppear {
                 draft = appModel.profile
                 withAnimation(.easeOut(duration: 0.2)) { contentVisible = true }
@@ -404,6 +393,9 @@ struct PreferencesView: View {
                 Group {
                     if appModel.isSavingProfile {
                         ProgressView().tint(MyoTheme.Colors.cream)
+                    } else if appModel.isWorkoutBusy {
+                        Label("Updating plan…", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.body.weight(.semibold))
                     } else if let icon = saveIcon {
                         Label(saveLabel, systemImage: icon)
                             .font(.body.weight(.semibold))
@@ -420,7 +412,7 @@ struct PreferencesView: View {
             // Disabled unless there are edits to save, OR we're in the failed
             // state (so "tap to retry" works). The "Saved" confirmation is NOT
             // a CTA — disable it so it can't trigger a redundant re-save.
-            .disabled(appModel.isSavingProfile || (!hasLocalEdits && lastSaveSucceeded != false))
+            .disabled(appModel.isSavingProfile || appModel.isWorkoutBusy || (!hasLocalEdits && lastSaveSucceeded != false))
             .padding(.horizontal, MyoTheme.Spacing.md)
             .padding(.vertical, MyoTheme.Spacing.sm)
         }
@@ -495,12 +487,12 @@ struct PreferencesView: View {
         withAnimation(MyoTheme.Motion.fade) { lastSaveSucceeded = succeeded }
         guard succeeded else { return }
 
-        // The dead-end fix: if a programming-affecting field changed, don't
-        // leave the user wondering — offer to rebuild the plan so the change
-        // is actually visible. Lens/tone changes are explanation-only and the
-        // coach picks them up on the next message, so they don't trigger this.
+        // If a plan-shaping field changed (days, length, focus, goals, gear,
+        // experience), auto-rebuild the plan so the change actually takes effect
+        // — no separate "Rebuild plan" tap. Protocol/tone are explanation-only
+        // and the coach picks them up on the next message, so they skip this.
         if Self.programmingChanged(from: baseline, to: draft) {
-            showRebuildOffer = true
+            await regenerate()
         }
 
         // Generation guard: if another save fires during the 1.5s window, only
