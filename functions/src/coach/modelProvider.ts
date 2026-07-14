@@ -1,6 +1,29 @@
+export type CoachToolDeclaration = {
+  name: string;
+  description: string;
+  // OpenAPI-3.0-subset JSON Schema — the shape Gemini's function-calling
+  // API expects. See coach/toolRegistry.ts for the declarations actually
+  // used and the Zod schemas they mirror.
+  parameters: Record<string, unknown>;
+};
+
+// Always resolves — never throws. A tool failure (validation, Firestore
+// error, whatever) becomes `{ok: false, error}` in the returned object so
+// the model gets a function response it can react to, instead of the whole
+// turn dying mid-loop.
+export type CoachToolExecutor = (
+  toolName: string,
+  args: Record<string, unknown>,
+) => Promise<Record<string, unknown>>;
+
 type GenerateCoachReplyArgs = {
   system: string;
   userContent: string;
+  tools?: CoachToolDeclaration[];
+  executeTool?: CoachToolExecutor;
+  // Sequential tool-call round trips before the loop forces a text-only
+  // finish. Matches the orchestration spec's cap (§5.5).
+  maxToolCalls?: number;
   onText?: (content: string) => Promise<void>;
   // Phase 1 Task 1.4 — orchestrator may abort the in-flight model call when
   // the function timeout is about to fire. Providers MUST honor this signal.
@@ -15,6 +38,7 @@ export type CoachModelUsage = {
 export type GenerateCoachReplyResult = {
   content: string;
   usage: CoachModelUsage;
+  toolCalls: Array<{ name: string; args: Record<string, unknown> }>;
 };
 
 export type CoachModelProvider = {
@@ -31,19 +55,47 @@ function estimateTokens(text: string) {
   return Math.ceil(text.length / 4);
 }
 
+const DEFAULT_MAX_TOOL_CALLS = 6;
+
+type GeminiPart =
+  | { text: string }
+  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | { functionResponse: { name: string; response: Record<string, unknown> } };
+
+type GeminiContent = {
+  role: "user" | "model" | "function";
+  parts: GeminiPart[];
+};
+
+type GeminiResponsePayload = {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+        functionCall?: { name: string; args?: Record<string, unknown> };
+      }>;
+    };
+  }>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+    totalTokenCount?: number;
+  };
+};
+
 export class GeminiCoachProvider implements CoachModelProvider {
   provider = "gemini" as const;
   model = process.env.IRONBOI_COACH_MODEL || "gemini-2.5-flash";
 
   constructor(private readonly apiKey: string) {}
 
-  async generateCoachReply({
-    system,
-    userContent,
-    onText,
-    signal,
-  }: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult> {
-    const callGemini = (): Promise<Response> => fetch(
+  private callGemini(
+    system: string,
+    contents: GeminiContent[],
+    tools: CoachToolDeclaration[] | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> {
+    return fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`,
       {
         method: "POST",
@@ -56,12 +108,10 @@ export class GeminiCoachProvider implements CoachModelProvider {
           systemInstruction: {
             parts: [{ text: system }],
           },
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: userContent }],
-            },
-          ],
+          contents,
+          ...(tools && tools.length > 0
+            ? { tools: [{ functionDeclarations: tools }] }
+            : {}),
           generationConfig: {
             maxOutputTokens: 900,
             temperature: 0.4,
@@ -93,15 +143,22 @@ export class GeminiCoachProvider implements CoachModelProvider {
         }),
       },
     );
+  }
 
-    // Gemini returns 429/500/503 when the model is momentarily overloaded.
-    // Retry transient failures with backoff (within the orchestrator's 55s
-    // budget) instead of failing the whole coach turn on a blip.
+  // Gemini returns 429/500/503 when the model is momentarily overloaded.
+  // Retry transient failures with backoff (within the orchestrator's 55s
+  // budget) instead of failing the whole coach turn on a blip.
+  private async callGeminiWithRetry(
+    system: string,
+    contents: GeminiContent[],
+    tools: CoachToolDeclaration[] | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<GeminiResponsePayload> {
     const TRANSIENT_STATUS = new Set([429, 500, 503]);
     const MAX_ATTEMPTS = 3;
     let response!: Response;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-      response = await callGemini();
+      response = await this.callGemini(system, contents, tools, signal);
       if (response.ok || !TRANSIENT_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
         break;
       }
@@ -112,42 +169,90 @@ export class GeminiCoachProvider implements CoachModelProvider {
       throw new Error(`Gemini request failed with HTTP ${response.status}`);
     }
 
-    const payload = (await response.json()) as {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string }>;
-        };
-      }>;
-      usageMetadata?: {
-        promptTokenCount?: number;
-        candidatesTokenCount?: number;
-        totalTokenCount?: number;
-      };
-    };
+    return (await response.json()) as GeminiResponsePayload;
+  }
 
-    const parts = payload.candidates?.[0]?.content?.parts;
-    const content = Array.isArray(parts)
-      ? parts
-          .map((part) => part.text ?? "")
-          .join("")
-          .trim()
-      : "";
+  async generateCoachReply({
+    system,
+    userContent,
+    tools,
+    executeTool,
+    maxToolCalls = DEFAULT_MAX_TOOL_CALLS,
+    onText,
+    signal,
+  }: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult> {
+    const contents: GeminiContent[] = [{ role: "user", parts: [{ text: userContent }] }];
+    const toolCallsMade: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let inputTokens = 0;
+    let outputTokens = 0;
 
-    if (!content) {
-      throw new Error("Gemini returned an empty coach response");
+    // Tools only ever get offered while there's an executor to run them and
+    // budget left in the loop — the final forced-finish call below always
+    // omits tools so Gemini can't open a 7th round trip.
+    const canUseTools = Boolean(tools && tools.length > 0 && executeTool);
+
+    for (let round = 0; round <= maxToolCalls; round += 1) {
+      const offerTools = canUseTools && round < maxToolCalls;
+      if (canUseTools && !offerTools) {
+        contents.push({
+          role: "user",
+          parts: [
+            {
+              text: "You've reached the tool-call limit for this turn. Reply now with your best text answer given everything so far — do not attempt another tool call.",
+            },
+          ],
+        });
+      }
+      const payload = await this.callGeminiWithRetry(
+        system,
+        contents,
+        offerTools ? tools : undefined,
+        signal,
+      );
+
+      inputTokens += payload.usageMetadata?.promptTokenCount ?? 0;
+      outputTokens += payload.usageMetadata?.candidatesTokenCount ?? 0;
+
+      const rawParts = payload.candidates?.[0]?.content?.parts;
+      const parts = Array.isArray(rawParts) ? rawParts : [];
+      const functionCallPart = parts.find(
+        (part): part is { functionCall: { name: string; args?: Record<string, unknown> } } =>
+          Boolean(part.functionCall),
+      );
+      const text = parts
+        .map((part) => part.text ?? "")
+        .join("")
+        .trim();
+
+      if (!functionCallPart || !offerTools) {
+        if (!text) {
+          throw new Error("Gemini returned an empty coach response");
+        }
+        if (inputTokens === 0 && outputTokens === 0) {
+          inputTokens = estimateTokens(`${system}\n${userContent}`);
+          outputTokens = estimateTokens(text);
+        }
+        await onText?.(text);
+        return { content: text, usage: { inputTokens, outputTokens }, toolCalls: toolCallsMade };
+      }
+
+      // Sequential only (per orchestration spec §5.5) — a single tool call
+      // per round trip even if the model asked for more than one.
+      const { name, args = {} } = functionCallPart.functionCall;
+      toolCallsMade.push({ name, args });
+      contents.push({ role: "model", parts: [{ functionCall: { name, args } }] });
+
+      const toolResponse = await executeTool!(name, args);
+      contents.push({
+        role: "function",
+        parts: [{ functionResponse: { name, response: toolResponse } }],
+      });
     }
 
-    await onText?.(content);
-    return {
-      content,
-      usage: {
-        inputTokens:
-          payload.usageMetadata?.promptTokenCount ??
-          estimateTokens(`${system}\n${userContent}`),
-        outputTokens:
-          payload.usageMetadata?.candidatesTokenCount ?? estimateTokens(content),
-      },
-    };
+    // Unreachable in practice — the loop's last iteration always omits
+    // tools, which forces a text response or throws above. Kept as a
+    // defensive exhaustiveness guard.
+    throw new Error("Gemini tool loop exited without a final reply");
   }
 }
 

@@ -12,13 +12,26 @@ import {
 import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
-import { selectCoachModelProvider } from "./modelProvider.js";
+import { selectCoachModelProvider, type CoachToolExecutor } from "./modelProvider.js";
 import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import {
   classifyUserMessage,
   refusalForVerdict,
   type SafetyVerdict,
 } from "./safety.js";
+import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
+import { executeTool } from "../tools/executor.js";
+
+// Feature-flagged so the new Gemini function-calling loop (adapt_plan,
+// ask_follow_up_question) can ship dark and run alongside the existing
+// deterministic classifier (workouts/planAdjustments.ts's
+// maybeCreatePlanAdjustmentProposal, still called from sendCoachMessageHttp)
+// for a release before that classifier is retired. Both paths write to the
+// same planAdjustmentProposals collection, so either can be reviewed
+// side-by-side in the proposal history during the overlap period.
+function isCoachToolLoopEnabled(): boolean {
+  return process.env.IRONBOI_COACH_TOOL_LOOP_ENABLED === "true";
+}
 
 type OrchestrateCoachTurnArgs = {
   db: Firestore;
@@ -139,6 +152,7 @@ export async function orchestrateCoachTurn({
       return;
     }
 
+    const toolLoopEnabled = isCoachToolLoopEnabled();
     const context = await loadCoachContext(db, userId, sessionId);
     const retrievedCorpus = retrieveResearchCorpus({
       userContent,
@@ -153,6 +167,7 @@ export async function orchestrateCoachTurn({
       coach,
       contextBundle,
       userContent,
+      { toolsEnabled: toolLoopEnabled },
     );
     const provider = selectCoachModelProvider({ geminiApiKey });
 
@@ -183,6 +198,29 @@ export async function orchestrateCoachTurn({
       modelAbort.abort();
     }, COACH_MODEL_TIMEOUT_MS);
 
+    const toolRegistry = toolLoopEnabled ? buildCoachToolRegistry(db) : undefined;
+    const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
+      ? async (toolName, toolArgs) => {
+          try {
+            const toolResult = await executeTool(toolRegistry, toolName, toolArgs, {
+              authenticatedUserId: userId,
+            });
+            return toolResult as Record<string, unknown>;
+          } catch (error) {
+            safeLogger.warn("Coach tool execution failed", {
+              event: "coach_tool_execution_failed",
+              userId,
+              sessionId,
+              messageId,
+              turnId,
+              tool: toolName,
+              errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+            });
+            return { ok: false, error: "tool_execution_failed" };
+          }
+        }
+      : undefined;
+
     let result;
     try {
       result = await provider.generateCoachReply({
@@ -190,6 +228,8 @@ export async function orchestrateCoachTurn({
         // Phase 1.1 — userContent on the wire is the XML-tagged userMessage,
         // not the raw user turn. The boundary contract is in `system`.
         userContent: userMessage,
+        tools: toolLoopEnabled ? COACH_TOOL_DECLARATIONS : undefined,
+        executeTool: executeCoachTool,
         signal: modelAbort.signal,
         onText: async (partialContent) => {
           await assistantRef.set(
@@ -249,6 +289,7 @@ export async function orchestrateCoachTurn({
         sources,
         promptTokens: result.usage.inputTokens,
         completionTokens: result.usage.outputTokens,
+        toolCallIds: result.toolCalls.map((call) => call.name),
         serverCompletedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

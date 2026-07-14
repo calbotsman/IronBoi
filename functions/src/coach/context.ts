@@ -10,6 +10,10 @@ export type CoachLoadedContext = {
   // Surfaced to the bundle so the coach knows there are pending items
   // waiting for user review, without those items influencing this reply.
   pendingProposalCount: number;
+  // Recently accepted plan-adjustment proposals — lets the coach reference
+  // a past change ("since we shortened Tuesday's session...") instead of
+  // re-asking. See workouts/planAdjustments.ts acceptPlanAdjustmentProposal.
+  recentPlanChanges: DocumentData[];
 };
 
 // A fact is "confirmed-for-prompt" if either:
@@ -25,7 +29,7 @@ export async function loadCoachContext(
   userId: string,
   sessionId: string,
 ): Promise<CoachLoadedContext> {
-  const [profileSnap, recentFactsSnap, recentLogsSnap, sessionHistorySnap] =
+  const [profileSnap, recentFactsSnap, recentLogsSnap, sessionHistorySnap, recentPlanChangesSnap] =
     await Promise.all([
       db.doc(profilePath(userId)).get(),
       db
@@ -42,6 +46,12 @@ export async function loadCoachContext(
         .collection(`${coachSessionPath(userId, sessionId)}/messages`)
         .orderBy("serverCreatedAt", "asc")
         .limit(40)
+        .get(),
+      db
+        .collection(`${userRoot(userId)}/planAdjustmentProposals`)
+        .where("decision", "==", "accepted")
+        .orderBy("decidedAt", "desc")
+        .limit(5)
         .get(),
     ]);
 
@@ -60,5 +70,6 @@ export async function loadCoachContext(
     recentLogs: recentLogsSnap.docs.map((doc) => doc.data()),
     sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()),
     pendingProposalCount,
+    recentPlanChanges: recentPlanChangesSnap.docs.map((doc) => doc.data()),
   };
 }

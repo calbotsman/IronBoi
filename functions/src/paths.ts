@@ -14,6 +14,13 @@ export function workoutPlanPath(userId: string, planId = "current") {
   return `${userRoot(userId)}/workoutPlans/${planId}`;
 }
 
+// Multi-week source of truth. workoutPlans/current stays as a flattened
+// snapshot of the program's active week (see workouts/program.ts) so the
+// Train tab and existing plan-adjustment code keep reading one doc.
+export function trainingProgramPath(userId: string, programId = "current") {
+  return `${userRoot(userId)}/trainingPrograms/${programId}`;
+}
+
 export function dailyCheckPath(userId: string, date: string) {
   return `${userRoot(userId)}/dailyChecks/${date}`;
 }

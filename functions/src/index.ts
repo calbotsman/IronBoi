@@ -49,6 +49,7 @@ import {
   acceptPlanAdjustmentProposal,
   maybeCreatePlanAdjustmentProposal,
 } from "./workouts/planAdjustments.js";
+import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { safeLogger } from "./logging/safeLogger.js";
 
 // Phase 3 Task 3.2 — App Check enforcement.
@@ -361,13 +362,9 @@ export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
     now,
   );
 
-  await db.doc(workoutPlanPath(userId, "current")).set(
-    {
-      ...plan,
-      serverUpdatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: false }, // overwrite — old days that were dropped should go
-  );
+  // Overwrites both workoutPlans/current and trainingPrograms/current — old
+  // days/weeks that were dropped should go.
+  await writeRegeneratedPlanAndProgram(db, userId, plan.days, now);
 
   await recordAuditEventBestEffort(db, {
     userId,
@@ -1158,13 +1155,7 @@ export const regenerateWorkoutPlanHttp = onRequest(
         now,
       );
 
-      await db.doc(workoutPlanPath(userId, "current")).set(
-        {
-          ...plan,
-          serverUpdatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: false },
-      );
+      await writeRegeneratedPlanAndProgram(db, userId, plan.days, now);
 
       await recordAuditEventBestEffort(db, {
         userId,

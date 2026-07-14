@@ -336,7 +336,10 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
-    func acceptPendingPlanAdjustmentProposal() async {
+    // scope: "today" | "rest_of_week" | "going_forward", or nil to use
+    // whatever scope the proposal already carries (e.g. legacy proposals
+    // with a single implicit target day).
+    func acceptPendingPlanAdjustmentProposal(scope: String? = nil) async {
         guard !isSending, let pendingPlanAdjustmentProposal else { return }
 
         isSending = true
@@ -344,10 +347,14 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let idToken = try await requireFreshFirebaseAuthToken()
-            try await callFunction("acceptPlanAdjustmentProposalHttp", idToken: idToken, data: [
+            var data: [String: Any] = [
                 "proposalId": pendingPlanAdjustmentProposal.proposalId,
                 "decidedAt": Self.isoString(from: Date()),
-            ])
+            ]
+            if let scope {
+                data["scope"] = scope
+            }
+            try await callFunction("acceptPlanAdjustmentProposalHttp", idToken: idToken, data: data)
             try await refreshCurrentWorkoutPlan()
         } catch {
             errorMessage = error.localizedDescription
@@ -889,7 +896,8 @@ final class AppModel: NSObject, ObservableObject {
             safetyNotes: data["safetyNotes"] as? [String] ?? [],
             sourceCorpusEntryIds: data["sourceCorpusEntryIds"] as? [String] ?? [],
             requiresFollowUp: data["requiresFollowUp"] as? Bool ?? false,
-            createdAt: createdAt
+            createdAt: createdAt,
+            scope: appliesTo?["scope"] as? String
         )
     }
 
@@ -951,12 +959,23 @@ final class AppModel: NSObject, ObservableObject {
             let days = data["days"] as? [String: Any]
         else { return nil }
 
+        // A "today only" plan-adjustment scope lands in dailyOverrides keyed
+        // by ISO date rather than in `days` (keyed by weekday), so it never
+        // bleeds into the repeating week. Splice today's override over the
+        // matching weekday before building the day list, so the rest of the
+        // app never has to know overrides exist.
+        let dailyOverrides = data["dailyOverrides"] as? [String: Any] ?? [:]
+        var resolvedDays = days
+        if let todayOverride = dailyOverrides[Self.currentDateISO()] {
+            resolvedDays[Self.currentDayKey()] = todayOverride
+        }
+
         return WorkoutPlanSummary(
             userId: userId,
             planId: planId,
             source: data["source"] as? String ?? "coach_generated",
             updatedAt: data["updatedAt"] as? String ?? "",
-            days: makePlannedWorkoutDays(from: days)
+            days: makePlannedWorkoutDays(from: resolvedDays)
         )
     }
 
@@ -1004,6 +1023,19 @@ final class AppModel: NSObject, ObservableObject {
     private static func currentDayKey() -> String {
         let weekday = Calendar.current.component(.weekday, from: Date())
         return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
+    }
+
+    // Device-local date, matching currentDayKey()'s use of device-local
+    // weekday — the backend resolves "today" in America/New_York, so a user
+    // in another timezone can see a brief mismatch window right around
+    // midnight in either zone. Same pre-existing limitation as the weekday
+    // resolution above; not new to dailyOverrides.
+    private static func currentDateISO() -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 
     private static func jsonObject<T: Encodable>(from value: T) throws -> Any {

@@ -16,8 +16,10 @@ import {
   coachSessionPath,
   profilePath,
   programProposalPath,
+  trainingProgramPath,
   workoutPlanPath,
 } from "../paths.js";
+import { buildTrainingProgramFromDays } from "../workouts/program.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -187,6 +189,7 @@ export async function acceptProgramProposal(
   const proposalRef = db.doc(programProposalPath(userId, request.proposalId));
   const profileRef = db.doc(profilePath(userId));
   const workoutPlanRef = db.doc(workoutPlanPath(userId, "current"));
+  const trainingProgramRef = db.doc(trainingProgramPath(userId));
   const serverDecidedAt = new Date().toISOString();
 
   await db.runTransaction(async (transaction) => {
@@ -220,6 +223,20 @@ export async function acceptProgramProposal(
       },
       { merge: true },
     );
+
+    // New program's week clock starts today — this is the first time the
+    // user has a plan at all, so there's no "activeWeekIndex" history to
+    // preserve.
+    const program = buildTrainingProgramFromDays(
+      userId,
+      proposal.workoutPlan.days,
+      serverDecidedAt.slice(0, 10),
+      serverDecidedAt,
+    );
+    transaction.set(trainingProgramRef, {
+      ...program,
+      serverUpdatedAt: FieldValue.serverTimestamp(),
+    });
 
     transaction.set(
       proposalRef,

@@ -21,6 +21,9 @@ export type CoachContextBundleV1 = {
     reason: "healthkit_not_connected";
   };
   retrievedCorpus: RetrievedCorpusEntry[];
+  // Recently accepted plan-adjustment proposals — so the coach can
+  // reference a past change instead of re-asking about it.
+  recentPlanChanges: CoachContextPlanChange[];
 };
 
 export type CoachContextMemoryFact = {
@@ -47,6 +50,15 @@ export type CoachContextMessage = {
   content: string;
   status?: string;
   timestamp?: string;
+};
+
+export type CoachContextPlanChange = {
+  proposalId?: string;
+  category?: string;
+  dayKey?: string;
+  scope?: string;
+  summary: string;
+  decidedAt?: string;
 };
 
 const PROFILE_FIELDS = [
@@ -107,6 +119,11 @@ export function buildCoachContextBundle(
       reason: "healthkit_not_connected",
     },
     retrievedCorpus,
+    // Defaults to [] for callers/fixtures built before this field existed —
+    // same tolerance pattern as pendingProposalCount above.
+    recentPlanChanges: (context.recentPlanChanges ?? [])
+      .map(planChangeForPrompt)
+      .filter((change): change is CoachContextPlanChange => hasText(change.summary)),
   };
 }
 
@@ -172,6 +189,18 @@ function messageForPrompt(message: DocumentData): CoachContextMessage {
     content,
     status: stringValue(message.status, 80),
     timestamp: stringValue(message.timestamp, 80),
+  });
+}
+
+function planChangeForPrompt(proposal: DocumentData): CoachContextPlanChange {
+  const appliesTo = isPlainObject(proposal.appliesTo) ? proposal.appliesTo : {};
+  return compactObject({
+    proposalId: stringValue(proposal.proposalId, 120),
+    category: stringValue(proposal.category, 80),
+    dayKey: stringValue(appliesTo.dayKey, 20),
+    scope: stringValue(appliesTo.scope, 20),
+    summary: stringValue(proposal.summary, 300) ?? "",
+    decidedAt: stringValue(proposal.decidedAt, 80),
   });
 }
 

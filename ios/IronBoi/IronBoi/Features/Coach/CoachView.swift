@@ -201,9 +201,9 @@ struct CoachView: View {
                         PlanAdjustmentProposalCard(
                             proposal: proposal,
                             isApplying: appModel.isSending
-                        ) {
+                        ) { scope in
                             Task {
-                                await appModel.acceptPendingPlanAdjustmentProposal()
+                                await appModel.acceptPendingPlanAdjustmentProposal(scope: scope)
                             }
                         }
                             .id("plan-adjustment-\(proposal.id)")
@@ -373,7 +373,10 @@ private struct RedPenUnderline: Shape {
 struct PlanAdjustmentProposalCard: View {
     let proposal: PlanAdjustmentProposalSummary
     let isApplying: Bool
-    let apply: () -> Void
+    // scope is nil when the proposal already carries its own scope (or for
+    // legacy single-target-day proposals) — otherwise the card collects it
+    // before the accept call goes out.
+    let apply: (String?) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -425,15 +428,49 @@ struct PlanAdjustmentProposalCard: View {
             }
 
             if canApply {
-                Button(action: apply) {
-                    Label(isApplying ? "Applying..." : applyButtonTitle, systemImage: "checkmark.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
+                if proposal.scope != nil {
+                    Button {
+                        apply(nil)
+                    } label: {
+                        Label(isApplying ? "Applying..." : applyButtonTitle, systemImage: "checkmark.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(MyoColor.Action.primary.color)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .disabled(isApplying)
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Apply this to just today, or carry it forward?")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+
+                        HStack(spacing: 8) {
+                            Button {
+                                apply("today")
+                            } label: {
+                                Text(isApplying ? "Applying..." : "Just today")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isApplying)
+
+                            Button {
+                                apply("going_forward")
+                            } label: {
+                                Text(isApplying ? "Applying..." : "Rest of plan")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(MyoColor.Action.primary.color)
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                            .disabled(isApplying)
+                        }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(MyoColor.Action.primary.color)
-                .foregroundStyle(MyoColor.Text.primary.color)
-                .disabled(isApplying)
             } else {
                 Label("Reply with one more detail before Coach changes your plan.", systemImage: "lock.shield")
                     .font(.caption.weight(.semibold))

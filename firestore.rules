@@ -75,7 +75,15 @@ service cloud.firestore {
         allow read: if owns(userId);
         allow write: if owns(userId)
           && request.resource.data.userId == userId
-          && onlyKeys(["userId", "planId", "source", "days", "updatedAt"]);
+          && onlyKeys(["userId", "planId", "source", "days", "dailyOverrides", "updatedAt"]);
+      }
+
+      // Multi-week source of truth cascading plan adjustments write into.
+      // Server-only — computed weekIndex/startDate fields mean the client
+      // never constructs this doc directly.
+      match /trainingPrograms/{programId} {
+        allow read: if owns(userId);
+        allow write: if false;
       }
 
       match /dailyChecks/{date} {
