@@ -80,6 +80,10 @@ final class AppModel: NSObject, ObservableObject {
     private var workoutPlanListener: ListenerRegistration?
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
+    // Raw workoutPlans/current doc — kept so the derived summary (which
+    // bakes in "today's" dailyOverride) can be recomputed when the calendar
+    // date changes without a server round-trip.
+    private var latestWorkoutPlanData: [String: Any]?
     private var currentNonce: String?
 
     deinit {
@@ -336,7 +340,10 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
-    func acceptPendingPlanAdjustmentProposal() async {
+    // scope: "today" | "rest_of_week" | "going_forward", or nil to use
+    // whatever scope the proposal already carries (e.g. legacy proposals
+    // with a single implicit target day).
+    func acceptPendingPlanAdjustmentProposal(scope: String? = nil) async {
         guard !isSending, let pendingPlanAdjustmentProposal else { return }
 
         isSending = true
@@ -344,10 +351,17 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let idToken = try await requireFreshFirebaseAuthToken()
-            try await callFunction("acceptPlanAdjustmentProposalHttp", idToken: idToken, data: [
+            var data: [String: Any] = [
                 "proposalId": pendingPlanAdjustmentProposal.proposalId,
                 "decidedAt": Self.isoString(from: Date()),
-            ])
+                // The user's local calendar date — the backend keys a
+                // today-scope override to this, not to the server's timezone.
+                "clientDate": Self.currentDateISO(),
+            ]
+            if let scope {
+                data["scope"] = scope
+            }
+            try await callFunction("acceptPlanAdjustmentProposalHttp", idToken: idToken, data: data)
             try await refreshCurrentWorkoutPlan()
         } catch {
             errorMessage = error.localizedDescription
@@ -372,6 +386,9 @@ final class AppModel: NSObject, ObservableObject {
                 data: [
                     "dayKey": dayKey,
                     "startedAt": now,
+                    // Local calendar date — the backend uses it to resolve a
+                    // "just today" dailyOverride for the day being started.
+                    "clientDate": Self.currentDateISO(),
                 ]
             )
             activeWorkout = response.activeWorkout
@@ -714,13 +731,28 @@ final class AppModel: NSObject, ObservableObject {
                     }
 
                     guard let data = snapshot?.data() else {
+                        self?.latestWorkoutPlanData = nil
                         self?.currentWorkoutPlan = nil
                         return
                     }
 
+                    // Keep the raw doc: the summary bakes in "today's"
+                    // dailyOverride, so it must be re-derivable when the
+                    // date changes without waiting for a server write
+                    // (see recomputeCurrentWorkoutPlanForToday).
+                    self?.latestWorkoutPlanData = data
                     self?.currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: data)
                 }
             }
+    }
+
+    // Firestore only re-emits on server changes — an app that stays
+    // resident across midnight would otherwise keep yesterday's override
+    // spliced into the wrong day. Views call this on scenePhase
+    // reactivation to re-derive the summary from the cached raw doc.
+    func recomputeCurrentWorkoutPlanForToday() {
+        guard let latestWorkoutPlanData else { return }
+        currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: latestWorkoutPlanData)
     }
 
     private func listenForActiveWorkout(userId: String?) {
@@ -889,7 +921,8 @@ final class AppModel: NSObject, ObservableObject {
             safetyNotes: data["safetyNotes"] as? [String] ?? [],
             sourceCorpusEntryIds: data["sourceCorpusEntryIds"] as? [String] ?? [],
             requiresFollowUp: data["requiresFollowUp"] as? Bool ?? false,
-            createdAt: createdAt
+            createdAt: createdAt,
+            scope: appliesTo?["scope"] as? String
         )
     }
 
@@ -951,12 +984,23 @@ final class AppModel: NSObject, ObservableObject {
             let days = data["days"] as? [String: Any]
         else { return nil }
 
+        // A "today only" plan-adjustment scope lands in dailyOverrides keyed
+        // by ISO date rather than in `days` (keyed by weekday), so it never
+        // bleeds into the repeating week. Splice today's override over the
+        // matching weekday before building the day list, so the rest of the
+        // app never has to know overrides exist.
+        let dailyOverrides = data["dailyOverrides"] as? [String: Any] ?? [:]
+        var resolvedDays = days
+        if let todayOverride = dailyOverrides[Self.currentDateISO()] {
+            resolvedDays[Self.currentDayKey()] = todayOverride
+        }
+
         return WorkoutPlanSummary(
             userId: userId,
             planId: planId,
             source: data["source"] as? String ?? "coach_generated",
             updatedAt: data["updatedAt"] as? String ?? "",
-            days: makePlannedWorkoutDays(from: days)
+            days: makePlannedWorkoutDays(from: resolvedDays)
         )
     }
 
@@ -1004,6 +1048,22 @@ final class AppModel: NSObject, ObservableObject {
     private static func currentDayKey() -> String {
         let weekday = Calendar.current.component(.weekday, from: Date())
         return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
+    }
+
+    // Device-local calendar DATE (what day it is for the user), rendered as
+    // a Gregorian/ISO string. The explicit iso8601 calendar + POSIX locale
+    // matter: a device set to the Buddhist or Japanese calendar would
+    // otherwise render e.g. 2569-07-14 and never match the backend's
+    // Gregorian override keys. This value is also SENT to the backend
+    // (clientDate) so override dates are keyed to the user's day, not the
+    // server's timezone.
+    private static func currentDateISO() -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 
     private static func jsonObject<T: Encodable>(from value: T) throws -> Any {

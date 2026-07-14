@@ -10,6 +10,10 @@ export type CoachLoadedContext = {
   // Surfaced to the bundle so the coach knows there are pending items
   // waiting for user review, without those items influencing this reply.
   pendingProposalCount: number;
+  // Recently accepted plan-adjustment proposals — lets the coach reference
+  // a past change ("since we shortened Tuesday's session...") instead of
+  // re-asking. See workouts/planAdjustments.ts acceptPlanAdjustmentProposal.
+  recentPlanChanges: DocumentData[];
 };
 
 // A fact is "confirmed-for-prompt" if either:
@@ -24,8 +28,25 @@ export async function loadCoachContext(
   db: Firestore,
   userId: string,
   sessionId: string,
+  options: { includePlanChanges?: boolean } = {},
 ): Promise<CoachLoadedContext> {
-  const [profileSnap, recentFactsSnap, recentLogsSnap, sessionHistorySnap] =
+  // The plan-change read needs a composite index (decision asc, decidedAt
+  // desc). It's advisory context, never load-bearing — so it's (a) gated
+  // behind the tool-loop feature bundle and (b) degraded to [] on failure
+  // rather than turning an index-still-building window into a full coach
+  // outage for every user.
+  const recentPlanChangesPromise = options.includePlanChanges
+    ? db
+        .collection(`${userRoot(userId)}/planAdjustmentProposals`)
+        .where("decision", "==", "accepted")
+        .orderBy("decidedAt", "desc")
+        .limit(5)
+        .get()
+        .then((snap) => snap.docs.map((doc) => doc.data()))
+        .catch(() => [] as DocumentData[])
+    : Promise.resolve([] as DocumentData[]);
+
+  const [profileSnap, recentFactsSnap, recentLogsSnap, sessionHistorySnap, recentPlanChanges] =
     await Promise.all([
       db.doc(profilePath(userId)).get(),
       db
@@ -43,6 +64,7 @@ export async function loadCoachContext(
         .orderBy("serverCreatedAt", "asc")
         .limit(40)
         .get(),
+      recentPlanChangesPromise,
     ]);
 
   const allFacts = recentFactsSnap.docs
@@ -60,5 +82,6 @@ export async function loadCoachContext(
     recentLogs: recentLogsSnap.docs.map((doc) => doc.data()),
     sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()),
     pendingProposalCount,
+    recentPlanChanges,
   };
 }

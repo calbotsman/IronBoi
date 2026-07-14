@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   CoachMemoryFact,
   MetricSnapshot,
+  PlanAdjustmentScope,
   UserHealthProfile,
   WorkoutLog,
 } from "./coach-agent.js";
@@ -88,7 +89,7 @@ export const GeneratePlanResult = ToolResultBase.extend({
 
 export const AdaptPlanRequest = ToolCallBase.extend({
   tool: z.literal("adapt_plan"),
-  planId: z.string().min(1),
+  planId: z.string().min(1).default("current"),
   reason: z.enum([
     "too_hard",
     "too_easy",
@@ -99,6 +100,16 @@ export const AdaptPlanRequest = ToolCallBase.extend({
     "missed_session",
   ]),
   userNote: z.string().optional(),
+  // Mirrors PlanAdjustmentProposal.appliesTo — dayKey defaults to today when
+  // omitted (see workouts/planAdjustments.ts resolveAppliesToDayKey).
+  // Enum, not free string: a model that sends "Monday" instead of "Mon"
+  // would otherwise plant a junk day key the iOS renderer silently drops.
+  dayKey: z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).optional(),
+  exerciseName: z.string().min(1).optional(),
+  // Omit until the user has said whether they want "just today" or "going
+  // forward" — the tool result flags needsScopeConfirmation when this is
+  // absent so the model asks before calling again with the answer.
+  scope: PlanAdjustmentScope.optional(),
 });
 
 export const AdaptPlanResult = ToolResultBase.extend({

@@ -24,6 +24,9 @@ struct PlanAdjustmentProposalSummary: Equatable, Identifiable {
     let sourceCorpusEntryIds: [String]
     let requiresFollowUp: Bool
     let createdAt: String
+    // "today" | "rest_of_week" | "going_forward" — nil until the user (or a
+    // future LLM tool call) has decided how far the change should reach.
+    let scope: String?
 }
 
 struct PlannedWorkoutDay: Equatable, Identifiable {

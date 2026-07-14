@@ -92,6 +92,21 @@ export const PlanAdjustmentDecision = z.enum([
   "edited",
 ]);
 
+// How far an accepted plan-adjustment patch reaches:
+//   today          — the proposal's target day, this occurrence only
+//                    (dailyOverrides keyed by ISO date); the repeating
+//                    template is untouched, so the same weekday next week
+//                    is unaffected.
+//   going_forward  — the target day in the template and every materialized
+//                    week of the program from the active week onward.
+// A "rest_of_week" tier was cut in review: until real week-rollover exists
+// (nothing advances activeWeekIndex yet), it would be indistinguishable
+// from going_forward. Reintroduce it together with the rollover job.
+export const PlanAdjustmentScope = z.enum([
+  "today",
+  "going_forward",
+]);
+
 export const CoachAgentContract = z.object({
   id: z.literal("myo_coach"),
   version: z.string().min(1),
@@ -201,6 +216,10 @@ export const CoachMemoryFact = z.object({
     "schedule",
     "equipment",
     "safety_note",
+    // Records what an accepted plan-adjustment proposal changed and why —
+    // written by acceptPlanAdjustmentProposal (workouts/planAdjustments.ts)
+    // so a later coach turn can reference past changes instead of re-asking.
+    "plan_change",
   ]),
   content: z.string().min(1),
   source: z.enum([
@@ -303,6 +322,37 @@ export const WorkoutPlan = z.object({
   planId: z.string().min(1),
   source: z.enum(["legacy_pwa", "coach_generated", "user_edited"]),
   days: z.record(z.string(), PlannedWorkoutDay),
+  // Keyed by ISO date (not weekday) — a "today only" plan-adjustment scope
+  // lands here instead of `days`, so it never bleeds into the repeating
+  // week. Resolving "what does the user see for date D" is:
+  // dailyOverrides[D] if present, else days[weekdayOf(D)].
+  // .optional() rather than .default({}) — a defaulted empty map merged via
+  // set({merge:true}) DELETES existing overrides for any caller that didn't
+  // send the field (verified against the emulator), which would let a plain
+  // upsertWorkoutPlan wipe an accepted "today only" adjustment.
+  dailyOverrides: z.record(z.string(), PlannedWorkoutDay).optional(),
+  updatedAt: ISODateTime,
+}).strict();
+
+// Multi-week program — the source of truth "the rest of the plan" cascades
+// through. `workoutPlans/current` (WorkoutPlan above) stays as a flattened
+// snapshot of `weeks[activeWeekIndex]` so the Train tab and existing
+// plan-adjustment patch code keep reading one doc; see
+// workouts/program.ts for the sync helper.
+export const TrainingProgramWeek = z.object({
+  weekIndex: z.number().int().nonnegative(),
+  days: z.record(z.string(), PlannedWorkoutDay),
+}).strict();
+
+export const TrainingProgram = z.object({
+  userId: z.string().min(1),
+  programId: z.string().min(1),
+  // Date the program's weekIndex 0 started — used to compute which week
+  // "today" falls in. Server-derived; iOS never sends weekIndex directly.
+  startDate: z.string().date(),
+  weeks: z.array(TrainingProgramWeek),
+  activeWeekIndex: z.number().int().nonnegative(),
+  source: z.enum(["coach_generated", "user_edited"]),
   updatedAt: ISODateTime,
 }).strict();
 
@@ -540,6 +590,12 @@ export const PlanAdjustmentProposal = z.object({
     planId: z.string().min(1).default("current"),
     dayKey: z.string().min(1).optional(),
     exerciseName: z.string().min(1).optional(),
+    // How far the accepted patch reaches. Undefined means "not yet decided"
+    // — the deterministic classifier never sets this; the iOS proposal card
+    // collects it at accept time (see AcceptPlanAdjustmentProposalRequest),
+    // and a future LLM tool call may set it directly when the user already
+    // specified scope in their message.
+    scope: PlanAdjustmentScope.optional(),
   }).strict(),
   proposedPlanPatch: z.object({
     type: z.enum([
@@ -553,6 +609,11 @@ export const PlanAdjustmentProposal = z.object({
     title: z.string().min(1),
     changes: z.array(z.string().min(1)).default([]),
     replacementDay: PlannedWorkoutDay.optional(),
+    // Exercise-level diff against the target day's current exercises —
+    // an alternative to `replacementDay` for patches that only add/remove
+    // a subset rather than swapping the whole day.
+    removeExercises: z.array(z.string().min(1)).default([]),
+    addExercises: z.array(PlannedExercise).default([]),
   }).strict(),
   sourceCorpusEntryIds: z.array(z.string()).default([]),
   safetyNotes: z.array(z.string()).default([]),
@@ -616,6 +677,8 @@ export type ActiveWorkoutExercise = z.infer<typeof ActiveWorkoutExercise>;
 export type ActiveWorkoutSession = z.infer<typeof ActiveWorkoutSession>;
 export type WorkoutLog = z.infer<typeof WorkoutLog>;
 export type WorkoutPlan = z.infer<typeof WorkoutPlan>;
+export type TrainingProgramWeek = z.infer<typeof TrainingProgramWeek>;
+export type TrainingProgram = z.infer<typeof TrainingProgram>;
 export type DailyCheck = z.infer<typeof DailyCheck>;
 export type MetricSnapshot = z.infer<typeof MetricSnapshot>;
 export type ConsentRecord = z.infer<typeof ConsentRecord>;
@@ -623,6 +686,7 @@ export type CoachSession = z.infer<typeof CoachSession>;
 export type CoachResponse = z.infer<typeof CoachResponse>;
 export type ProgramProposal = z.infer<typeof ProgramProposal>;
 export type PlanAdjustmentProposal = z.infer<typeof PlanAdjustmentProposal>;
+export type PlanAdjustmentScope = z.infer<typeof PlanAdjustmentScope>;
 export type ResearchCorpusEntry = z.infer<typeof ResearchCorpusEntry>;
 export type HealthSampleCategory = z.infer<typeof HealthSampleCategory>;
 export type HealthSample = z.infer<typeof HealthSample>;

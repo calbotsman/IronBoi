@@ -7,7 +7,7 @@ import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { z } from "zod";
 import { auth, db } from "./firebase.js";
-import { orchestrateCoachTurn } from "./coach/orchestrate.js";
+import { isCoachToolLoopEnabled, orchestrateCoachTurn } from "./coach/orchestrate.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
@@ -48,7 +48,9 @@ import {
   AcceptPlanAdjustmentProposalRequest,
   acceptPlanAdjustmentProposal,
   maybeCreatePlanAdjustmentProposal,
+  weekdayOfISODate,
 } from "./workouts/planAdjustments.js";
+import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { safeLogger } from "./logging/safeLogger.js";
 
 // Phase 3 Task 3.2 — App Check enforcement.
@@ -203,6 +205,17 @@ function writeHttpHandlerError(
   fallbackError: string,
 ) {
   if (error instanceof z.ZodError) {
+    // Log issue PATHS (never values — they can carry user content) so a
+    // chronic validation failure is visible to the operator instead of
+    // silently 400ing users forever.
+    safeLogger.warn("HTTP function rejected invalid request", {
+      event: "http_function_invalid_request",
+      errorCode: fallbackError,
+      errorDetail: error.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join(".")}:${issue.code}`)
+        .join(","),
+    });
     writeJsonResponse(response, 400, { ok: false, error: "invalid_request" });
     return;
   }
@@ -258,10 +271,37 @@ async function maybeApplyWorkoutPlanAdjustment(
       },
     };
 
+    // If a dailyOverride is active for this day, the user is LOOKING at the
+    // override, not the template — updating only the template would make
+    // this weight change invisible. Patch the same exercise inside any
+    // override whose weekday matches too.
+    const overrides = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const nextOverrides = Object.fromEntries(
+      Object.entries(overrides).map(([date, rawOverride]) => {
+        if (!isRecord(rawOverride) || weekdayOfISODate(date) !== context.data.dayKey) {
+          return [date, rawOverride];
+        }
+        const overrideExercises = Array.isArray(rawOverride.exercises) ? rawOverride.exercises : [];
+        return [
+          date,
+          {
+            ...rawOverride,
+            exercises: overrideExercises.map((exercise: unknown) =>
+              isRecord(exercise) &&
+              normalizeExerciseName(exercise.name) === normalizeExerciseName(context.data.exerciseName)
+                ? { ...exercise, weight: targetWeight }
+                : exercise,
+            ),
+          },
+        ];
+      }),
+    );
+
     transaction.set(
       planRef,
       {
         days: nextDays,
+        ...(Object.keys(nextOverrides).length > 0 ? { dailyOverrides: nextOverrides } : {}),
         source: "user_edited",
         updatedAt: now,
         serverUpdatedAt: FieldValue.serverTimestamp(),
@@ -361,13 +401,9 @@ export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
     now,
   );
 
-  await db.doc(workoutPlanPath(userId, "current")).set(
-    {
-      ...plan,
-      serverUpdatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: false }, // overwrite — old days that were dropped should go
-  );
+  // Overwrites both workoutPlans/current and trainingPrograms/current — old
+  // days/weeks that were dropped should go.
+  await writeRegeneratedPlanAndProgram(db, userId, plan.days, now);
 
   await recordAuditEventBestEffort(db, {
     userId,
@@ -865,12 +901,17 @@ export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
     serverCreatedAt: FieldValue.serverTimestamp(),
   });
 
-  const planAdjustment = await maybeCreatePlanAdjustmentProposal({
-    db,
-    userId,
-    content: parsed.content,
-    structuredAnswer: parsed.structuredAnswer,
-  });
+  // Flag on = the LLM tool loop (orchestrate.ts) owns proposal creation;
+  // running the keyword classifier too would double-create proposals for
+  // the same message.
+  const planAdjustment = isCoachToolLoopEnabled()
+    ? null
+    : await maybeCreatePlanAdjustmentProposal({
+        db,
+        userId,
+        content: parsed.content,
+        structuredAnswer: parsed.structuredAnswer,
+      });
 
   return { ok: true, messageId: parsed.messageId, planAdjustment };
 });
@@ -937,14 +978,19 @@ export const sendCoachMessageHttp = onRequest(
         parsed.content,
         parsed.structuredAnswer,
       );
+      // Flag on = the LLM tool loop owns proposal creation (see
+      // sendCoachMessage above); the direct weight-update path stays either
+      // way — it's deterministic and narrower than anything the loop does.
       const planAdjustment =
         directPlanAdjustment ??
-        (await maybeCreatePlanAdjustmentProposal({
-          db,
-          userId,
-          content: parsed.content,
-          structuredAnswer: parsed.structuredAnswer,
-        }));
+        (isCoachToolLoopEnabled()
+          ? null
+          : await maybeCreatePlanAdjustmentProposal({
+              db,
+              userId,
+              content: parsed.content,
+              structuredAnswer: parsed.structuredAnswer,
+            }));
 
       writeJsonResponse(response, 200, {
         ok: true,
@@ -1158,13 +1204,7 @@ export const regenerateWorkoutPlanHttp = onRequest(
         now,
       );
 
-      await db.doc(workoutPlanPath(userId, "current")).set(
-        {
-          ...plan,
-          serverUpdatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: false },
-      );
+      await writeRegeneratedPlanAndProgram(db, userId, plan.days, now);
 
       await recordAuditEventBestEffort(db, {
         userId,

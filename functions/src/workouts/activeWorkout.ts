@@ -14,12 +14,17 @@ import {
   workoutPlanPath,
   workoutSessionPath,
 } from "../paths.js";
+import { nextOccurrenceOfWeekday } from "./planAdjustments.js";
 
 export const StartWorkoutSessionRequest = z.object({
   dayKey: z.string().min(1),
   planId: z.string().min(1).default("current"),
   sessionId: z.string().min(1).optional(),
   startedAt: z.string().datetime().optional(),
+  // The client's local calendar date (YYYY-MM-DD) — used to resolve a
+  // "today only" dailyOverride for the day being started. Older clients
+  // omit it; the session then falls back to startedAt's UTC date.
+  clientDate: z.string().date().optional(),
 });
 
 export const FinishWorkoutSessionRequest = z.object({
@@ -46,7 +51,15 @@ export async function startWorkoutSession(
   const startedAt = request.startedAt ?? now;
   const sessionId =
     request.sessionId ?? `${startedAt.slice(0, 10)}_${request.dayKey.toLowerCase()}`;
-  const dayPlan = await loadWorkoutDay(db, userId, request.planId, request.dayKey, defaultPlan);
+  const sessionDate = request.clientDate ?? startedAt.slice(0, 10);
+  const dayPlan = await loadWorkoutDay(
+    db,
+    userId,
+    request.planId,
+    request.dayKey,
+    sessionDate,
+    defaultPlan,
+  );
 
   const activeWorkout = ActiveWorkoutSession.parse({
     userId,
@@ -173,10 +186,26 @@ async function loadWorkoutDay(
   userId: string,
   planId: string,
   dayKey: string,
+  sessionDate: string,
   defaultPlan: Record<string, unknown>,
 ) {
   const planSnap = await db.doc(workoutPlanPath(userId, planId)).get();
-  const planDays = planSnap.exists ? planSnap.data()?.days : defaultPlan;
+  const planData = planSnap.exists ? planSnap.data() : undefined;
+
+  // Resolution contract (contracts/coach-agent.ts WorkoutPlan): a
+  // dailyOverride for the requested day's date wins over the weekday
+  // template. Without this, a "just today" plan adjustment shows on the
+  // Train tab but the started session silently loads the original full day.
+  // The lookup targets the next occurrence of the REQUESTED dayKey (which
+  // is sessionDate itself when starting today's workout), so starting a
+  // different day early can't accidentally pick up today's override.
+  const overrideDate = nextOccurrenceOfWeekday(dayKey, sessionDate);
+  const override = readDay(planData?.dailyOverrides, overrideDate);
+  if (override) {
+    return PlannedWorkoutDay.parse(override);
+  }
+
+  const planDays = planSnap.exists ? planData?.days : defaultPlan;
   const dayData = readDay(planDays, dayKey) ?? readFirstWorkoutDay(planDays);
   return PlannedWorkoutDay.parse(dayData);
 }

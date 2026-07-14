@@ -264,6 +264,75 @@ describe("coach context bundle", () => {
     expect(bundle.pendingProposalCount).toBe(0);
   });
 
+  it("bundle_surfaces_recent_accepted_plan_changes_and_the_prompt_tags_them", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: { ageYears: 30 },
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+        recentPlanChanges: [
+          {
+            proposalId: "adjustment-1",
+            category: "time_limit",
+            appliesTo: { dayKey: "Mon", scope: "today" },
+            summary: "User needs a shorter workout option.",
+            decidedAt: "2026-05-20T00:00:00.000Z",
+          },
+          // Missing summary — should be dropped, not crash the bundle.
+          { proposalId: "adjustment-2" },
+        ],
+      },
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-05-22T12:00:00.000Z",
+      },
+    );
+
+    expect(bundle.recentPlanChanges).toEqual([
+      {
+        proposalId: "adjustment-1",
+        category: "time_limit",
+        dayKey: "Mon",
+        scope: "today",
+        summary: "User needs a shorter workout option.",
+        decidedAt: "2026-05-20T00:00:00.000Z",
+      },
+    ]);
+
+    // Ships with the tool-loop feature bundle: tools on → tag present…
+    const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi", {
+      toolsEnabled: true,
+    });
+    expect(userMessage).toContain("<recent_plan_changes>");
+    expect(userMessage).toContain("User needs a shorter workout option.");
+    expect(system).toContain("<recent_plan_changes>");
+
+    // …tools off → prompt byte-identical to the pre-feature build: no tag,
+    // no boundary mention.
+    const flagOff = assembleCoachPrompt(coachConfig, bundle, "hi");
+    expect(flagOff.userMessage).not.toContain("<recent_plan_changes>");
+    expect(flagOff.system).not.toContain("<recent_plan_changes>");
+  });
+
+  it("bundle_defaults_recentPlanChanges_to_empty_for_legacy_contexts", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: null,
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+      } as never,
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-05-22T12:00:00.000Z",
+      },
+    );
+    expect(bundle.recentPlanChanges).toEqual([]);
+  });
+
   it("context_bundle_tolerates_empty_or_malformed_context_docs", () => {
     const bundle = buildCoachContextBundle(
       {

@@ -3,17 +3,39 @@ import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import {
+  CoachMemoryFact,
   PlanAdjustmentCategory,
   PlanAdjustmentProposal,
+  PlanAdjustmentScope,
+  PlannedExercise,
+  PlannedWorkoutDay,
   RiskLevel,
 } from "../contracts/coach-agent.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { safeLogger } from "../logging/safeLogger.js";
-import { planAdjustmentProposalPath, profilePath, workoutPlanPath } from "../paths.js";
+import {
+  memoryFactPath,
+  planAdjustmentProposalPath,
+  profilePath,
+  trainingProgramPath,
+  workoutPlanPath,
+} from "../paths.js";
+import { ensureTrainingProgram, parseTrainingProgramDocument, type TrainingProgramType } from "./program.js";
 
 export const AcceptPlanAdjustmentProposalRequest = z.object({
   proposalId: z.string().min(1),
   decidedAt: z.string().datetime().optional(),
+  // Chosen at accept time by the iOS proposal card (or, for an LLM-driven
+  // proposal, may already be set on the proposal itself — see
+  // `appliesTo.scope`). Falls back to the proposal's own scope, then to
+  // the pre-scope legacy behavior when neither is set.
+  scope: PlanAdjustmentScope.optional(),
+  // The client's local calendar date (YYYY-MM-DD). "Today" for a user in
+  // Tokyo and "today" on a server pinned to America/New_York disagree for
+  // hours every day — a today-scope override keyed to the wrong date is
+  // invisible to the user who just accepted it. When present this wins;
+  // the ET server date is only the fallback for older clients.
+  clientDate: z.string().date().optional(),
 });
 
 const WorkoutPlanAdjustmentStructuredAnswer = z
@@ -26,6 +48,10 @@ const WorkoutPlanAdjustmentStructuredAnswer = z
 
 type AdjustmentCategory = z.infer<typeof PlanAdjustmentCategory>;
 type AdjustmentRiskLevel = z.infer<typeof RiskLevel>;
+type AdjustmentScope = z.infer<typeof PlanAdjustmentScope>;
+type PlannedWorkoutDayType = z.infer<typeof PlannedWorkoutDay>;
+type PlannedExerciseType = z.infer<typeof PlannedExercise>;
+type ProposedPlanPatch = z.infer<typeof PlanAdjustmentProposal>["proposedPlanPatch"];
 
 export async function maybeCreatePlanAdjustmentProposal(input: {
   db: Firestore;
@@ -40,18 +66,8 @@ export async function maybeCreatePlanAdjustmentProposal(input: {
   const category = classifyPlanAdjustment(trimmed, structured.success);
   if (!category) return null;
 
-  const profileSnap = await input.db.doc(profilePath(input.userId)).get();
-  const profile = profileSnap.exists ? profileSnap.data() ?? null : null;
-  const retrievedCorpus = retrieveResearchCorpus({
-    userContent: trimmed,
-    profile,
-    maxEntries: 4,
-  });
-
-  const now = new Date().toISOString();
-  const proposalId = `adjustment_${randomUUID()}`;
   const riskLevel = riskForCategory(category, trimmed);
-  const requiresFollowUp = needsFollowUp(category, riskLevel);
+  let requiresFollowUp = needsFollowUp(category, riskLevel);
   const appliesTo = {
     planId: "current",
     ...resolveAppliesToDayKey(category, structured.success ? structured.data.dayKey : undefined),
@@ -60,22 +76,156 @@ export async function maybeCreatePlanAdjustmentProposal(input: {
       : {}),
   };
 
+  // Categories that patch the plan automatically (requiresFollowUp === false)
+  // need the target day's real exercises to build a concrete patch — a
+  // keyword classifier alone can't invent exercise names. Loaded once here
+  // so patchForCategory can stay a pure function of its inputs.
+  let targetDay: PlannedWorkoutDayType | undefined;
+  if (!requiresFollowUp && appliesTo.dayKey) {
+    targetDay = await loadPlanDay(input.db, input.userId, appliesTo.dayKey);
+    if (category === "time_limit" && (targetDay?.exercises.length ?? 0) < 2) {
+      // Not enough exercises to safely trim automatically — fall back to
+      // asking rather than emitting a patch with nothing real to cut.
+      requiresFollowUp = true;
+    }
+  }
+
+  return persistPlanAdjustmentProposal({
+    db: input.db,
+    userId: input.userId,
+    source: structured.success ? "workout_detail" : "coach_chat",
+    category,
+    riskLevel,
+    requiresFollowUp,
+    originalUserText: trimmed,
+    appliesTo,
+    targetDay,
+    structuredAnswer: structured.success ? structured.data : undefined,
+  });
+}
+
+// The LLM tool-calling path (functions/src/coach/toolRegistry.ts) funnels
+// through here rather than duplicating proposal construction — same
+// collection, same risk/follow-up rules, same patch builder as the
+// deterministic keyword classifier above. `reason` (a fixed enum the model
+// fills in) maps onto the same PlanAdjustmentCategory taxonomy so both
+// paths share summaries, rationale, and safety notes.
+const ADAPT_PLAN_REASON_TO_CATEGORY: Record<
+  "too_hard" | "too_easy" | "pain_or_discomfort" | "time_constraint" | "equipment_unavailable" | "schedule_change" | "missed_session",
+  AdjustmentCategory
+> = {
+  too_hard: "other",
+  too_easy: "other",
+  pain_or_discomfort: "injury_pain",
+  time_constraint: "time_limit",
+  equipment_unavailable: "equipment_limit",
+  schedule_change: "skip_or_reschedule",
+  missed_session: "skip_or_reschedule",
+};
+
+export async function createPlanAdjustmentProposalFromTool(input: {
+  db: Firestore;
+  userId: string;
+  reason: keyof typeof ADAPT_PLAN_REASON_TO_CATEGORY;
+  userNote?: string;
+  dayKey?: string;
+  exerciseName?: string;
+  scope?: AdjustmentScope;
+}) {
+  const category = ADAPT_PLAN_REASON_TO_CATEGORY[input.reason];
+  const originalUserText = input.userNote?.trim() || `User requested a plan change (${input.reason}) via chat.`;
+  const riskLevel = riskForCategory(category, originalUserText);
+  let requiresFollowUp = needsFollowUp(category, riskLevel);
+  const appliesTo = {
+    planId: "current",
+    ...resolveAppliesToDayKey(category, input.dayKey),
+    ...(input.exerciseName ? { exerciseName: input.exerciseName } : {}),
+    ...(input.scope ? { scope: input.scope } : {}),
+  };
+
+  let targetDay: PlannedWorkoutDayType | undefined;
+  if (!requiresFollowUp && appliesTo.dayKey) {
+    targetDay = await loadPlanDay(input.db, input.userId, appliesTo.dayKey);
+    if (category === "time_limit" && (targetDay?.exercises.length ?? 0) < 2) {
+      requiresFollowUp = true;
+    }
+  }
+
+  // An appliable proposal with no scope yet is a QUESTION, not a proposal —
+  // the model is instructed to ask "just today, or going forward?" and call
+  // again with the answer. Persisting a doc on the first call would leave an
+  // orphaned pending proposal per scope exchange: it inflates
+  // pendingProposalCount, surfaces a scope-less duplicate card in iOS, and
+  // nothing ever expires it. So: analyze, but don't write.
+  const needsScopeConfirmation = !requiresFollowUp && input.scope === undefined;
+  if (needsScopeConfirmation) {
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: appliesTo.dayKey,
+      needsScopeConfirmation: true,
+    };
+  }
+
+  const persisted = await persistPlanAdjustmentProposal({
+    db: input.db,
+    userId: input.userId,
+    source: "coach_chat",
+    category,
+    riskLevel,
+    requiresFollowUp,
+    originalUserText,
+    appliesTo,
+    targetDay,
+  });
+
+  return {
+    ...persisted,
+    needsScopeConfirmation: false,
+  };
+}
+
+async function persistPlanAdjustmentProposal(input: {
+  db: Firestore;
+  userId: string;
+  source: "coach_chat" | "workout_detail" | "system";
+  category: AdjustmentCategory;
+  riskLevel: AdjustmentRiskLevel;
+  requiresFollowUp: boolean;
+  originalUserText: string;
+  appliesTo: { planId: string; dayKey?: string; exerciseName?: string; scope?: AdjustmentScope };
+  targetDay: PlannedWorkoutDayType | undefined;
+  structuredAnswer?: Record<string, unknown>;
+}) {
+  const profileSnap = await input.db.doc(profilePath(input.userId)).get();
+  const profile = profileSnap.exists ? profileSnap.data() ?? null : null;
+  const retrievedCorpus = retrieveResearchCorpus({
+    userContent: input.originalUserText,
+    profile,
+    maxEntries: 4,
+  });
+
+  const now = new Date().toISOString();
+  const proposalId = `adjustment_${randomUUID()}`;
+
   const proposal = PlanAdjustmentProposal.parse({
     userId: input.userId,
     proposalId,
-    source: structured.success ? "workout_detail" : "coach_chat",
+    source: input.source,
     decision: "pending",
-    category,
-    riskLevel,
-    originalUserText: trimmed,
-    summary: summaryForCategory(category, structured.success ? structured.data.exerciseName : undefined),
-    rationale: rationaleForCategory(category),
-    appliesTo,
-    proposedPlanPatch: patchForCategory(category, requiresFollowUp),
+    category: input.category,
+    riskLevel: input.riskLevel,
+    originalUserText: input.originalUserText,
+    summary: summaryForCategory(input.category, input.appliesTo.exerciseName),
+    rationale: rationaleForCategory(input.category),
+    appliesTo: input.appliesTo,
+    proposedPlanPatch: patchForCategory(input.category, input.requiresFollowUp, input.targetDay),
     sourceCorpusEntryIds: retrievedCorpus.map((entry) => entry.entryId),
-    safetyNotes: safetyNotesForCategory(category, retrievedCorpus.flatMap((entry) => entry.safetyBoundaries)),
-    requiresFollowUp,
-    ...(structured.success ? { structuredAnswer: structured.data } : {}),
+    safetyNotes: safetyNotesForCategory(input.category, retrievedCorpus.flatMap((entry) => entry.safetyBoundaries)),
+    requiresFollowUp: input.requiresFollowUp,
+    ...(input.structuredAnswer ? { structuredAnswer: input.structuredAnswer } : {}),
     createdAt: now,
   });
 
@@ -88,14 +238,15 @@ export async function maybeCreatePlanAdjustmentProposal(input: {
     event: "plan_adjustment_proposal_created",
     userId: input.userId,
     proposalId,
-    outcome: category,
+    outcome: input.category,
   });
 
   return {
     proposalId,
-    category,
-    riskLevel,
-    requiresFollowUp,
+    category: input.category,
+    riskLevel: input.riskLevel,
+    requiresFollowUp: input.requiresFollowUp,
+    dayKey: input.appliesTo.dayKey,
     sourceCorpusEntryIds: proposal.sourceCorpusEntryIds,
   };
 }
@@ -107,12 +258,34 @@ export async function acceptPlanAdjustmentProposal(
 ) {
   const proposalRef = db.doc(planAdjustmentProposalPath(userId, request.proposalId));
   const planRef = db.doc(workoutPlanPath(userId, "current"));
+  const programRef = db.doc(trainingProgramPath(userId));
   const serverDecidedAt = new Date().toISOString();
 
+  // Peek at the requested scope before the transaction so the program
+  // backfill only runs when the accept actually needs the program doc.
+  // ensureTrainingProgram may itself write (backfill), and Firestore
+  // transactions require all reads before any write — so it can't run
+  // inside the transaction. Gating it also means a today-scope or legacy
+  // accept can never fail on a malformed legacy program backfill.
+  const proposalPeek = await proposalRef.get();
+  if (!proposalPeek.exists) {
+    throw new Error("plan_adjustment_proposal_not_found");
+  }
+  const rawPeekScope = isRecord(proposalPeek.data()?.appliesTo)
+    ? (proposalPeek.data()?.appliesTo as Record<string, unknown>).scope
+    : undefined;
+  const peekScopeParse = PlanAdjustmentScope.safeParse(rawPeekScope);
+  const peekScope = request.scope ?? (peekScopeParse.success ? peekScopeParse.data : undefined);
+  const needsProgram = peekScope === "going_forward";
+  if (needsProgram) {
+    await ensureTrainingProgram(db, userId);
+  }
+
   await db.runTransaction(async (transaction) => {
-    const [proposalSnap, planSnap] = await Promise.all([
+    const [proposalSnap, planSnap, programSnap] = await Promise.all([
       transaction.get(proposalRef),
       transaction.get(planRef),
+      needsProgram ? transaction.get(programRef) : Promise.resolve(null),
     ]);
 
     if (!proposalSnap.exists) {
@@ -133,17 +306,41 @@ export async function acceptPlanAdjustmentProposal(
       throw new Error("plan_adjustment_requires_review");
     }
 
-    const nextPlanPatch = planPatchForAcceptedProposal(proposal, planSnap.data() ?? {});
+    const scope = request.scope ?? proposal.appliesTo.scope;
+    const program = programSnap?.exists
+      ? parseTrainingProgramDocument(programSnap.data())
+      : null;
+    const { planPatch, programPatch } = planPatchForAcceptedProposal(
+      proposal,
+      planSnap.data() ?? {},
+      program,
+      scope,
+      request.clientDate,
+    );
+
     transaction.set(
       planRef,
       {
-        ...nextPlanPatch,
+        ...planPatch,
         source: "user_edited",
         updatedAt: serverDecidedAt,
         serverUpdatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
+
+    if (programPatch) {
+      transaction.set(
+        programRef,
+        {
+          ...programPatch,
+          source: "user_edited",
+          updatedAt: serverDecidedAt,
+          serverUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
 
     transaction.set(
       proposalRef,
@@ -152,10 +349,42 @@ export async function acceptPlanAdjustmentProposal(
         decidedAt: serverDecidedAt,
         // Firestore rejects `undefined`; only write when the client sent it.
         ...(request.decidedAt !== undefined ? { clientDecidedAt: request.decidedAt } : {}),
+        // Record the scope that was actually applied, so later coach turns
+        // (and the plan-change memory) know how far this reached. Deep-merge
+        // the whole appliesTo map: a dotted "appliesTo.scope" key in set()
+        // with merge would write a LITERAL top-level field named
+        // "appliesTo.scope" (dots are field paths only in update()).
+        ...(scope !== undefined ? { appliesTo: { ...proposal.appliesTo, scope } } : {}),
         serverDecidedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
     );
+
+    // Record what changed and why, so a later coach turn can reference it
+    // ("since we shortened Tuesday's session...") instead of re-asking.
+    // Written `confirmed` (not `proposed`, unlike upsertMemoryFact's default
+    // for coach_inferred facts) because the user already explicitly
+    // approved this exact change by accepting the proposal.
+    // The content is SERVER-GENERATED ONLY (summary/day/scope) — the
+    // proposal's originalUserText can be model-authored (adapt_plan tool)
+    // and is never shown on the approval card, so echoing it here would
+    // launder unreviewed model text into confirmed memory that future
+    // prompts trust. The raw text stays on the proposal doc for audit.
+    const memoryFactRef = db.doc(memoryFactPath(userId, `plan_change_${proposal.proposalId}`));
+    const memoryFact = CoachMemoryFact.parse({
+      userId,
+      factId: `plan_change_${proposal.proposalId}`,
+      category: "plan_change",
+      content: planChangeMemoryContent(proposal, scope),
+      source: "coach_inferred",
+      confidence: 1,
+      state: "confirmed",
+      lastConfirmedAt: serverDecidedAt,
+      createdAt: serverDecidedAt,
+      lastReinforcedAt: serverDecidedAt,
+      userEditable: true,
+    });
+    transaction.set(memoryFactRef, memoryFact);
   });
 
   safeLogger.info("Plan adjustment proposal accepted", {
@@ -191,27 +420,129 @@ function parsePlanAdjustmentProposalDocument(data: FirebaseFirestore.DocumentDat
   });
 }
 
+// Computes the day-content the accepted patch should install, independent
+// of scope — scope only decides WHERE that content gets written (see
+// planPatchForAcceptedProposal below).
+function computePatchedDay(
+  patch: ProposedPlanPatch,
+  currentDay: PlannedWorkoutDayType | undefined,
+): PlannedWorkoutDayType {
+  if (patch.type === "reschedule_day") {
+    return { name: "Rest · Skipped", muscles: [], exercises: [] };
+  }
+
+  if (patch.replacementDay) {
+    return patch.replacementDay;
+  }
+
+  if (patch.type === "shorten_workout" || patch.type === "modify_exercise" || patch.type === "replace_exercise") {
+    if (!currentDay) {
+      throw new Error("plan_adjustment_target_day_not_found");
+    }
+    // A diff-style patch with nothing in it (e.g. a pending pre-deploy
+    // proposal doc that predates removeExercises/addExercises) must fail
+    // loudly like it did before this patch type existed — an accept that
+    // changes nothing while claiming success corrupts the user's mental
+    // model AND writes a false plan_change memory fact.
+    if (patch.removeExercises.length === 0 && patch.addExercises.length === 0) {
+      throw new Error("plan_adjustment_patch_not_supported");
+    }
+    let exercises = currentDay.exercises;
+    if (patch.removeExercises.length > 0) {
+      // Remove by occurrence budget, not by name-set: a day with two
+      // "Plank" entries and removeExercises=["Plank"] should lose ONE.
+      const removeBudget = new Map<string, number>();
+      for (const name of patch.removeExercises) {
+        const key = normalizeExerciseName(name);
+        removeBudget.set(key, (removeBudget.get(key) ?? 0) + 1);
+      }
+      exercises = exercises.filter((exercise) => {
+        const key = normalizeExerciseName(exercise.name);
+        const remaining = removeBudget.get(key) ?? 0;
+        if (remaining > 0) {
+          removeBudget.set(key, remaining - 1);
+          return false;
+        }
+        return true;
+      });
+    }
+    if (patch.addExercises.length > 0) {
+      exercises = [...exercises, ...patch.addExercises];
+    }
+    if (exercises.length === 0) {
+      throw new Error("plan_adjustment_patch_removed_all_exercises");
+    }
+    return { ...currentDay, exercises };
+  }
+
+  throw new Error("plan_adjustment_patch_not_supported");
+}
+
+// Rebuilds the full `weeks` array with `dayKey` patched from the active
+// week onward. Firestore can't merge inside an array element, so the whole
+// array has to be reconstructed and written back.
+function patchProgramWeeks(
+  program: TrainingProgramType,
+  dayKey: string,
+  patchedDay: PlannedWorkoutDayType,
+): { weeks: TrainingProgramType["weeks"] } {
+  const weeks = program.weeks.map((week) => {
+    if (week.weekIndex < program.activeWeekIndex) return week;
+    return { ...week, days: { ...week.days, [dayKey]: patchedDay } };
+  });
+  return { weeks };
+}
+
 function planPatchForAcceptedProposal(
   proposal: z.infer<typeof PlanAdjustmentProposal>,
   plan: Record<string, unknown>,
-) {
+  program: TrainingProgramType | null,
+  scope: AdjustmentScope | undefined,
+  clientDate: string | undefined,
+): { planPatch: Record<string, unknown>; programPatch?: Record<string, unknown> } {
   const days = isRecord(plan.days) ? plan.days : {};
-  const dayKey = proposal.appliesTo.dayKey ?? currentDayKey();
+  const today = clientDate ?? currentDateISO();
+  const dayKey = proposal.appliesTo.dayKey ?? weekdayOfISODate(today);
+  const currentDay = isRecord(days[dayKey]) ? (days[dayKey] as PlannedWorkoutDayType) : undefined;
+  const patchedDay = computePatchedDay(proposal.proposedPlanPatch, currentDay);
 
-  if (proposal.category === "skip_or_reschedule") {
+  if (scope === "today") {
+    // Key the override to the date of the proposal's TARGET day — its next
+    // occurrence on/after the user's "today" — not blindly to today. A
+    // Friday-targeting proposal accepted on Wednesday must land on Friday's
+    // date; keying it to Wednesday would put Friday's content on the wrong
+    // day and leave Friday untouched. Past-dated overrides are pruned on
+    // the same write via FieldValue.delete() sentinels — with merge:true a
+    // rewritten map MERGES per-key, so simply omitting stale keys would
+    // leave them in place forever.
+    const overrideDate = nextOccurrenceOfWeekday(dayKey, today);
+    const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const pruneMarkers = Object.fromEntries(
+      Object.keys(existing)
+        .filter((date) => date < today)
+        .map((date) => [date, FieldValue.delete()]),
+    );
     return {
-      days: {
-        ...days,
-        [dayKey]: {
-          name: "Rest · Skipped",
-          muscles: [],
-          exercises: [],
-        },
+      planPatch: {
+        dailyOverrides: { ...pruneMarkers, [overrideDate]: patchedDay },
       },
     };
   }
 
-  throw new Error("plan_adjustment_patch_not_supported");
+  if (scope === "going_forward") {
+    if (!program) {
+      throw new Error("training_program_not_loaded_for_cascade");
+    }
+    return {
+      planPatch: { days: { ...days, [dayKey]: patchedDay } },
+      programPatch: patchProgramWeeks(program, dayKey, patchedDay),
+    };
+  }
+
+  // Legacy/no-scope callers (workout-detail sheet, older clients): keep the
+  // pre-scope behavior byte-for-byte — in-place patch on the template day
+  // only, no dailyOverrides, no program write.
+  return { planPatch: { days: { ...days, [dayKey]: patchedDay } } };
 }
 
 function resolveAppliesToDayKey(category: AdjustmentCategory, dayKey: string | undefined) {
@@ -230,8 +561,71 @@ function currentDayKey() {
   return weekday;
 }
 
+function currentDateISO() {
+  // en-CA formats as YYYY-MM-DD, matching the ISO date keys dailyOverrides
+  // and TrainingProgram.startDate use. Fallback only — clients that send
+  // clientDate get their own local date instead.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+}
+
+const WEEKDAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+export function weekdayOfISODate(isoDate: string): string {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return currentDayKey();
+  return WEEKDAY_KEYS[new Date(parsed).getUTCDay()];
+}
+
+// The ISO date of the next occurrence of `dayKey` on or after `fromDate`
+// (returns fromDate itself when the weekday matches).
+export function nextOccurrenceOfWeekday(dayKey: string, fromDate: string): string {
+  const start = Date.parse(`${fromDate}T00:00:00Z`);
+  if (Number.isNaN(start)) return fromDate;
+  const targetIndex = WEEKDAY_KEYS.indexOf(dayKey as (typeof WEEKDAY_KEYS)[number]);
+  if (targetIndex === -1) return fromDate;
+  const fromIndex = new Date(start).getUTCDay();
+  const daysAhead = (targetIndex - fromIndex + 7) % 7;
+  const target = new Date(start + daysAhead * 86_400_000);
+  return target.toISOString().slice(0, 10);
+}
+
+const SCOPE_LABEL: Record<AdjustmentScope, string> = {
+  today: "for that day only",
+  going_forward: "going forward",
+};
+
+// Server-generated text only — deliberately excludes originalUserText,
+// which can be model-authored (adapt_plan userNote) and is not shown on
+// the approval card. See the laundering note at the accept-time write.
+function planChangeMemoryContent(
+  proposal: z.infer<typeof PlanAdjustmentProposal>,
+  scope: AdjustmentScope | undefined,
+): string {
+  const dayKey = proposal.appliesTo.dayKey;
+  const target = dayKey ? ` (${dayKey})` : "";
+  const scopeText = scope ? ` — ${SCOPE_LABEL[scope]}` : "";
+  return `Plan change${target}${scopeText} [${proposal.category}]: ${proposal.summary}`;
+}
+
+async function loadPlanDay(
+  db: Firestore,
+  userId: string,
+  dayKey: string,
+): Promise<PlannedWorkoutDayType | undefined> {
+  const planSnap = await db.doc(workoutPlanPath(userId, "current")).get();
+  const days = planSnap.exists && isRecord(planSnap.data()?.days) ? (planSnap.data()!.days as Record<string, unknown>) : {};
+  const raw = days[dayKey];
+  return isRecord(raw) ? (raw as PlannedWorkoutDayType) : undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeExerciseName(value: unknown) {
+  return typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ")
+    : "";
 }
 
 function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): AdjustmentCategory | null {
@@ -347,7 +741,57 @@ function rationaleForCategory(category: AdjustmentCategory) {
   return rationales[category];
 }
 
-function patchForCategory(category: AdjustmentCategory, requiresFollowUp: boolean) {
+// No-equipment, no-corpus-knowledge-required fallback used by
+// replaceDayFocusPatch below. Deliberately generic and conservative — a
+// keyword classifier can't know what specific substitution a real coach
+// would pick, so this only ever offers a safe, always-available circuit.
+const GENERIC_MOBILITY_CONDITIONING_EXERCISES: PlannedExerciseType[] = [
+  { name: "Bodyweight Squat", sets: 3, reps: 15, weight: 0 },
+  { name: "Push-Up", sets: 3, reps: 12, weight: 0 },
+  { name: "Walking Lunge", sets: 3, reps: 12, weight: 0 },
+  { name: "Plank", sets: 3, reps: 30, weight: 0 },
+  { name: "Jumping Jacks", sets: 3, reps: 20, weight: 0 },
+];
+
+function shortenWorkoutPatch(targetDay: PlannedWorkoutDayType): ProposedPlanPatch {
+  const exercises = targetDay.exercises;
+  const keepCount = Math.max(1, Math.ceil(exercises.length / 2));
+  const removeExercises = exercises.slice(keepCount).map((exercise) => exercise.name);
+  return {
+    type: "shorten_workout",
+    title: "Shorten today's workout",
+    changes: [
+      `Keep the first ${keepCount} exercise${keepCount === 1 ? "" : "s"} — the highest-value/compound work.`,
+      `Drop: ${removeExercises.join(", ")}.`,
+    ],
+    removeExercises,
+    addExercises: [],
+  };
+}
+
+function replaceDayFocusPatch(targetDay: PlannedWorkoutDayType | undefined, title: string): ProposedPlanPatch {
+  return {
+    type: "replace_day_focus",
+    title,
+    changes: [
+      "Replace today's exercises with a bodyweight mobility/conditioning circuit.",
+      "Keeps the day's training stimulus without needing the original equipment or setting.",
+    ],
+    replacementDay: {
+      name: targetDay ? `${targetDay.name} · Adapted` : "Mobility & Conditioning",
+      muscles: targetDay?.muscles ?? [],
+      exercises: GENERIC_MOBILITY_CONDITIONING_EXERCISES,
+    },
+    removeExercises: [],
+    addExercises: [],
+  };
+}
+
+function patchForCategory(
+  category: AdjustmentCategory,
+  requiresFollowUp: boolean,
+  targetDay: PlannedWorkoutDayType | undefined,
+): ProposedPlanPatch {
   if (requiresFollowUp) {
     return {
       type: "review_only",
@@ -356,68 +800,64 @@ function patchForCategory(category: AdjustmentCategory, requiresFollowUp: boolea
         "Keep the current plan unchanged until the missing context is clear.",
         "Use the user's reason, current workout, and safety context to propose a specific edit next.",
       ],
+      removeExercises: [],
+      addExercises: [],
     };
   }
 
-  const patches: Record<AdjustmentCategory, { type: string; title: string; changes: string[] }> = {
-    time_limit: {
-      type: "shorten_workout",
-      title: "Shorten today's workout",
-      changes: [
-        "Prioritize the main compound movement or highest-value exercise first.",
-        "Reduce accessory volume before increasing intensity.",
-      ],
-    },
-    equipment_limit: {
-      type: "review_only",
-      title: "Find equipment-matched substitutions",
-      changes: ["Map unavailable equipment to same-pattern alternatives."],
-    },
-    skip_or_reschedule: {
+  if (category === "time_limit") {
+    // maybeCreatePlanAdjustmentProposal forces requiresFollowUp when there
+    // aren't at least 2 exercises to trim, so targetDay is guaranteed here.
+    if (!targetDay || targetDay.exercises.length < 2) {
+      throw new Error("plan_adjustment_missing_target_day_for_shorten");
+    }
+    return shortenWorkoutPatch(targetDay);
+  }
+
+  if (category === "skip_or_reschedule") {
+    return {
       type: "reschedule_day",
       title: "Preserve the week without cramming",
       changes: [
         "Move or skip the session while protecting recovery.",
         "Do not automatically double the next workout.",
       ],
-    },
-    readiness_low: {
-      type: "review_only",
-      title: "Reduce intensity for low readiness",
-      changes: ["Consider easier load, fewer sets, mobility, walking, or rest."],
-    },
-    style_preference: {
-      type: "replace_day_focus",
-      title: "Swap the style while preserving intent",
-      changes: ["Replace the session with a style-compatible option that respects the weekly goal."],
-    },
-    injury_pain: {
-      type: "review_only",
-      title: "Safety-first adjustment",
-      changes: ["Avoid movements that reproduce or worsen symptoms until more context is known."],
-    },
-    pregnancy_postpartum: {
-      type: "review_only",
-      title: "Clinician-aware adjustment",
-      changes: ["Keep suggestions conservative and ask about clinician restrictions."],
-    },
-    travel: {
-      type: "replace_day_focus",
-      title: "Travel-compatible workout",
-      changes: ["Use available space, time, and equipment while preserving the day's intent."],
-    },
-    nutrition_context: {
-      type: "review_only",
-      title: "Review nutrition context",
-      changes: ["Use range-based guidance and avoid medical diet prescriptions."],
-    },
-    other: {
-      type: "review_only",
-      title: "Review requested change",
-      changes: ["Turn the user's freeform reason into a specific plan edit after context check."],
-    },
+      removeExercises: [],
+      addExercises: [],
+    };
+  }
+
+  if (category === "style_preference") {
+    return replaceDayFocusPatch(targetDay, "Swap the style while preserving intent");
+  }
+
+  if (category === "travel") {
+    return replaceDayFocusPatch(targetDay, "Travel-compatible workout");
+  }
+
+  const reviewOnlyTitles: Partial<Record<AdjustmentCategory, string>> = {
+    equipment_limit: "Find equipment-matched substitutions",
+    readiness_low: "Reduce intensity for low readiness",
+    injury_pain: "Safety-first adjustment",
+    pregnancy_postpartum: "Clinician-aware adjustment",
+    nutrition_context: "Review nutrition context",
+    other: "Review requested change",
   };
-  return patches[category];
+  const reviewOnlyChanges: Partial<Record<AdjustmentCategory, string[]>> = {
+    equipment_limit: ["Map unavailable equipment to same-pattern alternatives."],
+    readiness_low: ["Consider easier load, fewer sets, mobility, walking, or rest."],
+    injury_pain: ["Avoid movements that reproduce or worsen symptoms until more context is known."],
+    pregnancy_postpartum: ["Keep suggestions conservative and ask about clinician restrictions."],
+    nutrition_context: ["Use range-based guidance and avoid medical diet prescriptions."],
+    other: ["Turn the user's freeform reason into a specific plan edit after context check."],
+  };
+  return {
+    type: "review_only",
+    title: reviewOnlyTitles[category] ?? "Review requested change",
+    changes: reviewOnlyChanges[category] ?? ["Review requested change after context check."],
+    removeExercises: [],
+    addExercises: [],
+  };
 }
 
 function safetyNotesForCategory(category: AdjustmentCategory, corpusSafetyNotes: string[]) {

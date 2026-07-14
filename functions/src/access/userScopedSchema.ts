@@ -85,6 +85,16 @@ export const USER_SCOPED = {
     write: { kind: "client_owner", runtimeSchema: WorkoutPlan },
     contextRole: "internal",
   },
+  // Multi-week source of truth cascading plan adjustments write into.
+  // Server-only — computed weekIndex/startDate fields mean the client never
+  // constructs this doc directly; iOS still reads/writes the flattened
+  // workoutPlans/current snapshot above.
+  trainingPrograms: {
+    pathPattern: "users/{uid}/trainingPrograms/{programId}",
+    read: "owner",
+    write: { kind: "server_only" },
+    contextRole: "internal",
+  },
   dailyChecks: {
     pathPattern: "users/{uid}/dailyChecks/{date}",
     read: "owner",
