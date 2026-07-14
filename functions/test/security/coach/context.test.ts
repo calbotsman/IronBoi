@@ -61,7 +61,9 @@ describe("loadCoachContext", () => {
     });
     await db.doc(planAdjustmentProposalPath(USER_ID, "p-3-pending")).set(pendingProposal);
 
-    const context = await loadCoachContext(db, USER_ID, SESSION_ID);
+    const context = await loadCoachContext(db, USER_ID, SESSION_ID, {
+      includePlanChanges: true,
+    });
 
     expect(context.recentPlanChanges).toHaveLength(2);
     expect(context.recentPlanChanges[0]).toMatchObject({ proposalId: "p-2" });
@@ -69,6 +71,16 @@ describe("loadCoachContext", () => {
   });
 
   it("returns an empty array when nothing has been accepted yet", async () => {
+    const context = await loadCoachContext(db, USER_ID, SESSION_ID, {
+      includePlanChanges: true,
+    });
+    expect(context.recentPlanChanges).toEqual([]);
+  });
+
+  it("skips the plan-change read entirely when the option is off (flag-off invariance)", async () => {
+    await db.doc(planAdjustmentProposalPath(USER_ID, "p-1")).set(
+      makeAcceptedProposal({ proposalId: "p-1" }),
+    );
     const context = await loadCoachContext(db, USER_ID, SESSION_ID);
     expect(context.recentPlanChanges).toEqual([]);
   });

@@ -3,6 +3,7 @@ import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import {
+  CoachMemoryFact,
   PlanAdjustmentCategory,
   PlanAdjustmentProposal,
   PlanAdjustmentScope,
@@ -24,11 +25,17 @@ import { ensureTrainingProgram, parseTrainingProgramDocument, type TrainingProgr
 export const AcceptPlanAdjustmentProposalRequest = z.object({
   proposalId: z.string().min(1),
   decidedAt: z.string().datetime().optional(),
-  // Chosen at accept time by the iOS proposal card (or, for a future
-  // LLM-driven proposal, may already be set on the proposal itself — see
+  // Chosen at accept time by the iOS proposal card (or, for an LLM-driven
+  // proposal, may already be set on the proposal itself — see
   // `appliesTo.scope`). Falls back to the proposal's own scope, then to
   // the pre-scope legacy behavior when neither is set.
   scope: PlanAdjustmentScope.optional(),
+  // The client's local calendar date (YYYY-MM-DD). "Today" for a user in
+  // Tokyo and "today" on a server pinned to America/New_York disagree for
+  // hours every day — a today-scope override keyed to the wrong date is
+  // invisible to the user who just accepted it. When present this wins;
+  // the ET server date is only the fallback for older clients.
+  clientDate: z.string().date().optional(),
 });
 
 const WorkoutPlanAdjustmentStructuredAnswer = z
@@ -144,6 +151,24 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     }
   }
 
+  // An appliable proposal with no scope yet is a QUESTION, not a proposal —
+  // the model is instructed to ask "just today, or going forward?" and call
+  // again with the answer. Persisting a doc on the first call would leave an
+  // orphaned pending proposal per scope exchange: it inflates
+  // pendingProposalCount, surfaces a scope-less duplicate card in iOS, and
+  // nothing ever expires it. So: analyze, but don't write.
+  const needsScopeConfirmation = !requiresFollowUp && input.scope === undefined;
+  if (needsScopeConfirmation) {
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: appliesTo.dayKey,
+      needsScopeConfirmation: true,
+    };
+  }
+
   const persisted = await persistPlanAdjustmentProposal({
     db: input.db,
     userId: input.userId,
@@ -158,10 +183,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
 
   return {
     ...persisted,
-    // The model should ask "just today, or going forward?" before calling
-    // adapt_plan again — unless this proposal needs a different follow-up
-    // anyway (requiresFollowUp), in which case scope is moot for now.
-    needsScopeConfirmation: !requiresFollowUp && input.scope === undefined,
+    needsScopeConfirmation: false,
   };
 }
 
@@ -239,16 +261,31 @@ export async function acceptPlanAdjustmentProposal(
   const programRef = db.doc(trainingProgramPath(userId));
   const serverDecidedAt = new Date().toISOString();
 
-  // Firestore transactions require all reads before any write, and
-  // ensureTrainingProgram may itself need to write a backfilled doc — so it
-  // has to run before the transaction opens, not inside it.
-  await ensureTrainingProgram(db, userId);
+  // Peek at the requested scope before the transaction so the program
+  // backfill only runs when the accept actually needs the program doc.
+  // ensureTrainingProgram may itself write (backfill), and Firestore
+  // transactions require all reads before any write — so it can't run
+  // inside the transaction. Gating it also means a today-scope or legacy
+  // accept can never fail on a malformed legacy program backfill.
+  const proposalPeek = await proposalRef.get();
+  if (!proposalPeek.exists) {
+    throw new Error("plan_adjustment_proposal_not_found");
+  }
+  const rawPeekScope = isRecord(proposalPeek.data()?.appliesTo)
+    ? (proposalPeek.data()?.appliesTo as Record<string, unknown>).scope
+    : undefined;
+  const peekScopeParse = PlanAdjustmentScope.safeParse(rawPeekScope);
+  const peekScope = request.scope ?? (peekScopeParse.success ? peekScopeParse.data : undefined);
+  const needsProgram = peekScope === "going_forward";
+  if (needsProgram) {
+    await ensureTrainingProgram(db, userId);
+  }
 
   await db.runTransaction(async (transaction) => {
     const [proposalSnap, planSnap, programSnap] = await Promise.all([
       transaction.get(proposalRef),
       transaction.get(planRef),
-      transaction.get(programRef),
+      needsProgram ? transaction.get(programRef) : Promise.resolve(null),
     ]);
 
     if (!proposalSnap.exists) {
@@ -270,12 +307,15 @@ export async function acceptPlanAdjustmentProposal(
     }
 
     const scope = request.scope ?? proposal.appliesTo.scope;
-    const program = parseTrainingProgramDocument(programSnap.data());
+    const program = programSnap?.exists
+      ? parseTrainingProgramDocument(programSnap.data())
+      : null;
     const { planPatch, programPatch } = planPatchForAcceptedProposal(
       proposal,
       planSnap.data() ?? {},
       program,
       scope,
+      request.clientDate,
     );
 
     transaction.set(
@@ -310,9 +350,11 @@ export async function acceptPlanAdjustmentProposal(
         // Firestore rejects `undefined`; only write when the client sent it.
         ...(request.decidedAt !== undefined ? { clientDecidedAt: request.decidedAt } : {}),
         // Record the scope that was actually applied, so later coach turns
-        // (and Phase D's plan-change memory) know how far this reached
-        // without having to re-derive it.
-        ...(scope !== undefined ? { "appliesTo.scope": scope } : {}),
+        // (and the plan-change memory) know how far this reached. Deep-merge
+        // the whole appliesTo map: a dotted "appliesTo.scope" key in set()
+        // with merge would write a LITERAL top-level field named
+        // "appliesTo.scope" (dots are field paths only in update()).
+        ...(scope !== undefined ? { appliesTo: { ...proposal.appliesTo, scope } } : {}),
         serverDecidedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
@@ -322,10 +364,14 @@ export async function acceptPlanAdjustmentProposal(
     // ("since we shortened Tuesday's session...") instead of re-asking.
     // Written `confirmed` (not `proposed`, unlike upsertMemoryFact's default
     // for coach_inferred facts) because the user already explicitly
-    // approved this exact change by accepting the proposal — a second
-    // confirmation step would just be redundant friction.
+    // approved this exact change by accepting the proposal.
+    // The content is SERVER-GENERATED ONLY (summary/day/scope) — the
+    // proposal's originalUserText can be model-authored (adapt_plan tool)
+    // and is never shown on the approval card, so echoing it here would
+    // launder unreviewed model text into confirmed memory that future
+    // prompts trust. The raw text stays on the proposal doc for audit.
     const memoryFactRef = db.doc(memoryFactPath(userId, `plan_change_${proposal.proposalId}`));
-    transaction.set(memoryFactRef, {
+    const memoryFact = CoachMemoryFact.parse({
       userId,
       factId: `plan_change_${proposal.proposalId}`,
       category: "plan_change",
@@ -333,12 +379,12 @@ export async function acceptPlanAdjustmentProposal(
       source: "coach_inferred",
       confidence: 1,
       state: "confirmed",
-      evidenceExcerpt: proposal.originalUserText.slice(0, 500),
       lastConfirmedAt: serverDecidedAt,
       createdAt: serverDecidedAt,
       lastReinforcedAt: serverDecidedAt,
       userEditable: true,
     });
+    transaction.set(memoryFactRef, memoryFact);
   });
 
   safeLogger.info("Plan adjustment proposal accepted", {
@@ -393,10 +439,32 @@ function computePatchedDay(
     if (!currentDay) {
       throw new Error("plan_adjustment_target_day_not_found");
     }
+    // A diff-style patch with nothing in it (e.g. a pending pre-deploy
+    // proposal doc that predates removeExercises/addExercises) must fail
+    // loudly like it did before this patch type existed — an accept that
+    // changes nothing while claiming success corrupts the user's mental
+    // model AND writes a false plan_change memory fact.
+    if (patch.removeExercises.length === 0 && patch.addExercises.length === 0) {
+      throw new Error("plan_adjustment_patch_not_supported");
+    }
     let exercises = currentDay.exercises;
     if (patch.removeExercises.length > 0) {
-      const removeSet = new Set(patch.removeExercises.map(normalizeExerciseName));
-      exercises = exercises.filter((exercise) => !removeSet.has(normalizeExerciseName(exercise.name)));
+      // Remove by occurrence budget, not by name-set: a day with two
+      // "Plank" entries and removeExercises=["Plank"] should lose ONE.
+      const removeBudget = new Map<string, number>();
+      for (const name of patch.removeExercises) {
+        const key = normalizeExerciseName(name);
+        removeBudget.set(key, (removeBudget.get(key) ?? 0) + 1);
+      }
+      exercises = exercises.filter((exercise) => {
+        const key = normalizeExerciseName(exercise.name);
+        const remaining = removeBudget.get(key) ?? 0;
+        if (remaining > 0) {
+          removeBudget.set(key, remaining - 1);
+          return false;
+        }
+        return true;
+      });
     }
     if (patch.addExercises.length > 0) {
       exercises = [...exercises, ...patch.addExercises];
@@ -410,21 +478,16 @@ function computePatchedDay(
   throw new Error("plan_adjustment_patch_not_supported");
 }
 
-// Rebuilds the full `weeks` array with `dayKey` patched in the scoped set
-// of weeks. Firestore can't merge inside an array element, so the whole
+// Rebuilds the full `weeks` array with `dayKey` patched from the active
+// week onward. Firestore can't merge inside an array element, so the whole
 // array has to be reconstructed and written back.
 function patchProgramWeeks(
   program: TrainingProgramType,
   dayKey: string,
   patchedDay: PlannedWorkoutDayType,
-  reach: "active_week_only" | "active_week_and_forward",
 ): { weeks: TrainingProgramType["weeks"] } {
   const weeks = program.weeks.map((week) => {
-    const inScope =
-      reach === "active_week_and_forward"
-        ? week.weekIndex >= program.activeWeekIndex
-        : week.weekIndex === program.activeWeekIndex;
-    if (!inScope) return week;
+    if (week.weekIndex < program.activeWeekIndex) return week;
     return { ...week, days: { ...week.days, [dayKey]: patchedDay } };
   });
   return { weeks };
@@ -433,34 +496,46 @@ function patchProgramWeeks(
 function planPatchForAcceptedProposal(
   proposal: z.infer<typeof PlanAdjustmentProposal>,
   plan: Record<string, unknown>,
-  program: TrainingProgramType,
+  program: TrainingProgramType | null,
   scope: AdjustmentScope | undefined,
+  clientDate: string | undefined,
 ): { planPatch: Record<string, unknown>; programPatch?: Record<string, unknown> } {
   const days = isRecord(plan.days) ? plan.days : {};
-  const dayKey = proposal.appliesTo.dayKey ?? currentDayKey();
+  const today = clientDate ?? currentDateISO();
+  const dayKey = proposal.appliesTo.dayKey ?? weekdayOfISODate(today);
   const currentDay = isRecord(days[dayKey]) ? (days[dayKey] as PlannedWorkoutDayType) : undefined;
   const patchedDay = computePatchedDay(proposal.proposedPlanPatch, currentDay);
 
   if (scope === "today") {
-    const dailyOverrides = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    // Key the override to the date of the proposal's TARGET day — its next
+    // occurrence on/after the user's "today" — not blindly to today. A
+    // Friday-targeting proposal accepted on Wednesday must land on Friday's
+    // date; keying it to Wednesday would put Friday's content on the wrong
+    // day and leave Friday untouched. Past-dated overrides are pruned on
+    // the same write via FieldValue.delete() sentinels — with merge:true a
+    // rewritten map MERGES per-key, so simply omitting stale keys would
+    // leave them in place forever.
+    const overrideDate = nextOccurrenceOfWeekday(dayKey, today);
+    const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const pruneMarkers = Object.fromEntries(
+      Object.keys(existing)
+        .filter((date) => date < today)
+        .map((date) => [date, FieldValue.delete()]),
+    );
     return {
       planPatch: {
-        dailyOverrides: { ...dailyOverrides, [currentDateISO()]: patchedDay },
+        dailyOverrides: { ...pruneMarkers, [overrideDate]: patchedDay },
       },
     };
   }
 
-  if (scope === "rest_of_week") {
-    return {
-      planPatch: { days: { ...days, [dayKey]: patchedDay } },
-      programPatch: patchProgramWeeks(program, dayKey, patchedDay, "active_week_only"),
-    };
-  }
-
   if (scope === "going_forward") {
+    if (!program) {
+      throw new Error("training_program_not_loaded_for_cascade");
+    }
     return {
       planPatch: { days: { ...days, [dayKey]: patchedDay } },
-      programPatch: patchProgramWeeks(program, dayKey, patchedDay, "active_week_and_forward"),
+      programPatch: patchProgramWeeks(program, dayKey, patchedDay),
     };
   }
 
@@ -488,16 +563,40 @@ function currentDayKey() {
 
 function currentDateISO() {
   // en-CA formats as YYYY-MM-DD, matching the ISO date keys dailyOverrides
-  // and TrainingProgram.startDate use.
+  // and TrainingProgram.startDate use. Fallback only — clients that send
+  // clientDate get their own local date instead.
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
 }
 
+const WEEKDAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+export function weekdayOfISODate(isoDate: string): string {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return currentDayKey();
+  return WEEKDAY_KEYS[new Date(parsed).getUTCDay()];
+}
+
+// The ISO date of the next occurrence of `dayKey` on or after `fromDate`
+// (returns fromDate itself when the weekday matches).
+export function nextOccurrenceOfWeekday(dayKey: string, fromDate: string): string {
+  const start = Date.parse(`${fromDate}T00:00:00Z`);
+  if (Number.isNaN(start)) return fromDate;
+  const targetIndex = WEEKDAY_KEYS.indexOf(dayKey as (typeof WEEKDAY_KEYS)[number]);
+  if (targetIndex === -1) return fromDate;
+  const fromIndex = new Date(start).getUTCDay();
+  const daysAhead = (targetIndex - fromIndex + 7) % 7;
+  const target = new Date(start + daysAhead * 86_400_000);
+  return target.toISOString().slice(0, 10);
+}
+
 const SCOPE_LABEL: Record<AdjustmentScope, string> = {
-  today: "for today only",
-  rest_of_week: "for the rest of this week",
+  today: "for that day only",
   going_forward: "going forward",
 };
 
+// Server-generated text only — deliberately excludes originalUserText,
+// which can be model-authored (adapt_plan userNote) and is not shown on
+// the approval card. See the laundering note at the accept-time write.
 function planChangeMemoryContent(
   proposal: z.infer<typeof PlanAdjustmentProposal>,
   scope: AdjustmentScope | undefined,
@@ -505,7 +604,7 @@ function planChangeMemoryContent(
   const dayKey = proposal.appliesTo.dayKey;
   const target = dayKey ? ` (${dayKey})` : "";
   const scopeText = scope ? ` — ${SCOPE_LABEL[scope]}` : "";
-  return `Plan change${target}${scopeText}: ${proposal.summary} Reason: "${proposal.originalUserText}".`;
+  return `Plan change${target}${scopeText} [${proposal.category}]: ${proposal.summary}`;
 }
 
 async function loadPlanDay(

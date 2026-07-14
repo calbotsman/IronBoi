@@ -177,7 +177,7 @@ describe("plan adjustment proposals", () => {
     ]);
   });
 
-  it("scope 'today' writes a dailyOverride and leaves the template untouched", async () => {
+  it("scope 'today' writes a dailyOverride keyed to the TARGET day's date and records the applied scope", async () => {
     await db.doc(workoutPlanPath(USER_ID, "current")).set(makeWorkoutPlan());
     const result = await maybeCreatePlanAdjustmentProposal({
       db,
@@ -186,19 +186,55 @@ describe("plan adjustment proposals", () => {
       structuredAnswer: { kind: "workout_plan_adjustment", dayKey: "Tue" },
     });
 
+    // 2026-07-15 is a Wednesday — the proposal targets Tue, so the override
+    // must land on the NEXT Tuesday (2026-07-21), not on the accept date.
     const acceptResult = await acceptPlanAdjustmentProposal(db, USER_ID, {
       proposalId: result!.proposalId,
       scope: "today",
+      clientDate: "2026-07-15",
     });
     expect(acceptResult.ok).toBe(true);
 
-    const planSnap = await db.doc(workoutPlanPath(USER_ID, "current")).get();
+    const [planSnap, proposalSnap] = await Promise.all([
+      db.doc(workoutPlanPath(USER_ID, "current")).get(),
+      db.doc(planAdjustmentProposalPath(USER_ID, result!.proposalId)).get(),
+    ]);
     const data = planSnap.data()!;
     // Template day is untouched — only a dailyOverride was written.
     expect(data.days.Tue).toMatchObject({ name: "Pull" });
-    const overrideKeys = Object.keys(data.dailyOverrides ?? {});
-    expect(overrideKeys).toHaveLength(1);
-    expect(data.dailyOverrides[overrideKeys[0]]).toMatchObject({ name: "Rest · Skipped" });
+    expect(Object.keys(data.dailyOverrides ?? {})).toEqual(["2026-07-21"]);
+    expect(data.dailyOverrides["2026-07-21"]).toMatchObject({ name: "Rest · Skipped" });
+
+    // The applied scope must land NESTED in appliesTo (a dotted key in
+    // set+merge would write a literal top-level "appliesTo.scope" field).
+    expect(proposalSnap.data()?.appliesTo).toMatchObject({ dayKey: "Tue", scope: "today" });
+    expect(proposalSnap.data()?.["appliesTo.scope"]).toBeUndefined();
+  });
+
+  it("scope 'today' accepted on the target weekday keys the override to that same date and prunes stale overrides", async () => {
+    await db.doc(workoutPlanPath(USER_ID, "current")).set({
+      ...makeWorkoutPlan(),
+      dailyOverrides: {
+        "2026-07-01": { name: "Stale Past Override", muscles: [], exercises: [] },
+      },
+    });
+    const result = await maybeCreatePlanAdjustmentProposal({
+      db,
+      userId: USER_ID,
+      content: "I need to skip today.",
+      structuredAnswer: { kind: "workout_plan_adjustment", dayKey: "Tue" },
+    });
+
+    // 2026-07-21 IS a Tuesday — override lands on the accept date itself,
+    // and the past-dated override is pruned on the same write.
+    await acceptPlanAdjustmentProposal(db, USER_ID, {
+      proposalId: result!.proposalId,
+      scope: "today",
+      clientDate: "2026-07-21",
+    });
+
+    const planSnap = await db.doc(workoutPlanPath(USER_ID, "current")).get();
+    expect(Object.keys(planSnap.data()?.dailyOverrides ?? {})).toEqual(["2026-07-21"]);
   });
 
   it("scope 'going_forward' patches every materialized week in trainingPrograms/current", async () => {
@@ -231,7 +267,7 @@ describe("plan adjustment proposals", () => {
     }
   });
 
-  it("scope 'rest_of_week' only patches the active week, not the whole program", async () => {
+  it("scope 'today' does NOT create a trainingPrograms doc (program only needed for cascades)", async () => {
     await db.doc(workoutPlanPath(USER_ID, "current")).set(makeWorkoutPlan());
     const result = await maybeCreatePlanAdjustmentProposal({
       db,
@@ -242,18 +278,40 @@ describe("plan adjustment proposals", () => {
 
     await acceptPlanAdjustmentProposal(db, USER_ID, {
       proposalId: result!.proposalId,
-      scope: "rest_of_week",
+      scope: "today",
+      clientDate: "2026-07-21",
     });
 
     const programSnap = await db.doc(trainingProgramPath(USER_ID)).get();
-    const weeks = programSnap.data()?.weeks as Array<{ weekIndex: number; days: Record<string, { name: string }> }>;
-    const activeWeek = weeks.find((week) => week.weekIndex === programSnap.data()?.activeWeekIndex);
-    const otherWeeks = weeks.filter((week) => week.weekIndex !== programSnap.data()?.activeWeekIndex);
+    expect(programSnap.exists).toBe(false);
+  });
 
-    expect(activeWeek?.days.Tue).toMatchObject({ name: "Rest · Skipped" });
-    for (const week of otherWeeks) {
-      expect(week.days.Tue).toMatchObject({ name: "Pull" });
-    }
+  it("today-scope accepts succeed even when the legacy plan has malformed exercises", async () => {
+    // A legacy_pwa-written plan with garbage in an exercise would fail a
+    // strict TrainingProgram backfill parse — the today path must never
+    // touch the program, so this accept has to succeed regardless.
+    const plan = makeWorkoutPlan() as Record<string, unknown>;
+    (plan.days as Record<string, { exercises: unknown[] }>).Mon.exercises.push({
+      name: "Corrupted",
+      sets: "three",
+      reps: null,
+      bogusField: true,
+    });
+    await db.doc(workoutPlanPath(USER_ID, "current")).set(plan);
+
+    const result = await maybeCreatePlanAdjustmentProposal({
+      db,
+      userId: USER_ID,
+      content: "I need to skip today.",
+      structuredAnswer: { kind: "workout_plan_adjustment", dayKey: "Tue" },
+    });
+
+    const acceptResult = await acceptPlanAdjustmentProposal(db, USER_ID, {
+      proposalId: result!.proposalId,
+      scope: "today",
+      clientDate: "2026-07-21",
+    });
+    expect(acceptResult.ok).toBe(true);
   });
 
   it("accepting a proposal writes a confirmed plan_change memory fact", async () => {
@@ -268,6 +326,7 @@ describe("plan adjustment proposals", () => {
     await acceptPlanAdjustmentProposal(db, USER_ID, {
       proposalId: result!.proposalId,
       scope: "today",
+      clientDate: "2026-07-21",
     });
 
     const factSnap = await db.doc(memoryFactPath(USER_ID, `plan_change_${result!.proposalId}`)).get();
@@ -280,7 +339,11 @@ describe("plan adjustment proposals", () => {
       userEditable: true,
     });
     expect(factSnap.data()?.content).toContain("Tue");
-    expect(factSnap.data()?.content).toContain("I need to skip today.");
+    // Server-generated content ONLY — the user's/model's free text must NOT
+    // be laundered into confirmed memory (it never appears on the approval
+    // card, so the human gate can't vet it).
+    expect(factSnap.data()?.content).not.toContain("I need to skip today.");
+    expect(factSnap.data()?.evidenceExcerpt).toBeUndefined();
   });
 
   it("rejects high-risk proposals instead of mutating the plan", async () => {

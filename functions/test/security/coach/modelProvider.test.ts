@@ -177,8 +177,11 @@ describe("GeminiCoachProvider", () => {
       role: "model",
       parts: [{ functionCall: { name: "adapt_plan", args: { reason: "time_constraint" } } }],
     });
+    // Function responses ride in a user-role content (Gemini v1beta only
+    // documents "user" | "model" roles) — the functionResponse part type
+    // carries the semantics.
     expect(secondBody.contents).toContainEqual({
-      role: "function",
+      role: "user",
       parts: [{ functionResponse: { name: "adapt_plan", response: { ok: true, needsScopeConfirmation: true } } }],
     });
   });

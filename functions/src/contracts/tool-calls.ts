@@ -102,7 +102,9 @@ export const AdaptPlanRequest = ToolCallBase.extend({
   userNote: z.string().optional(),
   // Mirrors PlanAdjustmentProposal.appliesTo — dayKey defaults to today when
   // omitted (see workouts/planAdjustments.ts resolveAppliesToDayKey).
-  dayKey: z.string().min(1).optional(),
+  // Enum, not free string: a model that sends "Monday" instead of "Mon"
+  // would otherwise plant a junk day key the iOS renderer silently drops.
+  dayKey: z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).optional(),
   exerciseName: z.string().min(1).optional(),
   // Omit until the user has said whether they want "just today" or "going
   // forward" — the tool result flags needsScopeConfirmation when this is

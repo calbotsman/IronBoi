@@ -3,6 +3,7 @@ import UIKit
 
 struct WorkoutView: View {
     @EnvironmentObject private var appModel: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedDemoExercise: PlannedExercise?
 
     var body: some View {
@@ -17,6 +18,15 @@ struct WorkoutView: View {
                 }
             }
             .navigationTitle("Train")
+            // The plan summary bakes in "today's" dailyOverride; an app
+            // resident across midnight would show yesterday's splice until
+            // the next server write. Re-derive from the cached doc whenever
+            // the app comes back to the foreground.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    appModel.recomputeCurrentWorkoutPlanForToday()
+                }
+            }
             .alert("MYO", isPresented: Binding(
                 get: { appModel.errorMessage != nil },
                 set: { if !$0 { appModel.errorMessage = nil } }

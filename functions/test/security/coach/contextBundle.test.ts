@@ -301,10 +301,19 @@ describe("coach context bundle", () => {
       },
     ]);
 
-    const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi");
+    // Ships with the tool-loop feature bundle: tools on → tag present…
+    const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi", {
+      toolsEnabled: true,
+    });
     expect(userMessage).toContain("<recent_plan_changes>");
     expect(userMessage).toContain("User needs a shorter workout option.");
     expect(system).toContain("<recent_plan_changes>");
+
+    // …tools off → prompt byte-identical to the pre-feature build: no tag,
+    // no boundary mention.
+    const flagOff = assembleCoachPrompt(coachConfig, bundle, "hi");
+    expect(flagOff.userMessage).not.toContain("<recent_plan_changes>");
+    expect(flagOff.system).not.toContain("<recent_plan_changes>");
   });
 
   it("bundle_defaults_recentPlanChanges_to_empty_for_legacy_contexts", () => {

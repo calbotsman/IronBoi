@@ -80,6 +80,10 @@ final class AppModel: NSObject, ObservableObject {
     private var workoutPlanListener: ListenerRegistration?
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
+    // Raw workoutPlans/current doc — kept so the derived summary (which
+    // bakes in "today's" dailyOverride) can be recomputed when the calendar
+    // date changes without a server round-trip.
+    private var latestWorkoutPlanData: [String: Any]?
     private var currentNonce: String?
 
     deinit {
@@ -350,6 +354,9 @@ final class AppModel: NSObject, ObservableObject {
             var data: [String: Any] = [
                 "proposalId": pendingPlanAdjustmentProposal.proposalId,
                 "decidedAt": Self.isoString(from: Date()),
+                // The user's local calendar date — the backend keys a
+                // today-scope override to this, not to the server's timezone.
+                "clientDate": Self.currentDateISO(),
             ]
             if let scope {
                 data["scope"] = scope
@@ -379,6 +386,9 @@ final class AppModel: NSObject, ObservableObject {
                 data: [
                     "dayKey": dayKey,
                     "startedAt": now,
+                    // Local calendar date — the backend uses it to resolve a
+                    // "just today" dailyOverride for the day being started.
+                    "clientDate": Self.currentDateISO(),
                 ]
             )
             activeWorkout = response.activeWorkout
@@ -721,13 +731,28 @@ final class AppModel: NSObject, ObservableObject {
                     }
 
                     guard let data = snapshot?.data() else {
+                        self?.latestWorkoutPlanData = nil
                         self?.currentWorkoutPlan = nil
                         return
                     }
 
+                    // Keep the raw doc: the summary bakes in "today's"
+                    // dailyOverride, so it must be re-derivable when the
+                    // date changes without waiting for a server write
+                    // (see recomputeCurrentWorkoutPlanForToday).
+                    self?.latestWorkoutPlanData = data
                     self?.currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: data)
                 }
             }
+    }
+
+    // Firestore only re-emits on server changes — an app that stays
+    // resident across midnight would otherwise keep yesterday's override
+    // spliced into the wrong day. Views call this on scenePhase
+    // reactivation to re-derive the summary from the cached raw doc.
+    func recomputeCurrentWorkoutPlanForToday() {
+        guard let latestWorkoutPlanData else { return }
+        currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: latestWorkoutPlanData)
     }
 
     private func listenForActiveWorkout(userId: String?) {
@@ -1025,14 +1050,17 @@ final class AppModel: NSObject, ObservableObject {
         return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
     }
 
-    // Device-local date, matching currentDayKey()'s use of device-local
-    // weekday — the backend resolves "today" in America/New_York, so a user
-    // in another timezone can see a brief mismatch window right around
-    // midnight in either zone. Same pre-existing limitation as the weekday
-    // resolution above; not new to dailyOverrides.
+    // Device-local calendar DATE (what day it is for the user), rendered as
+    // a Gregorian/ISO string. The explicit iso8601 calendar + POSIX locale
+    // matter: a device set to the Buddhist or Japanese calendar would
+    // otherwise render e.g. 2569-07-14 and never match the backend's
+    // Gregorian override keys. This value is also SENT to the backend
+    // (clientDate) so override dates are keyed to the user's day, not the
+    // server's timezone.
     private static func currentDateISO() -> String {
         let formatter = DateFormatter()
-        formatter.calendar = Calendar.current
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())

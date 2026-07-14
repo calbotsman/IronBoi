@@ -26,7 +26,7 @@ describe("coach tool registry", () => {
     await Promise.all(getApps().map((activeApp) => deleteApp(activeApp)));
   });
 
-  it("adapt_plan creates a proposal and flags needsScopeConfirmation when scope is omitted", async () => {
+  it("adapt_plan without scope analyzes but does NOT persist — needsScopeConfirmation instead", async () => {
     await db.doc(workoutPlanPath(USER_ID, "current")).set({
       userId: USER_ID,
       planId: "current",
@@ -58,16 +58,14 @@ describe("coach tool registry", () => {
       riskLevel: "low",
       requiresFollowUp: false,
       needsScopeConfirmation: true,
+      proposalId: null,
       dayKey: "Mon",
     });
 
-    const proposalSnap = await db.doc(planAdjustmentProposalPath(USER_ID, result.proposalId as string)).get();
-    expect(proposalSnap.data()).toMatchObject({
-      userId: USER_ID,
-      source: "coach_chat",
-      category: "time_limit",
-      appliesTo: { dayKey: "Mon" },
-    });
+    // Nothing persisted — a scope-less call is a question, not a proposal.
+    // Persisting here would orphan a pending doc per scope exchange.
+    const pending = await db.collection(`users/${USER_ID}/planAdjustmentProposals`).get();
+    expect(pending.empty).toBe(true);
   });
 
   it("adapt_plan does not flag needsScopeConfirmation once scope is supplied", async () => {

@@ -22,14 +22,15 @@ import {
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
 import { executeTool } from "../tools/executor.js";
 
-// Feature-flagged so the new Gemini function-calling loop (adapt_plan,
-// ask_follow_up_question) can ship dark and run alongside the existing
-// deterministic classifier (workouts/planAdjustments.ts's
-// maybeCreatePlanAdjustmentProposal, still called from sendCoachMessageHttp)
-// for a release before that classifier is retired. Both paths write to the
-// same planAdjustmentProposals collection, so either can be reviewed
-// side-by-side in the proposal history during the overlap period.
-function isCoachToolLoopEnabled(): boolean {
+// Feature flag for the Gemini function-calling loop (adapt_plan,
+// ask_follow_up_question). Exported because it gates BOTH sides of the
+// switchover: flag off = the deterministic keyword classifier in
+// sendCoachMessage/sendCoachMessageHttp creates proposals and this
+// orchestrator runs the plain single-call turn; flag on = the tool loop
+// owns proposal creation and the classifier is skipped (running both would
+// double-create proposals for the same message). Both paths write to the
+// same planAdjustmentProposals collection.
+export function isCoachToolLoopEnabled(): boolean {
   return process.env.IRONBOI_COACH_TOOL_LOOP_ENABLED === "true";
 }
 
@@ -153,7 +154,9 @@ export async function orchestrateCoachTurn({
     }
 
     const toolLoopEnabled = isCoachToolLoopEnabled();
-    const context = await loadCoachContext(db, userId, sessionId);
+    const context = await loadCoachContext(db, userId, sessionId, {
+      includePlanChanges: toolLoopEnabled,
+    });
     const retrievedCorpus = retrieveResearchCorpus({
       userContent,
       profile: context.profile ?? null,
@@ -207,15 +210,28 @@ export async function orchestrateCoachTurn({
             });
             return toolResult as Record<string, unknown>;
           } catch (error) {
-            safeLogger.warn("Coach tool execution failed", {
-              event: "coach_tool_execution_failed",
+            // An identity-shaped arg from the model is a SECURITY event
+            // (either a probing model or successful prompt injection), not
+            // an operational hiccup — log it at error level so it can't
+            // drown in warn noise.
+            const isIdentityViolation =
+              error instanceof Error && error.name === "ToolIdentityViolationError";
+            const logPayload = {
+              event: isIdentityViolation
+                ? "coach_tool_identity_violation"
+                : "coach_tool_execution_failed",
               userId,
               sessionId,
               messageId,
               turnId,
               tool: toolName,
               errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
-            });
+            };
+            if (isIdentityViolation) {
+              safeLogger.error("Coach tool execution failed", logPayload);
+            } else {
+              safeLogger.warn("Coach tool execution failed", logPayload);
+            }
             return { ok: false, error: "tool_execution_failed" };
           }
         }
@@ -289,7 +305,11 @@ export async function orchestrateCoachTurn({
         sources,
         promptTokens: result.usage.inputTokens,
         completionTokens: result.usage.outputTokens,
-        toolCallIds: result.toolCalls.map((call) => call.name),
+        // Names, not IDs — Gemini function calls carry no call id, and
+        // stuffing names into `toolCallIds` would lie about the field.
+        ...(result.toolCalls.length > 0
+          ? { toolNames: result.toolCalls.map((call) => call.name) }
+          : {}),
         serverCompletedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

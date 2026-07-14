@@ -93,14 +93,17 @@ export const PlanAdjustmentDecision = z.enum([
 ]);
 
 // How far an accepted plan-adjustment patch reaches:
-//   today          — this calendar date only (dailyOverrides), template
-//                    untouched, so the same weekday next week is unaffected.
-//   rest_of_week   — the target day in the current week's template only.
-//   going_forward  — the target day in every materialized week of the
-//                    program from the active week onward.
+//   today          — the proposal's target day, this occurrence only
+//                    (dailyOverrides keyed by ISO date); the repeating
+//                    template is untouched, so the same weekday next week
+//                    is unaffected.
+//   going_forward  — the target day in the template and every materialized
+//                    week of the program from the active week onward.
+// A "rest_of_week" tier was cut in review: until real week-rollover exists
+// (nothing advances activeWeekIndex yet), it would be indistinguishable
+// from going_forward. Reintroduce it together with the rollover job.
 export const PlanAdjustmentScope = z.enum([
   "today",
-  "rest_of_week",
   "going_forward",
 ]);
 
@@ -323,7 +326,11 @@ export const WorkoutPlan = z.object({
   // lands here instead of `days`, so it never bleeds into the repeating
   // week. Resolving "what does the user see for date D" is:
   // dailyOverrides[D] if present, else days[weekdayOf(D)].
-  dailyOverrides: z.record(z.string(), PlannedWorkoutDay).default({}),
+  // .optional() rather than .default({}) — a defaulted empty map merged via
+  // set({merge:true}) DELETES existing overrides for any caller that didn't
+  // send the field (verified against the emulator), which would let a plain
+  // upsertWorkoutPlan wipe an accepted "today only" adjustment.
+  dailyOverrides: z.record(z.string(), PlannedWorkoutDay).optional(),
   updatedAt: ISODateTime,
 }).strict();
 

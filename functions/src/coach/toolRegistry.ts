@@ -1,6 +1,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { AdaptPlanRequest, AskFollowUpQuestionRequest } from "../contracts/tool-calls.js";
 import { createPlanAdjustmentProposalFromTool } from "../workouts/planAdjustments.js";
+import { safeLogger } from "../logging/safeLogger.js";
 import type { ToolRegistry } from "../tools/executor.js";
 import type { CoachToolDeclaration } from "./modelProvider.js";
 
@@ -13,7 +14,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
   {
     name: "adapt_plan",
     description:
-      "Propose a change to the user's workout plan (skip, shorten, or otherwise adjust a day) in response to something they said. This creates a review card the user must approve in the app — it never mutates the plan directly. If they haven't told you whether the change should apply to just today or carry forward through the rest of their plan, omit `scope` here and ask them in your reply; call this again with `scope` once they answer.",
+      "Propose a change to the user's workout plan (skip, shorten, or otherwise adjust a day) in response to something they said. This creates a review card the user must approve in the app — it never mutates the plan directly. If they haven't told you whether the change should apply to just that day or carry forward through the rest of their plan, omit `scope` here and ask them in your reply; call this again with `scope` once they answer (nothing is created until scope is known).",
     parameters: {
       type: "object",
       properties: {
@@ -35,12 +36,13 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
         },
         dayKey: {
           type: "string",
-          description: "Mon, Tue, Wed, Thu, Fri, Sat, or Sun. Defaults to today if omitted.",
+          enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+          description: "Defaults to today if omitted.",
         },
         exerciseName: { type: "string" },
         scope: {
           type: "string",
-          enum: ["today", "rest_of_week", "going_forward"],
+          enum: ["today", "going_forward"],
           description: "Only set once the user has told you which they want.",
         },
       },
@@ -82,6 +84,23 @@ const AskFollowUpQuestionArgs = AskFollowUpQuestionRequest.omit({
   tool: true,
 });
 
+// Validation failures return {ok:false} so the model can retry — but they
+// must NOT be silent to the operator: chronic malformed args (schema drift,
+// a model update changing enum casing) would otherwise mean no proposals
+// get created while the coach keeps telling users "I've set that up."
+// Log issue paths only, never values (userNote is user/model content).
+function logToolValidationFailure(userId: string, tool: string, issues: Array<{ path: PropertyKey[]; code: string }>) {
+  safeLogger.warn("Coach tool args failed validation", {
+    event: "coach_tool_args_invalid",
+    userId,
+    tool,
+    errorDetail: issues
+      .slice(0, 5)
+      .map((issue) => `${issue.path.join(".")}:${issue.code}`)
+      .join(","),
+  });
+}
+
 export function buildCoachToolRegistry(db: Firestore): ToolRegistry {
   return {
     adapt_plan: async (rawArgs) => {
@@ -90,6 +109,7 @@ export function buildCoachToolRegistry(db: Firestore): ToolRegistry {
       const { userId, ...args } = rawArgs;
       const parsed = AdaptPlanArgs.safeParse(args);
       if (!parsed.success) {
+        logToolValidationFailure(userId, "adapt_plan", parsed.error.issues);
         return { ok: false, error: "invalid_adapt_plan_args" };
       }
       const result = await createPlanAdjustmentProposalFromTool({
@@ -104,9 +124,10 @@ export function buildCoachToolRegistry(db: Firestore): ToolRegistry {
       return { ok: true, ...result };
     },
     ask_follow_up_question: (rawArgs) => {
-      const { userId: _userId, ...args } = rawArgs;
+      const { userId, ...args } = rawArgs;
       const parsed = AskFollowUpQuestionArgs.safeParse(args);
       if (!parsed.success) {
+        logToolValidationFailure(userId, "ask_follow_up_question", parsed.error.issues);
         return { ok: false, error: "invalid_ask_follow_up_question_args" };
       }
       return { ok: true, renderedQuestion: parsed.data.question };

@@ -142,4 +142,19 @@ describe("Firestore rules enforce client-writable allowlists", () => {
       ),
     );
   });
+
+  it("trainingPrograms is server-only: even the owner cannot write it", async () => {
+    const db = await authedDb(USER_A);
+    await assertFails(
+      setDoc(doc(db, `users/${USER_A}/trainingPrograms/current`), {
+        userId: USER_A,
+        programId: "current",
+        startDate: "2026-07-14",
+        weeks: [],
+        activeWeekIndex: 0,
+        source: "user_edited",
+        updatedAt: ISO,
+      }),
+    );
+  });
 });

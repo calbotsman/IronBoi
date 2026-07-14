@@ -373,9 +373,10 @@ private struct RedPenUnderline: Shape {
 struct PlanAdjustmentProposalCard: View {
     let proposal: PlanAdjustmentProposalSummary
     let isApplying: Bool
-    // scope is nil when the proposal already carries its own scope (or for
-    // legacy single-target-day proposals) — otherwise the card collects it
-    // before the accept call goes out.
+    // The scope string passed here is nil ONLY when the proposal already
+    // carries its own scope (LLM-preset) — the backend then falls back to
+    // proposal.appliesTo.scope. Every proposal without a preset scope goes
+    // through the two-button picker below and sends an explicit value.
     let apply: (String?) -> Void
 
     var body: some View {
@@ -442,7 +443,7 @@ struct PlanAdjustmentProposalCard: View {
                     .disabled(isApplying)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Apply this to just today, or carry it forward?")
+                        Text(scopeQuestion)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
@@ -450,7 +451,7 @@ struct PlanAdjustmentProposalCard: View {
                             Button {
                                 apply("today")
                             } label: {
-                                Text(isApplying ? "Applying..." : "Just today")
+                                Text(isApplying ? "Applying..." : justOnceButtonTitle)
                                     .font(.subheadline.weight(.semibold))
                                     .frame(maxWidth: .infinity)
                             }
@@ -501,11 +502,42 @@ struct PlanAdjustmentProposalCard: View {
         proposal.riskLevel == "low" && !proposal.requiresFollowUp
     }
 
+    // Only used when the proposal came in with a preset scope (LLM tool
+    // path). The reach MUST be visible on the one-tap button — the human
+    // approving is the only gate, and "Apply to plan" alone would hide
+    // whether this is a one-day tweak or a permanent cascade.
     private var applyButtonTitle: String {
-        if let dayKey = proposal.dayKey {
-            return "Apply to \(dayKey)"
+        let target = proposal.dayKey ?? "plan"
+        switch proposal.scope {
+        case "today":
+            return "Apply to \(target) — that day only"
+        case "going_forward":
+            return "Apply to \(target) — going forward"
+        default:
+            return proposal.dayKey.map { "Apply to \($0)" } ?? "Apply to plan"
         }
-        return "Apply to plan"
+    }
+
+    // The "one time" button names the actual target day when the proposal
+    // isn't about today — "Just today" on a Friday-targeting proposal would
+    // misdescribe what happens (the backend keys the override to Friday).
+    private var justOnceButtonTitle: String {
+        guard let dayKey = proposal.dayKey, dayKey != Self.currentDayKey() else {
+            return "Just today"
+        }
+        return "Just this \(dayKey)"
+    }
+
+    private var scopeQuestion: String {
+        guard let dayKey = proposal.dayKey, dayKey != Self.currentDayKey() else {
+            return "Apply this to just today, or carry it forward?"
+        }
+        return "Apply this to just this \(dayKey), or carry it forward?"
+    }
+
+    private static func currentDayKey() -> String {
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
     }
 }
 
