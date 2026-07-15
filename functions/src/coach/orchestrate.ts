@@ -221,7 +221,11 @@ export async function orchestrateCoachTurn({
       ? ((await findLatestPendingProposal(db, userId))?.docId ?? null)
       : null;
     const toolRegistry = toolLoopEnabled
-      ? buildCoachToolRegistry(db, { latestPendingProposalId, clientDate })
+      ? buildCoachToolRegistry(db, {
+          latestPendingProposalId,
+          clientDate,
+          rawUserText: userContent,
+        })
       : undefined;
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
       ? async (toolName, toolArgs) => {

@@ -19,7 +19,14 @@ struct PlanAdjustmentProposalSummary: Equatable, Identifiable {
     let rationale: String
     let dayKey: String?
     let patchTitle: String
+    // proposedPlanPatch.type — drives special card layouts (clear_overrides
+    // gets a single restore button instead of the scope picker).
+    let patchType: String
     let changes: [String]
+    // Full exercise detail for model-authored day patches. The card MUST
+    // show exactly what will land in the plan — the user can't approve
+    // content they can't see.
+    let dayPatchDetails: [ProposalDayPatchDetail]
     let safetyNotes: [String]
     let sourceCorpusEntryIds: [String]
     let requiresFollowUp: Bool
@@ -29,6 +36,13 @@ struct PlanAdjustmentProposalSummary: Equatable, Identifiable {
     let scope: String?
 }
 
+struct ProposalDayPatchDetail: Equatable, Identifiable {
+    var id: String { dayKey }
+    let dayKey: String
+    let name: String
+    let exerciseLines: [String]
+}
+
 struct PlannedWorkoutDay: Equatable, Identifiable {
     var id: String { dayKey }
 
@@ -36,6 +50,10 @@ struct PlannedWorkoutDay: Equatable, Identifiable {
     let name: String
     let muscles: [String]
     let exercises: [PlannedExercise]
+    // True when this day's content comes from a dated dailyOverride (a
+    // temporary coach adjustment) rather than the repeating template —
+    // drives the ADJUSTED tag on the Train tab card.
+    var isAdjusted: Bool = false
 
     var totalSets: Int {
         exercises.reduce(0) { $0 + $1.sets }

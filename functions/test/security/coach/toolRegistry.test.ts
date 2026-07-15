@@ -44,7 +44,7 @@ describe("coach tool registry", () => {
       },
     });
 
-    const registry = buildCoachToolRegistry(db);
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
     const result = (await executeTool(
       registry,
       "adapt_plan",
@@ -77,7 +77,7 @@ describe("coach tool registry", () => {
       days: { Mon: { name: "Rest day", muscles: [], exercises: [] } },
     });
 
-    const registry = buildCoachToolRegistry(db);
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
     const result = (await executeTool(
       registry,
       "adapt_plan",
@@ -92,7 +92,7 @@ describe("coach tool registry", () => {
   });
 
   it("adapt_plan rejects a model call carrying an identity-shaped field", async () => {
-    const registry = buildCoachToolRegistry(db);
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
     await expect(
       executeTool(
         registry,
@@ -104,7 +104,7 @@ describe("coach tool registry", () => {
   });
 
   it("adapt_plan returns a validation error instead of throwing on malformed args", async () => {
-    const registry = buildCoachToolRegistry(db);
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
     const result = (await executeTool(
       registry,
       "adapt_plan",
@@ -116,7 +116,7 @@ describe("coach tool registry", () => {
   });
 
   it("ask_follow_up_question returns the rendered question", async () => {
-    const registry = buildCoachToolRegistry(db);
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
     const result = await executeTool(
       registry,
       "ask_follow_up_question",

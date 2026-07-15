@@ -911,6 +911,25 @@ final class AppModel: NSObject, ObservableObject {
 
         let appliesTo = data["appliesTo"] as? [String: Any]
 
+        // Model-authored day patches: surface every exercise on the card so
+        // the user sees exactly what a yes will write into the plan.
+        let dayPatchDetails: [ProposalDayPatchDetail] = (proposedPlanPatch["dayPatches"] as? [[String: Any]] ?? []).compactMap { raw in
+            guard
+                let dayKey = raw["dayKey"] as? String,
+                let replacementDay = raw["replacementDay"] as? [String: Any],
+                let name = replacementDay["name"] as? String
+            else { return nil }
+            let exercises = (replacementDay["exercises"] as? [[String: Any]] ?? []).compactMap { exercise -> String? in
+                guard let exerciseName = exercise["name"] as? String else { return nil }
+                let sets = exercise["sets"] as? Int ?? 0
+                let reps = exercise["reps"] as? Int ?? 0
+                let weight = Self.makeDouble(from: exercise["weight"]) ?? 0
+                let load = weight > 0 ? " @ \(Int(weight)) lb" : ""
+                return "\(exerciseName) · \(sets)×\(reps)\(load)"
+            }
+            return ProposalDayPatchDetail(dayKey: dayKey, name: name, exerciseLines: exercises)
+        }
+
         return PlanAdjustmentProposalSummary(
             id: document.documentID,
             proposalId: proposalId,
@@ -920,7 +939,9 @@ final class AppModel: NSObject, ObservableObject {
             rationale: rationale,
             dayKey: appliesTo?["dayKey"] as? String,
             patchTitle: patchTitle,
+            patchType: proposedPlanPatch["type"] as? String ?? "review_only",
             changes: proposedPlanPatch["changes"] as? [String] ?? [],
+            dayPatchDetails: dayPatchDetails,
             safetyNotes: data["safetyNotes"] as? [String] ?? [],
             sourceCorpusEntryIds: data["sourceCorpusEntryIds"] as? [String] ?? [],
             requiresFollowUp: data["requiresFollowUp"] as? Bool ?? false,
@@ -987,15 +1008,22 @@ final class AppModel: NSObject, ObservableObject {
             let days = data["days"] as? [String: Any]
         else { return nil }
 
-        // A "today only" plan-adjustment scope lands in dailyOverrides keyed
-        // by ISO date rather than in `days` (keyed by weekday), so it never
-        // bleeds into the repeating week. Splice today's override over the
-        // matching weekday before building the day list, so the rest of the
-        // app never has to know overrides exist.
+        // Temporary plan adjustments land in dailyOverrides keyed by ISO
+        // date rather than in `days` (keyed by weekday), so they never bleed
+        // into the repeating week. Resolve EVERY weekday card through its
+        // next occurrence's override (the same rule the backend uses when
+        // starting a workout) — a Wednesday adjustment for Wed→Sun must be
+        // visible on those cards, not just today's.
         let dailyOverrides = data["dailyOverrides"] as? [String: Any] ?? [:]
         var resolvedDays = days
-        if let todayOverride = dailyOverrides[Self.currentDateISO()] {
-            resolvedDays[Self.currentDayKey()] = todayOverride
+        var adjustedDayKeys = Set<String>()
+        let today = Self.currentDateISO()
+        for dayKey in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] {
+            let overrideDate = Self.nextOccurrenceISO(of: dayKey, onOrAfter: today)
+            if let override = dailyOverrides[overrideDate] {
+                resolvedDays[dayKey] = override
+                adjustedDayKeys.insert(dayKey)
+            }
         }
 
         return WorkoutPlanSummary(
@@ -1003,11 +1031,39 @@ final class AppModel: NSObject, ObservableObject {
             planId: planId,
             source: data["source"] as? String ?? "coach_generated",
             updatedAt: data["updatedAt"] as? String ?? "",
-            days: makePlannedWorkoutDays(from: resolvedDays)
+            days: makePlannedWorkoutDays(from: resolvedDays, adjustedDayKeys: adjustedDayKeys)
         )
     }
 
-    private static func makePlannedWorkoutDays(from days: [String: Any]) -> [PlannedWorkoutDay] {
+    // ISO date (yyyy-MM-dd, Gregorian) of the next occurrence of `dayKey` on
+    // or after the given local date — mirrors the backend's
+    // nextOccurrenceOfWeekday so client and server agree on which override
+    // a weekday card shows.
+    private static func nextOccurrenceISO(of dayKey: String, onOrAfter isoDate: String) -> String {
+        let order = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+        guard let targetIndex = order.firstIndex(of: dayKey) else { return isoDate }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        guard let start = formatter.date(from: isoDate) else { return isoDate }
+
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let startWeekday = calendar.component(.weekday, from: start) - 1 // Sun=0
+        let daysAhead = (targetIndex - startWeekday + 7) % 7
+        guard let target = calendar.date(byAdding: .day, value: daysAhead, to: start) else {
+            return isoDate
+        }
+        return formatter.string(from: target)
+    }
+
+    private static func makePlannedWorkoutDays(
+        from days: [String: Any],
+        adjustedDayKeys: Set<String> = []
+    ) -> [PlannedWorkoutDay] {
         let dayOrder = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         return dayOrder.compactMap { dayKey in
             guard
@@ -1020,7 +1076,8 @@ final class AppModel: NSObject, ObservableObject {
                 dayKey: dayKey,
                 name: name,
                 muscles: rawDay["muscles"] as? [String] ?? [],
-                exercises: rawExercises.compactMap(makePlannedExercise)
+                exercises: rawExercises.compactMap(makePlannedExercise),
+                isAdjusted: adjustedDayKeys.contains(dayKey)
             )
         }
     }

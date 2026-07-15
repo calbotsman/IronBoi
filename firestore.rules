@@ -159,6 +159,11 @@ service cloud.firestore {
         allow update: if owns(userId) && ownerDecisionOnly();
       }
 
+      match /coachFollowUps/{followUpId} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
       match /planAdjustmentProposals/{proposalId} {
         allow read: if owns(userId);
         allow create, delete: if false;

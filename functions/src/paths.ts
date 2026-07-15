@@ -61,6 +61,14 @@ export function planAdjustmentProposalPath(userId: string, proposalId: string) {
   return `${planAdjustmentProposalsCollectionPath(userId)}/${proposalId}`;
 }
 
+export function coachFollowUpsCollectionPath(userId: string) {
+  return `${userRoot(userId)}/coachFollowUps`;
+}
+
+export function coachFollowUpPath(userId: string, followUpId: string) {
+  return `${coachFollowUpsCollectionPath(userId)}/${followUpId}`;
+}
+
 export function coachSessionPath(userId: string, sessionId: string) {
   return `${userRoot(userId)}/coachSessions/${sessionId}`;
 }

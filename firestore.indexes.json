@@ -4,8 +4,28 @@
       "collectionGroup": "planAdjustmentProposals",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "decision", "order": "ASCENDING" },
-        { "fieldPath": "decidedAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "decision",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "decidedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "coachFollowUps",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "dueAt",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],
