@@ -93,6 +93,7 @@ struct CoachView: View {
     private var protocolBar: some View {
         let lens = appModel.profile.preferences.coachingLens
         return Button {
+            composerFocused = false
             appModel.selectedTab = .you
         } label: {
             HStack(spacing: MyoTheme.Spacing.sm) {
@@ -223,17 +224,27 @@ struct CoachView: View {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
+            // Opening the keyboard shrinks the viewport — keep the newest
+            // message visible instead of letting it hide behind the keyboard.
+            .onChange(of: composerFocused) { _, focused in
+                guard focused, let last = appModel.messages.last else { return }
+                withAnimation(MyoTheme.Motion.fade) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
             .background(MyoTheme.Colors.cream)
         }
     }
 
     private var composer: some View {
         HStack(spacing: 10) {
+            // Deliberately NOT .disabled(isSending): disabling a focused field
+            // resigns first responder, dropping the keyboard after every send.
+            // Double-send is already prevented by the send button's guard.
             TextField("Ask Coach...", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
                 .focused($composerFocused)
-                .disabled(appModel.isSending)
 
             Button {
                 voiceInput.toggle()

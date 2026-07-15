@@ -61,6 +61,12 @@ describe("chat-driven plan adjustment decisions", () => {
     await Promise.all(getApps().map((activeApp) => deleteApp(activeApp)));
   });
 
+  // Chat accepts require the turn-boundary snapshot — in production this is
+  // the latest pending proposal id captured BEFORE the model runs.
+  async function pendingIdSnapshot(): Promise<string | null> {
+    return (await findLatestPendingProposal(db, USER_ID))?.docId ?? null;
+  }
+
   async function createPendingViaTool(scope?: "today" | "going_forward") {
     return createPlanAdjustmentProposalFromTool({
       db,
@@ -76,7 +82,13 @@ describe("chat-driven plan adjustment decisions", () => {
     const created = await createPendingViaTool("going_forward");
     expect(created.proposalId).toBeTruthy();
 
-    const result = await acceptLatestPlanAdjustmentFromChat(db, USER_ID, undefined);
+    const result = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      await pendingIdSnapshot(),
+      undefined,
+    );
     expect(result).toMatchObject({ ok: true, appliedScope: "going_forward" });
 
     const proposalSnap = await db
@@ -119,7 +131,13 @@ describe("chat-driven plan adjustment decisions", () => {
       createdAt: new Date().toISOString(),
     });
 
-    const result = await acceptLatestPlanAdjustmentFromChat(db, USER_ID, undefined);
+    const result = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      await pendingIdSnapshot(),
+      undefined,
+    );
     expect(result).toMatchObject({ ok: false, error: "scope_required" });
 
     const planSnap = await db.doc(workoutPlanPath(USER_ID, "current")).get();
@@ -127,7 +145,7 @@ describe("chat-driven plan adjustment decisions", () => {
   });
 
   it("chat accept refuses when there is no pending proposal", async () => {
-    const result = await acceptLatestPlanAdjustmentFromChat(db, USER_ID, "today");
+    const result = await acceptLatestPlanAdjustmentFromChat(db, USER_ID, "today", null, undefined);
     expect(result).toMatchObject({ ok: false, error: "no_pending_proposal" });
   });
 
@@ -143,7 +161,13 @@ describe("chat-driven plan adjustment decisions", () => {
     });
     expect(created.proposalId).toBeTruthy();
 
-    const result = await acceptLatestPlanAdjustmentFromChat(db, USER_ID, "today");
+    const result = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      "today",
+      await pendingIdSnapshot(),
+      undefined,
+    );
     expect(result).toMatchObject({ ok: false, error: "plan_adjustment_requires_review" });
   });
 
@@ -155,6 +179,64 @@ describe("chat-driven plan adjustment decisions", () => {
     const snap = await db.doc(planAdjustmentProposalPath(USER_ID, created.proposalId!)).get();
     expect(snap.data()?.decision).toBe("rejected");
     expect(snap.data()?.decidedAt).toBeTruthy();
+  });
+
+  it("a proposal created THIS turn cannot be chat-accepted (turn boundary)", async () => {
+    // Snapshot taken before the model ran: no pending proposal existed.
+    const snapshotBeforeTurn = await pendingIdSnapshot();
+    expect(snapshotBeforeTurn).toBeNull();
+
+    // Model creates a proposal mid-turn via adapt_plan...
+    const created = await createPendingViaTool("going_forward");
+    expect(created.proposalId).toBeTruthy();
+
+    // ...and immediately tries to accept it in the same turn. Refused.
+    const result = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      "going_forward",
+      snapshotBeforeTurn,
+      undefined,
+    );
+    expect(result).toMatchObject({ ok: false, error: "proposal_not_visible_yet" });
+
+    const planSnap = await db.doc(workoutPlanPath(USER_ID, "current")).get();
+    expect(planSnap.data()?.source).toBe("coach_generated");
+
+    // Next turn (snapshot now includes it) the same accept succeeds.
+    const nextTurn = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      await pendingIdSnapshot(),
+      undefined,
+    );
+    expect(nextTurn).toMatchObject({ ok: true });
+  });
+
+  it("chat accept keys a today-scope override to the client's local date", async () => {
+    await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "schedule_change",
+      userNote: "skip Tuesday",
+      dayKey: "Tue",
+      scope: "today",
+    });
+
+    // Client's local date is 2026-07-21, a Tuesday — the override must land
+    // exactly there, regardless of the server's timezone.
+    const result = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      await pendingIdSnapshot(),
+      "2026-07-21",
+    );
+    expect(result).toMatchObject({ ok: true, appliedScope: "today" });
+
+    const planSnap = await db.doc(workoutPlanPath(USER_ID, "current")).get();
+    expect(Object.keys(planSnap.data()?.dailyOverrides ?? {})).toEqual(["2026-07-21"]);
   });
 
   it("a revised proposal supersedes the previous pending one", async () => {

@@ -78,7 +78,8 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
     name: "reject_plan_adjustment",
     description:
       "Dismiss the pending plan-change proposal. Call when the user declines it ('no thanks', 'leave my plan alone'). If they want something different instead, don't reject — call adapt_plan with the new request (it replaces the old proposal automatically).",
-    parameters: { type: "object", properties: {}, required: [] },
+    // No parameters on purpose: Gemini 400s OBJECT schemas with empty
+    // properties, so zero-arg tools omit the field (provider also guards).
   },
   {
     name: "ask_follow_up_question",
@@ -142,7 +143,21 @@ function logToolValidationFailure(userId: string, tool: string, issues: Array<{ 
   });
 }
 
-export function buildCoachToolRegistry(db: Firestore): ToolRegistry {
+export type CoachToolRegistryContext = {
+  // The latest pending proposal AT TURN START (null if none). The accept
+  // tool refuses anything newer — a proposal the model just created cannot
+  // be accepted in the same turn; the user must say yes in a later message.
+  latestPendingProposalId: string | null;
+  // The user's local calendar date from the triggering message, when the
+  // client sent one. Keys today-scope overrides to the user's day instead
+  // of the server's timezone.
+  clientDate?: string;
+};
+
+export function buildCoachToolRegistry(
+  db: Firestore,
+  context: CoachToolRegistryContext,
+): ToolRegistry {
   return {
     adapt_plan: async (rawArgs) => {
       // executeTool injects userId onto every handler's args — strip it
@@ -171,7 +186,13 @@ export function buildCoachToolRegistry(db: Firestore): ToolRegistry {
         logToolValidationFailure(userId, "accept_plan_adjustment", parsed.error.issues);
         return { ok: false, error: "invalid_accept_plan_adjustment_args" };
       }
-      const result = await acceptLatestPlanAdjustmentFromChat(db, userId, parsed.data.scope);
+      const result = await acceptLatestPlanAdjustmentFromChat(
+        db,
+        userId,
+        parsed.data.scope,
+        context.latestPendingProposalId,
+        context.clientDate,
+      );
       safeLogger.info("Chat-driven plan adjustment decision", {
         event: "plan_adjustment_chat_accept",
         userId,

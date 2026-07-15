@@ -107,6 +107,9 @@ const IosCoachMessageRequest = z.object({
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().min(1).optional(),
   startedAt: z.string().datetime().optional(),
+  // The client's local calendar date — lets a chat-driven "yes, just today"
+  // accept key its dailyOverride to the user's day, not the server's tz.
+  clientDate: z.string().date().optional(),
 });
 const WorkoutPlanAdjustmentStructuredAnswer = z
   .object({
@@ -969,6 +972,9 @@ export const sendCoachMessageHttp = onRequest(
       if (parsed.turnId !== undefined) {
         messageData.turnId = parsed.turnId;
       }
+      if (parsed.clientDate !== undefined) {
+        messageData.clientDate = parsed.clientDate;
+      }
 
       await db
         .doc(coachSessionMessagePath(userId, parsed.sessionId, parsed.messageId))
@@ -1277,6 +1283,7 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       messageId,
       turnId,
       userContent: data.content,
+      clientDate: typeof data.clientDate === "string" ? data.clientDate : undefined,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
     });
   },

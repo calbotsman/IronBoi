@@ -52,7 +52,17 @@ export function classifyUserMessage(text: string): SafetyVerdict {
     };
   }
 
-  if (/\b(sarms?|steroids?|cycle|stack|anavar|tren|testosterone)\b/.test(lower)) {
+  // "cycle" and "stack" are everyday training vocabulary ("training cycle",
+  // "stack two sessions") — alone they must not trip a drug-protocol block.
+  // This same classifier runs POSTFLIGHT on the coach's own reply, so a
+  // false positive here replaces a legitimate confirmation with a refusal
+  // AFTER side effects (an accepted plan change) were already applied.
+  // The ambiguous tokens only count alongside an actual drug term.
+  if (
+    /\b(sarms?|steroids?|anavar|tren|testosterone)\b/.test(lower) ||
+    (/\b(cycle|stack)\b/.test(lower) &&
+      /\b(anabolic|peds?|gear|juice|blast|cruise|dbol|winstrol|clen)\b/.test(lower))
+  ) {
     return {
       category: "drug_or_supplement_protocol",
       riskTier: "blocked",
