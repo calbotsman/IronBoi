@@ -19,7 +19,14 @@ struct PlanAdjustmentProposalSummary: Equatable, Identifiable {
     let rationale: String
     let dayKey: String?
     let patchTitle: String
+    // proposedPlanPatch.type — drives special card layouts (clear_overrides
+    // gets a single restore button instead of the scope picker).
+    let patchType: String
     let changes: [String]
+    // Full exercise detail for model-authored day patches. The card MUST
+    // show exactly what will land in the plan — the user can't approve
+    // content they can't see.
+    let dayPatchDetails: [ProposalDayPatchDetail]
     let safetyNotes: [String]
     let sourceCorpusEntryIds: [String]
     let requiresFollowUp: Bool
@@ -27,6 +34,13 @@ struct PlanAdjustmentProposalSummary: Equatable, Identifiable {
     // "today" | "rest_of_week" | "going_forward" — nil until the user (or a
     // future LLM tool call) has decided how far the change should reach.
     let scope: String?
+}
+
+struct ProposalDayPatchDetail: Equatable, Identifiable {
+    var id: String { dayKey }
+    let dayKey: String
+    let name: String
+    let exerciseLines: [String]
 }
 
 struct PlannedWorkoutDay: Equatable, Identifiable {

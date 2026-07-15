@@ -661,7 +661,7 @@ export const CoachFollowUp = z.object({
   context: z.string().min(1).max(300),
   proposalId: z.string().min(1),
   dueAt: ISODateTime,
-  status: z.enum(["scheduled", "sent", "cancelled"]).default("scheduled"),
+  status: z.enum(["scheduled", "sent", "cancelled", "failed"]).default("scheduled"),
   createdAt: ISODateTime,
   sentAt: ISODateTime.optional(),
 }).strict();

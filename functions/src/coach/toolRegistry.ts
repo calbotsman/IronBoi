@@ -220,6 +220,10 @@ export type CoachToolRegistryContext = {
   // client sent one. Keys today-scope overrides to the user's day instead
   // of the server's timezone.
   clientDate?: string;
+  // The RAW text of the user's triggering message — never model-authored.
+  // The injury severe-screen and category coercion run over this so a model
+  // paraphrase can't route around the triage gate.
+  rawUserText?: string;
 };
 
 export function buildCoachToolRegistry(
@@ -247,6 +251,8 @@ export function buildCoachToolRegistry(
         dayPatches: parsed.data.dayPatches,
         painTriage: parsed.data.painTriage,
         recoveryDays: parsed.data.recoveryDays,
+        rawUserText: context.rawUserText,
+        clientDate: context.clientDate,
       });
       return { ok: true, ...result };
     },

@@ -153,15 +153,29 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   dayPatches?: ToolDayPatch[];
   painTriage?: PainTriage;
   recoveryDays?: number;
+  // The RAW user turn that triggered this call, straight from the message
+  // doc — never model-authored. The severe screen and category coercion run
+  // over this text so a model paraphrase ("leg discomfort" for "shooting
+  // pain down my leg") or a mislabeled reason can't route around the gate.
+  rawUserText?: string;
+  clientDate?: string;
 }) {
-  const category = ADAPT_PLAN_REASON_TO_CATEGORY[input.reason];
+  const rawText = input.rawUserText ?? "";
+  // Category coercion: if the user's own words classify as injury (or trip
+  // the severe screen), the proposal IS an injury proposal no matter what
+  // reason the model picked — schedule_change can't smuggle a pain request
+  // past the triage gate.
+  const rawSaysInjury =
+    rawText.length > 0 &&
+    (classifyPlanAdjustment(rawText, false) === "injury_pain" || hasSevereMarkers(rawText));
+  const category = rawSaysInjury ? "injury_pain" : ADAPT_PLAN_REASON_TO_CATEGORY[input.reason];
   const originalUserText = input.userNote?.trim() || `User requested a plan change (${input.reason}) via chat.`;
 
   // Risk resolution. For pain: the deterministic severe screen runs over
-  // BOTH the user note and the triage description and is absolute. Only
-  // when it comes back clean can a completed triage (red flags asked, user
-  // reports non-severe) lower injury risk to appliable.
-  const severeText = `${originalUserText} ${input.painTriage?.description ?? ""}`;
+  // the user note, the triage description, AND the raw user turn — and is
+  // absolute. Only when it comes back clean can a completed triage (red
+  // flags asked, user reports non-severe) lower injury risk to appliable.
+  const severeText = `${originalUserText} ${input.painTriage?.description ?? ""} ${rawText}`;
   let riskLevel = riskForCategory(category, severeText);
   let requiresFollowUp = needsFollowUp(category, riskLevel);
   let triageCleared = false;
@@ -176,6 +190,22 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     riskLevel = "low";
     requiresFollowUp = false;
     triageCleared = true;
+  }
+
+  // P1-3a: "today" can only ever mean ONE day. A multi-day patch with
+  // scope=today would silently behave like rest_of_week while the card's
+  // one-tap button says "that day only" — bounce it back as a scope
+  // question instead of mislabeling consent.
+  if (input.scope === "today" && (input.dayPatches?.length ?? 0) > 1) {
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: input.dayPatches?.[0]?.dayKey,
+      needsScopeConfirmation: true,
+      error: "today_scope_is_single_day",
+    };
   }
 
   const appliesTo = {
@@ -195,8 +225,32 @@ export async function createPlanAdjustmentProposalFromTool(input: {
 
   // Model-authored multi-day patch: build the proposal content directly
   // from the (Zod-validated, bounded) replacement days.
-  const dayPatchesForProposal = input.dayPatches?.length
-    ? input.dayPatches.map((patch) => ({
+  // rest_of_week means THROUGH SUNDAY of the user's current week. Patches
+  // whose next occurrence would wrap into next week (Mon/Tue patched on a
+  // Wednesday) are dropped — showing them as "this week" would be false.
+  const referenceDate = input.clientDate ?? currentDateISO();
+  const keptDayPatches =
+    input.scope === "rest_of_week" && input.dayPatches?.length
+      ? input.dayPatches.filter(
+          (patch) =>
+            nextOccurrenceOfWeekday(patch.dayKey, referenceDate) <=
+            endOfWeekSunday(referenceDate),
+        )
+      : input.dayPatches;
+  if (input.dayPatches?.length && !keptDayPatches?.length) {
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: input.dayPatches[0]?.dayKey,
+      needsScopeConfirmation: false,
+      error: "no_patched_days_remain_this_week",
+    };
+  }
+
+  const dayPatchesForProposal = keptDayPatches?.length
+    ? keptDayPatches.map((patch) => ({
         dayKey: patch.dayKey,
         replacementDay: {
           name: patch.dayName,
@@ -213,7 +267,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
           : "Adjusted days",
         changes: dayPatchesForProposal.map(
           (patch) =>
-            `${patch.dayKey}: ${patch.replacementDay.name} (${patch.replacementDay.exercises.length} exercises)`,
+            `${patch.dayKey} ${nextOccurrenceOfWeekday(patch.dayKey, referenceDate)}: ${patch.replacementDay.name} (${patch.replacementDay.exercises.length} exercises)`,
         ),
         dayPatches: dayPatchesForProposal,
       }
@@ -618,7 +672,13 @@ export async function acceptPlanAdjustmentProposal(
       throw new Error("plan_adjustment_requires_review");
     }
 
-    const scope = request.scope ?? proposal.appliesTo.scope;
+    // clear_overrides is scope-free: recording whatever button an old
+    // client sent would write a false label into appliesTo and the memory
+    // fact ("for that day only" on a full restore).
+    const scope =
+      proposal.proposedPlanPatch.type === "clear_overrides"
+        ? undefined
+        : (request.scope ?? proposal.appliesTo.scope);
     const program = programSnap?.exists
       ? parseTrainingProgramDocument(programSnap.data())
       : null;
@@ -844,7 +904,11 @@ function planPatchForAcceptedProposal(
         .filter((date) => date >= today)
         .map((date) => [date, FieldValue.delete()]),
     );
-    return { planPatch: { dailyOverrides: deleteMarkers } };
+    // An EXPLICITLY EMPTY map in set(merge:true) replaces the whole map —
+    // when nothing is due for deletion, don't touch the field at all.
+    return {
+      planPatch: Object.keys(deleteMarkers).length > 0 ? { dailyOverrides: deleteMarkers } : {},
+    };
   }
 
   // Multi-day (model-authored) patches: one dated override per patched
@@ -864,7 +928,25 @@ function planPatchForAcceptedProposal(
         nextDays = { ...nextDays, [patch.dayKey]: patch.replacementDay };
         weeks = patchProgramWeeks({ ...program, weeks }, patch.dayKey, patch.replacementDay).weeks;
       }
-      return { planPatch: { days: nextDays }, programPatch: { weeks } };
+      // A permanent change must WIN immediately: prune any still-active
+      // temporary override on the patched days, or the Train tab keeps
+      // showing old override content for up to a week after approval.
+      const existingOverrides = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+      const patchedDates = new Set(
+        contractDayPatches.map((patch) => nextOccurrenceOfWeekday(patch.dayKey, today)),
+      );
+      const overridePrune = Object.fromEntries(
+        Object.keys(existingOverrides)
+          .filter((date) => patchedDates.has(date))
+          .map((date) => [date, FieldValue.delete()]),
+      );
+      return {
+        planPatch: {
+          days: nextDays,
+          ...(Object.keys(overridePrune).length > 0 ? { dailyOverrides: overridePrune } : {}),
+        },
+        programPatch: { weeks },
+      };
     }
     const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
     const pruneMarkers = Object.fromEntries(
@@ -969,6 +1051,12 @@ export function weekdayOfISODate(isoDate: string): string {
   const parsed = Date.parse(`${isoDate}T00:00:00Z`);
   if (Number.isNaN(parsed)) return currentDayKey();
   return WEEKDAY_KEYS[new Date(parsed).getUTCDay()];
+}
+
+// The ISO date of this week's Sunday (the last day of the user's current
+// week), on or after `fromDate`.
+export function endOfWeekSunday(fromDate: string): string {
+  return nextOccurrenceOfWeekday("Sun", fromDate);
 }
 
 // The ISO date of the next occurrence of `dayKey` on or after `fromDate`
@@ -1080,25 +1168,31 @@ function matchesAny(text: string, needles: string[]) {
 
 // The ABSOLUTE severe-symptom screen. Deterministic, server-side, and not
 // model-overridable: no triage attestation can clear a text that trips it.
+const SEVERE_MARKER_PATTERNS: RegExp[] = [
+  /chest pain/,
+  /can'?t breathe|cannot breathe|hurts (when|to) .{0,12}breathe/,
+  /\bfaint(ed|ing)?\b/,
+  /passed out|blacked out/,
+  /\bbleeding\b/,
+  // \b keeps "lower the NUMBers on squats" from tripping the screen.
+  /\bnumb(ness)?\b/,
+  /\btingling\b|pins and needles/,
+  /lost feeling|can'?t feel|no feeling/,
+  /\bdeformity\b|\bdeformed\b/,
+  /severe.{0,16}pain|pain.{0,16}severe/,
+  /sharp.{0,16}pain|pain.{0,16}sharp/,
+  /shooting.{0,16}(pain|down)|pain.{0,16}shooting/,
+  /\bradiat(es|ing)\b/,
+  // Scoped to body parts so "can't move my Thursday session" stays a
+  // plain reschedule request.
+  /can'?t move my (arm|leg|neck|back|shoulder|knee|wrist|ankle|hip|hand|foot|toe|finger)/,
+  /\bswollen\b|\bswelling\b/,
+  /heard a pop|felt a pop|\bgave out\b/,
+];
+
 export function hasSevereMarkers(content: string): boolean {
   const text = content.toLowerCase();
-  return matchesAny(text, [
-    "chest pain",
-    "can't breathe",
-    "cannot breathe",
-    "faint",
-    "fainted",
-    "bleeding",
-    "numb",
-    "tingling",
-    "deformity",
-    "severe pain",
-    "sharp pain",
-    "shooting",
-    "radiating",
-    "can't move",
-    "cannot move",
-  ]);
+  return SEVERE_MARKER_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function riskForCategory(category: AdjustmentCategory, content: string): AdjustmentRiskLevel {

@@ -23,7 +23,9 @@ export async function sweepCoachFollowUps(db: Firestore, nowISO?: string) {
     .get();
 
   let sent = 0;
+  let failed = 0;
   for (const doc of due.docs) {
+    try {
     const data = doc.data();
     const userId = typeof data.userId === "string" ? data.userId : "";
     if (!userId) {
@@ -40,16 +42,17 @@ export async function sweepCoachFollowUps(db: Firestore, nowISO?: string) {
       typeof data.context === "string" && data.context.length > 0
         ? data.context
         : "we eased your training off a few days ago.";
-    await db.doc(coachSessionPath(userId, sessionId)).set(
-      {
+    const sessionRef = db.doc(coachSessionPath(userId, sessionId));
+    const sessionSnap = await sessionRef.get();
+    if (!sessionSnap.exists) {
+      await sessionRef.set({
         userId,
         sessionId,
         startedAt: now,
         outcome: "active",
         serverCreatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
+      });
+    }
     await db.doc(coachSessionMessagePath(userId, sessionId, messageId)).set({
       messageId,
       role: "coach",
@@ -67,11 +70,35 @@ export async function sweepCoachFollowUps(db: Firestore, nowISO?: string) {
       { merge: true },
     );
     sent += 1;
+    } catch (error) {
+      // One bad doc must not starve every other user's check-in. Retry up
+      // to 3 sweeps, then park it as `failed` so a deterministic poison doc
+      // can't jam the head of the dueAt-ordered queue forever.
+      failed += 1;
+      safeLogger.warn("Coach follow-up delivery failed", {
+        event: "coach_followup_delivery_failed",
+        followUpId: doc.id,
+        errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+      });
+      try {
+        const attempts = (typeof doc.data().deliveryAttempts === "number" ? doc.data().deliveryAttempts : 0) + 1;
+        await doc.ref.set(
+          {
+            deliveryAttempts: attempts,
+            ...(attempts >= 3 ? { status: "failed" } : {}),
+            serverUpdatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      } catch {
+        // Best-effort bookkeeping; the outer log already recorded the failure.
+      }
+    }
   }
 
   safeLogger.info("Coach follow-ups swept", {
     event: "coach_followups_swept",
-    outcome: `sent_${sent}_of_${due.size}`,
+    outcome: `sent_${sent}_failed_${failed}_of_${due.size}`,
   });
-  return { sent, due: due.size };
+  return { sent, failed, due: due.size };
 }

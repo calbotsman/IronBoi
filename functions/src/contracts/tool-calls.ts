@@ -123,10 +123,16 @@ export const AdaptPlanRequest = ToolCallBase.extend({
           .array(
             z.object({
               name: z.string().min(1).max(80),
-              sets: z.number().int().min(1).max(12),
-              reps: z.number().int().min(1).max(50),
-              weight: z.number().min(0).max(2000).default(0),
-            }).strict(),
+              sets: z.number().int().min(1).max(8),
+              reps: z.number().int().min(1).max(30),
+              weight: z.number().min(0).max(600).default(0),
+            }).strict()
+              // Volume sanity: 8x30 bodyweight is fine; 8x30 loaded is not a
+              // recovery adjustment. Bounds are a backstop — the card now
+              // shows every exercise before the user approves.
+              .refine((exercise) => exercise.sets * exercise.reps <= 120, {
+                message: "sets x reps too high for a plan adjustment",
+              }),
           )
           .min(1)
           .max(12),

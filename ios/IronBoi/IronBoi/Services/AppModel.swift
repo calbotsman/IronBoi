@@ -911,6 +911,25 @@ final class AppModel: NSObject, ObservableObject {
 
         let appliesTo = data["appliesTo"] as? [String: Any]
 
+        // Model-authored day patches: surface every exercise on the card so
+        // the user sees exactly what a yes will write into the plan.
+        let dayPatchDetails: [ProposalDayPatchDetail] = (proposedPlanPatch["dayPatches"] as? [[String: Any]] ?? []).compactMap { raw in
+            guard
+                let dayKey = raw["dayKey"] as? String,
+                let replacementDay = raw["replacementDay"] as? [String: Any],
+                let name = replacementDay["name"] as? String
+            else { return nil }
+            let exercises = (replacementDay["exercises"] as? [[String: Any]] ?? []).compactMap { exercise -> String? in
+                guard let exerciseName = exercise["name"] as? String else { return nil }
+                let sets = exercise["sets"] as? Int ?? 0
+                let reps = exercise["reps"] as? Int ?? 0
+                let weight = Self.makeDouble(from: exercise["weight"]) ?? 0
+                let load = weight > 0 ? " @ \(Int(weight)) lb" : ""
+                return "\(exerciseName) · \(sets)×\(reps)\(load)"
+            }
+            return ProposalDayPatchDetail(dayKey: dayKey, name: name, exerciseLines: exercises)
+        }
+
         return PlanAdjustmentProposalSummary(
             id: document.documentID,
             proposalId: proposalId,
@@ -920,7 +939,9 @@ final class AppModel: NSObject, ObservableObject {
             rationale: rationale,
             dayKey: appliesTo?["dayKey"] as? String,
             patchTitle: patchTitle,
+            patchType: proposedPlanPatch["type"] as? String ?? "review_only",
             changes: proposedPlanPatch["changes"] as? [String] ?? [],
+            dayPatchDetails: dayPatchDetails,
             safetyNotes: data["safetyNotes"] as? [String] ?? [],
             sourceCorpusEntryIds: data["sourceCorpusEntryIds"] as? [String] ?? [],
             requiresFollowUp: data["requiresFollowUp"] as? Bool ?? false,

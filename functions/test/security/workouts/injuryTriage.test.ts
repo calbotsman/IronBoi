@@ -215,6 +215,74 @@ describe("injury triage → week rebuilder → recovery arc", () => {
     expect(second).toMatchObject({ sent: 0 });
   });
 
+  it("scope=today with multi-day patches bounces back as a scope question", async () => {
+    const created = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "my back hurts",
+      scope: "today",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: CLEAN_TRIAGE,
+    });
+    expect(created).toMatchObject({ proposalId: null, needsScopeConfirmation: true });
+  });
+
+  it("raw user text overrides a mislabeled reason and severe raw text stays locked", async () => {
+    // Model says schedule_change, but the USER said their back hurts —
+    // category coerces to injury_pain, and without triage it stays locked.
+    const mislabeled = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "schedule_change",
+      userNote: "move some days around",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      rawUserText: "my back hurts, can we update this weeks workouts",
+    });
+    expect(mislabeled).toMatchObject({ category: "injury_pain", riskLevel: "high" });
+
+    // Severe language in the RAW text locks even a clean triage attestation.
+    const severe = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "back is a bit tight",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: CLEAN_TRIAGE,
+      rawUserText: "the pain is shooting down my leg",
+    });
+    expect(severe).toMatchObject({ riskLevel: "high", requiresFollowUp: true });
+  });
+
+  it("clear_plan_overrides with ONLY past-dated overrides leaves them untouched", async () => {
+    await db.doc(workoutPlanPath(USER_ID, "current")).set(
+      {
+        dailyOverrides: {
+          "2026-07-01": { name: "Old Past Override", muscles: [], exercises: [] },
+        },
+      },
+      { merge: true },
+    );
+    await createClearOverridesProposalFromTool({
+      db,
+      userId: USER_ID,
+      userNote: "feeling better",
+    });
+    const accept = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      "2026-07-15",
+    );
+    expect(accept).toMatchObject({ ok: true });
+    const planSnap = await db.doc(workoutPlanPath(USER_ID, "current")).get();
+    // The explicitly-empty-map merge pitfall: past overrides must survive.
+    expect(Object.keys(planSnap.data()?.dailyOverrides ?? {})).toEqual(["2026-07-01"]);
+  });
+
   it("clear_plan_overrides proposal accepts without scope and removes future-dated overrides", async () => {
     await db.doc(workoutPlanPath(USER_ID, "current")).set(
       {

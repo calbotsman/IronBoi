@@ -426,10 +426,37 @@ struct PlanAdjustmentProposalCard: View {
                 Text(proposal.patchTitle)
                     .font(.subheadline.weight(.semibold))
 
-                ForEach(proposal.changes, id: \.self) { change in
-                    Label(change, systemImage: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                if proposal.dayPatchDetails.isEmpty {
+                    ForEach(proposal.changes, id: \.self) { change in
+                        Label(change, systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                    }
+                } else {
+                    // The user is approving THIS content — show every
+                    // exercise, never just a day name and a count.
+                    ForEach(proposal.dayPatchDetails) { day in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("\(day.dayKey) — \(day.name)")
+                                .font(.caption.weight(.semibold))
+                            ForEach(day.exerciseLines, id: \.self) { line in
+                                Text(line)
+                                    .font(.caption)
+                                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                                    .padding(.leading, 10)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !proposal.safetyNotes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(proposal.safetyNotes.prefix(3), id: \.self) { note in
+                        Label(note, systemImage: "exclamationmark.shield")
+                            .font(.caption2)
+                            .foregroundStyle(MyoColor.redPen)
+                    }
                 }
             }
 
@@ -447,7 +474,20 @@ struct PlanAdjustmentProposalCard: View {
             }
 
             if canApply {
-                if proposal.scope != nil {
+                if proposal.patchType == "clear_overrides" {
+                    // Scope is meaningless for a restore — one honest button.
+                    Button {
+                        apply(nil)
+                    } label: {
+                        Label(isApplying ? "Applying..." : "Restore my regular plan", systemImage: "arrow.uturn.backward.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(MyoColor.Action.primary.color)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .disabled(isApplying)
+                } else if proposal.scope != nil {
                     Button {
                         apply(nil)
                     } label: {
@@ -477,15 +517,20 @@ struct PlanAdjustmentProposalCard: View {
                                 .buttonStyle(.bordered)
                                 .disabled(isApplying)
 
-                                Button {
-                                    apply("rest_of_week")
-                                } label: {
-                                    Text(isApplying ? "Applying..." : "This week")
-                                        .font(.subheadline.weight(.semibold))
-                                        .frame(maxWidth: .infinity)
+                                // Only offered for multi-day patches: for a
+                                // single target day "this week" and "just
+                                // today" produce the identical write.
+                                if proposal.dayPatchDetails.count > 1 {
+                                    Button {
+                                        apply("rest_of_week")
+                                    } label: {
+                                        Text(isApplying ? "Applying..." : "This week")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(isApplying)
                                 }
-                                .buttonStyle(.bordered)
-                                .disabled(isApplying)
                             }
 
                             Button {
