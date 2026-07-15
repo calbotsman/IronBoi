@@ -16,6 +16,7 @@ import { safeLogger } from "../logging/safeLogger.js";
 import {
   memoryFactPath,
   planAdjustmentProposalPath,
+  planAdjustmentProposalsCollectionPath,
   profilePath,
   trainingProgramPath,
   workoutPlanPath,
@@ -169,6 +170,12 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     };
   }
 
+  // Revise flow: a new proposal replaces whatever pending one the user was
+  // just looking at ("actually make Friday lighter instead"). Supersede the
+  // old pending docs so the iOS card swaps instead of stacking, and stale
+  // pendings can't be accepted later by mistake.
+  await supersedePendingProposals(input.db, input.userId);
+
   const persisted = await persistPlanAdjustmentProposal({
     db: input.db,
     userId: input.userId,
@@ -185,6 +192,98 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     ...persisted,
     needsScopeConfirmation: false,
   };
+}
+
+// The single most recent pending proposal — what the iOS card shows and
+// what a chat-level "yes"/"no" refers to. Sorted in memory instead of
+// orderBy so no composite index is needed (pending sets are tiny; new
+// proposals supersede old ones).
+export async function findLatestPendingProposal(db: Firestore, userId: string) {
+  const snap = await db
+    .collection(planAdjustmentProposalsCollectionPath(userId))
+    .where("decision", "==", "pending")
+    .get();
+  const docs = snap.docs
+    .map((doc) => doc.data())
+    .filter((data) => typeof data.createdAt === "string")
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return docs[0] ?? null;
+}
+
+async function supersedePendingProposals(db: Firestore, userId: string) {
+  const snap = await db
+    .collection(planAdjustmentProposalsCollectionPath(userId))
+    .where("decision", "==", "pending")
+    .get();
+  if (snap.empty) return;
+  const now = new Date().toISOString();
+  const batch = db.batch();
+  for (const doc of snap.docs) {
+    batch.set(
+      doc.ref,
+      { decision: "superseded", decidedAt: now, serverDecidedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+  }
+  await batch.commit();
+}
+
+// Chat-driven accept ("yes, update my training"). Resolves the latest
+// pending proposal server-side and funnels through the SAME
+// acceptPlanAdjustmentProposal gate as the card tap — risk level,
+// follow-up, and scope requirements all still apply; this only changes who
+// pulls the trigger, not what is allowed to fire.
+export async function acceptLatestPlanAdjustmentFromChat(
+  db: Firestore,
+  userId: string,
+  scope: AdjustmentScope | undefined,
+) {
+  const pending = await findLatestPendingProposal(db, userId);
+  if (!pending) {
+    return { ok: false as const, error: "no_pending_proposal" };
+  }
+  const proposalId = String(pending.proposalId ?? "");
+  const presetScope = PlanAdjustmentScope.safeParse(
+    isRecord(pending.appliesTo) ? pending.appliesTo.scope : undefined,
+  );
+  const effectiveScope = scope ?? (presetScope.success ? presetScope.data : undefined);
+  if (effectiveScope === undefined) {
+    // The user hasn't said how far this should reach — the model must ask
+    // before accepting, exactly like the card's two-button picker.
+    return { ok: false as const, error: "scope_required", proposalId };
+  }
+  try {
+    const result = await acceptPlanAdjustmentProposal(db, userId, {
+      proposalId,
+      scope: effectiveScope,
+    });
+    return { ok: true as const, proposalId: result.proposalId, appliedScope: effectiveScope };
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "accept_failed";
+    return { ok: false as const, error: code, proposalId };
+  }
+}
+
+// Chat-driven reject ("no thanks"). Terminal decision on the latest
+// pending proposal; the iOS pending-only listener drops the card.
+export async function rejectLatestPlanAdjustmentFromChat(db: Firestore, userId: string) {
+  const pending = await findLatestPendingProposal(db, userId);
+  if (!pending) {
+    return { ok: false as const, error: "no_pending_proposal" };
+  }
+  const proposalId = String(pending.proposalId ?? "");
+  const now = new Date().toISOString();
+  await db.doc(planAdjustmentProposalPath(userId, proposalId)).set(
+    { decision: "rejected", decidedAt: now, serverDecidedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
+  safeLogger.info("Plan adjustment proposal rejected from chat", {
+    event: "plan_adjustment_proposal_rejected",
+    userId,
+    proposalId,
+    outcome: "rejected",
+  });
+  return { ok: true as const, proposalId };
 }
 
 async function persistPlanAdjustmentProposal(input: {

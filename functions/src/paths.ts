@@ -53,8 +53,12 @@ export function programProposalPath(userId: string, proposalId: string) {
   return `${userRoot(userId)}/programProposals/${proposalId}`;
 }
 
+export function planAdjustmentProposalsCollectionPath(userId: string) {
+  return `${userRoot(userId)}/planAdjustmentProposals`;
+}
+
 export function planAdjustmentProposalPath(userId: string, proposalId: string) {
-  return `${userRoot(userId)}/planAdjustmentProposals/${proposalId}`;
+  return `${planAdjustmentProposalsCollectionPath(userId)}/${proposalId}`;
 }
 
 export function coachSessionPath(userId: string, sessionId: string) {

@@ -118,6 +118,31 @@ export const AdaptPlanResult = ToolResultBase.extend({
   escalationRequired: z.boolean().default(false),
 });
 
+// Chat-driven decision on the CURRENT pending proposal ("yes, update
+// training" / "no thanks"). No proposalId arg on purpose: the model never
+// sees proposal ids, and letting it supply one would be an unnecessary
+// model-controlled selector — the server always resolves the single most
+// recent pending proposal for the authenticated user.
+export const AcceptPlanAdjustmentToolRequest = ToolCallBase.extend({
+  tool: z.literal("accept_plan_adjustment"),
+  // Required if the proposal itself doesn't already carry a scope — the
+  // user must have said "just today" or "going forward" first.
+  scope: PlanAdjustmentScope.optional(),
+});
+
+export const AcceptPlanAdjustmentToolResult = ToolResultBase.extend({
+  proposalId: z.string().optional(),
+  appliedScope: PlanAdjustmentScope.optional(),
+});
+
+export const RejectPlanAdjustmentToolRequest = ToolCallBase.extend({
+  tool: z.literal("reject_plan_adjustment"),
+});
+
+export const RejectPlanAdjustmentToolResult = ToolResultBase.extend({
+  proposalId: z.string().optional(),
+});
+
 export const ExplainExerciseRequest = ToolCallBase.extend({
   tool: z.literal("explain_exercise"),
   exerciseName: z.string().min(1),
@@ -188,6 +213,8 @@ export const CoachToolRequest = z.discriminatedUnion("tool", [
   ReadRecentMetricsRequest,
   GeneratePlanRequest,
   AdaptPlanRequest,
+  AcceptPlanAdjustmentToolRequest,
+  RejectPlanAdjustmentToolRequest,
   ExplainExerciseRequest,
   FlagRiskRequest,
   SummarizeProgressRequest,
@@ -199,6 +226,8 @@ export const CoachToolResult = z.union([
   ReadRecentMetricsResult,
   GeneratePlanResult,
   AdaptPlanResult,
+  AcceptPlanAdjustmentToolResult,
+  RejectPlanAdjustmentToolResult,
   ExplainExerciseResult,
   FlagRiskResult,
   SummarizeProgressResult,

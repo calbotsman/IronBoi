@@ -4,6 +4,7 @@ struct CoachView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var voiceInput = VoiceInputEngine()
     @State private var draft = ""
+    @FocusState private var composerFocused: Bool
     @State private var showDeleteAccountConfirm = false
     @State private var showDeleteAccountFinalConfirm = false
 
@@ -211,6 +212,11 @@ struct CoachView: View {
                 }
                 .padding()
             }
+            // Keyboard dismissal: drag the conversation down (iMessage-style)
+            // or tap anywhere in the message list. Without these the keyboard
+            // has NO way to close — the TextField never resigns focus.
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
             .onChange(of: appModel.messages) { _, messages in
                 guard let last = messages.last else { return }
                 withAnimation(MyoTheme.Motion.fade) {
@@ -226,6 +232,7 @@ struct CoachView: View {
             TextField("Ask Coach...", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
+                .focused($composerFocused)
                 .disabled(appModel.isSending)
 
             Button {
