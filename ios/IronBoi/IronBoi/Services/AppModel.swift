@@ -264,6 +264,9 @@ final class AppModel: NSObject, ObservableObject {
                 "startedAt": now,
                 "toolCallIds": [],
                 "structuredAnswer": structuredAnswer ?? [:],
+                // Local calendar date — a chat-driven "yes, just today" keys
+                // its override to the user's day, not the server timezone.
+                "clientDate": Self.currentDateISO(),
             ])
         } catch {
             errorMessage = error.localizedDescription

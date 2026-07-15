@@ -36,7 +36,14 @@ service cloud.firestore {
     }
 
     function ownerDecisionOnly() {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["decision", "decidedAt"]);
+      // Only the decision fields may change, only FROM pending, and only to
+      // the two user-decidable outcomes. Without the value constraints a
+      // client could write decision:"pending" to resurrect a superseded or
+      // rejected proposal — which chat-accept ("latest pending") or the card
+      // would then happily apply. Terminal states stay terminal.
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["decision", "decidedAt"])
+        && resource.data.decision == "pending"
+        && request.resource.data.decision in ["accepted", "rejected"];
     }
 
     match /users/{userId} {

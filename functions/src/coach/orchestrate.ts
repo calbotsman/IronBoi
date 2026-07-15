@@ -20,6 +20,7 @@ import {
   type SafetyVerdict,
 } from "./safety.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
+import { findLatestPendingProposal } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
@@ -42,6 +43,9 @@ type OrchestrateCoachTurnArgs = {
   messageId: string;
   turnId: string;
   userContent: string;
+  // Local calendar date (YYYY-MM-DD) the client stamped on the triggering
+  // message, if any — used to key today-scope overrides to the user's day.
+  clientDate?: string;
   geminiApiKey?: string;
 };
 
@@ -70,6 +74,7 @@ export async function orchestrateCoachTurn({
   messageId,
   turnId,
   userContent,
+  clientDate,
   geminiApiKey,
 }: OrchestrateCoachTurnArgs) {
   const assistantMessageId = `${messageId}_coach`;
@@ -115,6 +120,13 @@ export async function orchestrateCoachTurn({
     sourceMessageId: messageId,
     serverCreatedAt: FieldValue.serverTimestamp(),
   });
+
+  // Set when a chat-driven accept ACTUALLY mutated the plan this turn.
+  // If the turn then dies (timeout, error) or postflight blocks the reply,
+  // the user must still be told their approved change WAS applied —
+  // otherwise the Train tab changes with no explanation, or worse, a
+  // refusal message implies it didn't.
+  let appliedPlanChange = false;
 
   try {
     const usageCap = await checkDailyUsageCap(db, userId);
@@ -201,14 +213,27 @@ export async function orchestrateCoachTurn({
       modelAbort.abort();
     }, COACH_MODEL_TIMEOUT_MS);
 
-    const toolRegistry = toolLoopEnabled ? buildCoachToolRegistry(db) : undefined;
+    // Turn boundary for chat-driven accepts: snapshot which pending proposal
+    // exists BEFORE the model runs. accept_plan_adjustment may only decide
+    // that proposal — one the model creates mid-turn via adapt_plan is not
+    // acceptable until the user has seen it and replied in a later message.
+    const latestPendingProposalId = toolLoopEnabled
+      ? ((await findLatestPendingProposal(db, userId))?.docId ?? null)
+      : null;
+    const toolRegistry = toolLoopEnabled
+      ? buildCoachToolRegistry(db, { latestPendingProposalId, clientDate })
+      : undefined;
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
       ? async (toolName, toolArgs) => {
           try {
             const toolResult = await executeTool(toolRegistry, toolName, toolArgs, {
               authenticatedUserId: userId,
             });
-            return toolResult as Record<string, unknown>;
+            const record = toolResult as Record<string, unknown>;
+            if (toolName === "accept_plan_adjustment" && record.ok === true) {
+              appliedPlanChange = true;
+            }
+            return record;
           } catch (error) {
             // An identity-shaped arg from the model is a SECURITY event
             // (either a probing model or successful prompt injection), not
@@ -265,7 +290,9 @@ export async function orchestrateCoachTurn({
       const refusal = refusalForVerdict(postflight);
       await assistantRef.set(
         {
-          content: refusal.content,
+          content: appliedPlanChange
+            ? `${refusal.content}\n\n(Your approved plan change was applied before this — check the Train tab.)`
+            : refusal.content,
           status: "blocked",
           riskLevel: "blocked",
           requiredUserAction: refusal.requiredUserAction,
@@ -327,11 +354,14 @@ export async function orchestrateCoachTurn({
       errorCode,
       errorDetail: error instanceof Error ? error.message.slice(0, 300) : "unknown_error",
     });
+    const baseErrorContent = aborted
+      ? "That reply took longer than I have to think. Your message is saved — try again or send a shorter version."
+      : "I'm having trouble right now. Your message is saved, but I need you to try again in a moment.";
     await assistantRef.set(
       {
-        content: aborted
-          ? "That reply took longer than I have to think. Your message is saved — try again or send a shorter version."
-          : "I'm having trouble right now. Your message is saved, but I need you to try again in a moment.",
+        content: appliedPlanChange
+          ? `${baseErrorContent}\n\n(Your approved plan change WAS applied — check the Train tab.)`
+          : baseErrorContent,
         status: "error",
         errorCode,
         serverCompletedAt: FieldValue.serverTimestamp(),

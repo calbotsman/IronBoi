@@ -90,6 +90,10 @@ export const PlanAdjustmentDecision = z.enum([
   "accepted",
   "rejected",
   "edited",
+  // A newer proposal replaced this one before it was decided — happens when
+  // the user asks the coach to revise ("make it lighter instead") and the
+  // coach proposes again. Superseded proposals are terminal, like rejected.
+  "superseded",
 ]);
 
 // How far an accepted plan-adjustment patch reaches:

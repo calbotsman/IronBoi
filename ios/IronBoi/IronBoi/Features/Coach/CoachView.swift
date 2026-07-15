@@ -4,6 +4,7 @@ struct CoachView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var voiceInput = VoiceInputEngine()
     @State private var draft = ""
+    @FocusState private var composerFocused: Bool
     @State private var showDeleteAccountConfirm = false
     @State private var showDeleteAccountFinalConfirm = false
 
@@ -92,6 +93,7 @@ struct CoachView: View {
     private var protocolBar: some View {
         let lens = appModel.profile.preferences.coachingLens
         return Button {
+            composerFocused = false
             appModel.selectedTab = .you
         } label: {
             HStack(spacing: MyoTheme.Spacing.sm) {
@@ -211,8 +213,21 @@ struct CoachView: View {
                 }
                 .padding()
             }
+            // Keyboard dismissal: drag the conversation down (iMessage-style)
+            // or tap anywhere in the message list. Without these the keyboard
+            // has NO way to close — the TextField never resigns focus.
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
             .onChange(of: appModel.messages) { _, messages in
                 guard let last = messages.last else { return }
+                withAnimation(MyoTheme.Motion.fade) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
+            // Opening the keyboard shrinks the viewport — keep the newest
+            // message visible instead of letting it hide behind the keyboard.
+            .onChange(of: composerFocused) { _, focused in
+                guard focused, let last = appModel.messages.last else { return }
                 withAnimation(MyoTheme.Motion.fade) {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
@@ -223,10 +238,13 @@ struct CoachView: View {
 
     private var composer: some View {
         HStack(spacing: 10) {
+            // Deliberately NOT .disabled(isSending): disabling a focused field
+            // resigns first responder, dropping the keyboard after every send.
+            // Double-send is already prevented by the send button's guard.
             TextField("Ask Coach...", text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
-                .disabled(appModel.isSending)
+                .focused($composerFocused)
 
             Button {
                 voiceInput.toggle()

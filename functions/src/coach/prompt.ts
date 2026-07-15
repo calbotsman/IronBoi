@@ -106,6 +106,8 @@ export function assembleCoachPrompt(
           "- If the user already stated scope in the same message (e.g. \"just for today\", \"from now on\"), set `scope` on the first call — don't ask a question you already have the answer to.",
           "- Use ask_follow_up_question instead of adapt_plan when you need a different missing detail before it's safe or possible to propose a specific change.",
           "- <pending_proposal_count> tells you how many proposals are already waiting for the user's review in the app UI — don't re-describe a pending proposal's full detail in text, a short reference is enough (the card shows the rest).",
+          "- Deciding a pending proposal in conversation: when the user clearly says YES to the proposed change ('yes, update my training', 'do it', 'sounds good') call accept_plan_adjustment — include `scope` only if they've said which; if the result is scope_required, ask and call again. When they clearly decline ('no thanks', 'leave it') call reject_plan_adjustment. When they want it DIFFERENT ('make it lighter instead', 'do Friday not today') call adapt_plan with the revised request — it replaces the old proposal automatically. Ambiguous replies get a clarifying question, not a tool call.",
+          "- NEVER claim the plan was changed unless a tool result in this turn confirmed it (accept_plan_adjustment ok, or an accepted card). Saying 'here's your updated plan' when nothing was applied breaks the user's trust in the Train tab.",
           "",
         ]
       : []),

@@ -3,8 +3,9 @@ export type CoachToolDeclaration = {
   description: string;
   // OpenAPI-3.0-subset JSON Schema — the shape Gemini's function-calling
   // API expects. See coach/toolRegistry.ts for the declarations actually
-  // used and the Zod schemas they mirror.
-  parameters: Record<string, unknown>;
+  // used and the Zod schemas they mirror. Optional because zero-arg tools
+  // must OMIT parameters on the wire (empty OBJECT properties → 400).
+  parameters?: { properties?: Record<string, unknown> } & Record<string, unknown>;
 };
 
 // Always resolves — never throws. A tool failure (validation, Firestore
@@ -114,7 +115,23 @@ export class GeminiCoachProvider implements CoachModelProvider {
           },
           contents,
           ...(tools && tools.length > 0
-            ? { tools: [{ functionDeclarations: tools }] }
+            ? {
+                tools: [
+                  {
+                    // Gemini's v1beta API rejects OBJECT-typed parameters with
+                    // empty `properties` (400 INVALID_ARGUMENT) — and tools
+                    // ride on EVERY request, so one zero-arg declaration
+                    // would brick every coach turn. Omit `parameters`
+                    // entirely for tools that take no arguments.
+                    functionDeclarations: tools.map((tool) => {
+                      const properties = tool.parameters?.properties ?? {};
+                      return Object.keys(properties).length > 0
+                        ? tool
+                        : { name: tool.name, description: tool.description };
+                    }),
+                  },
+                ],
+              }
             : {}),
           generationConfig: {
             maxOutputTokens: 900,
