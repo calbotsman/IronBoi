@@ -234,10 +234,26 @@ private struct PlannedWorkoutDayCard: View {
                     .frame(width: 54)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(day.name)
-                            .font(.headline)
-                            .foregroundStyle(MyoTheme.Colors.ink)
-                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
+                            Text(day.name)
+                                .font(.headline)
+                                .foregroundStyle(MyoTheme.Colors.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if day.isAdjusted {
+                                // Coach-adjusted (temporary override) — the
+                                // red-pen accent matches the coach's voice
+                                // elsewhere in the app.
+                                Text("ADJUSTED")
+                                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                                    .kerning(0.5)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(MyoColor.redPen.opacity(0.12))
+                                    .foregroundStyle(MyoColor.redPen)
+                                    .clipShape(Capsule())
+                            }
+                        }
 
                         Text(summaryText)
                             .font(.subheadline)

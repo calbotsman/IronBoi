@@ -4,10 +4,12 @@ import type { CollectionReference, DocumentReference } from "firebase-admin/fire
 import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { z } from "zod";
 import { auth, db } from "./firebase.js";
 import { isCoachToolLoopEnabled, orchestrateCoachTurn } from "./coach/orchestrate.js";
+import { sweepCoachFollowUps } from "./followups/sweep.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
@@ -1286,5 +1288,18 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       clientDate: typeof data.clientDate === "string" ? data.clientDate : undefined,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
     });
+  },
+);
+
+// Recovery-arc delivery — see coach/followUps.ts for the sweep itself.
+export const dailyCoachFollowUps = onSchedule(
+  {
+    schedule: "every day 14:00",
+    timeZone: "America/New_York",
+    region: "us-central1",
+    retryCount: 1,
+  },
+  async () => {
+    await sweepCoachFollowUps(db);
   },
 );

@@ -95,6 +95,12 @@ export const USER_SCOPED = {
     write: { kind: "server_only" },
     contextRole: "internal",
   },
+  coachFollowUps: {
+    pathPattern: "users/{uid}/coachFollowUps/{followUpId}",
+    read: "owner",
+    write: { kind: "server_only" },
+    contextRole: "internal",
+  },
   dailyChecks: {
     pathPattern: "users/{uid}/dailyChecks/{date}",
     read: "owner",

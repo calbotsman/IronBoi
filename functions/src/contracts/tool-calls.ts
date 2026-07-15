@@ -110,6 +110,47 @@ export const AdaptPlanRequest = ToolCallBase.extend({
   // forward" — the tool result flags needsScopeConfirmation when this is
   // absent so the model asks before calling again with the answer.
   scope: PlanAdjustmentScope.optional(),
+  // Model-authored replacement days: concrete exercise substitutions (e.g.
+  // back-safe swaps) rather than the server's mechanical trim/skip patches.
+  // Hard-bounded: ≤7 days, ≤12 exercises/day, name ≤80 chars, ints/nonneg
+  // enforced by PlannedExercise. Server re-validates everything.
+  dayPatches: z
+    .array(
+      z.object({
+        dayKey: z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+        dayName: z.string().min(1).max(60),
+        replacementExercises: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(80),
+              sets: z.number().int().min(1).max(12),
+              reps: z.number().int().min(1).max(50),
+              weight: z.number().min(0).max(2000).default(0),
+            }).strict(),
+          )
+          .min(1)
+          .max(12),
+      }).strict(),
+    )
+    .min(1)
+    .max(7)
+    .optional(),
+  // Pain triage attestation — only meaningful for reason=pain_or_discomfort.
+  // The model must have ASKED the red-flag questions in a prior exchange and
+  // report what the user said. The server independently screens the text for
+  // severe markers; this attestation can lower risk only when that absolute
+  // screen also comes back clean.
+  painTriage: z
+    .object({
+      redFlagsAsked: z.literal(true),
+      userReportsSevere: z.boolean(),
+      description: z.string().min(1).max(200),
+    })
+    .strict()
+    .optional(),
+  // Suggested recovery window (days) before the coach checks back in.
+  // Clamped server-side to 3–14; defaults to 5 when omitted.
+  recoveryDays: z.number().int().min(1).max(30).optional(),
 });
 
 export const AdaptPlanResult = ToolResultBase.extend({
@@ -137,6 +178,14 @@ export const AcceptPlanAdjustmentToolResult = ToolResultBase.extend({
 
 export const RejectPlanAdjustmentToolRequest = ToolCallBase.extend({
   tool: z.literal("reject_plan_adjustment"),
+});
+
+// Ramp-back-up: removes future-dated dailyOverrides so the template shows
+// through again. Proposal-gated like every other mutation — this request
+// shape is what the model sends; the actual delete happens on accept.
+export const ClearPlanOverridesToolRequest = ToolCallBase.extend({
+  tool: z.literal("clear_plan_overrides"),
+  userNote: z.string().min(1).max(300),
 });
 
 export const RejectPlanAdjustmentToolResult = ToolResultBase.extend({
@@ -215,6 +264,7 @@ export const CoachToolRequest = z.discriminatedUnion("tool", [
   AdaptPlanRequest,
   AcceptPlanAdjustmentToolRequest,
   RejectPlanAdjustmentToolRequest,
+  ClearPlanOverridesToolRequest,
   ExplainExerciseRequest,
   FlagRiskRequest,
   SummarizeProgressRequest,

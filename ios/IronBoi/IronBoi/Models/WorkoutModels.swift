@@ -36,6 +36,10 @@ struct PlannedWorkoutDay: Equatable, Identifiable {
     let name: String
     let muscles: [String]
     let exercises: [PlannedExercise]
+    // True when this day's content comes from a dated dailyOverride (a
+    // temporary coach adjustment) rather than the repeating template —
+    // drives the ADJUSTED tag on the Train tab card.
+    var isAdjusted: Bool = false
 
     var totalSets: Int {
         exercises.reduce(0) { $0 + $1.sets }

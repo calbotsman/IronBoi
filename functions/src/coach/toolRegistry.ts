@@ -3,10 +3,12 @@ import {
   AcceptPlanAdjustmentToolRequest,
   AdaptPlanRequest,
   AskFollowUpQuestionRequest,
+  ClearPlanOverridesToolRequest,
   RejectPlanAdjustmentToolRequest,
 } from "../contracts/tool-calls.js";
 import {
   acceptLatestPlanAdjustmentFromChat,
+  createClearOverridesProposalFromTool,
   createPlanAdjustmentProposalFromTool,
   rejectLatestPlanAdjustmentFromChat,
 } from "../workouts/planAdjustments.js";
@@ -51,8 +53,54 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
         exerciseName: { type: "string" },
         scope: {
           type: "string",
-          enum: ["today", "going_forward"],
-          description: "Only set once the user has told you which they want.",
+          enum: ["today", "rest_of_week", "going_forward"],
+          description:
+            "Only set once the user has told you which they want. rest_of_week = the adjusted days apply this week only, then the plan reverts automatically.",
+        },
+        dayPatches: {
+          type: "array",
+          description:
+            "Concrete replacement content for each day you're adjusting — real exercises with sets/reps/weight, not placeholders. Use for substitutions (e.g. a back-safe week). Max 7 days.",
+          items: {
+            type: "object",
+            properties: {
+              dayKey: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+              dayName: { type: "string", description: "Short workout title, e.g. 'Back-safe pull'." },
+              replacementExercises: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    sets: { type: "integer" },
+                    reps: { type: "integer" },
+                    weight: { type: "number", description: "Pounds; 0 for bodyweight." },
+                  },
+                  required: ["name", "sets", "reps"],
+                },
+              },
+            },
+            required: ["dayKey", "dayName", "replacementExercises"],
+          },
+        },
+        painTriage: {
+          type: "object",
+          description:
+            "REQUIRED for pain_or_discomfort proposals to be appliable. Only set after you have ASKED the red-flag questions (sharp/shooting pain? numbness or tingling? pain radiating? recent trauma?) and the user answered. Never fabricate.",
+          properties: {
+            redFlagsAsked: { type: "boolean" },
+            userReportsSevere: { type: "boolean" },
+            description: {
+              type: "string",
+              description: "The user's own words about the pain, briefly.",
+            },
+          },
+          required: ["redFlagsAsked", "userReportsSevere", "description"],
+        },
+        recoveryDays: {
+          type: "integer",
+          description:
+            "For pain adjustments: days until you should check back in (3–14). Defaults to 5.",
         },
       },
       required: ["reason", "userNote"],
@@ -67,7 +115,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       properties: {
         scope: {
           type: "string",
-          enum: ["today", "going_forward"],
+          enum: ["today", "rest_of_week", "going_forward"],
           description: "Only if the user has said which they want.",
         },
       },
@@ -80,6 +128,21 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       "Dismiss the pending plan-change proposal. Call when the user declines it ('no thanks', 'leave my plan alone'). If they want something different instead, don't reject — call adapt_plan with the new request (it replaces the old proposal automatically).",
     // No parameters on purpose: Gemini 400s OBJECT schemas with empty
     // properties, so zero-arg tools omit the field (provider also guards).
+  },
+  {
+    name: "clear_plan_overrides",
+    description:
+      "Propose returning to the user's regular plan by removing temporary day adjustments (e.g. after an injury recovery window when the user says they feel better). Creates a review card / needs a yes like any other change.",
+    parameters: {
+      type: "object",
+      properties: {
+        userNote: {
+          type: "string",
+          description: "Why the plan is going back to normal, in the user's words.",
+        },
+      },
+      required: ["userNote"],
+    },
   },
   {
     name: "ask_follow_up_question",
@@ -116,6 +179,11 @@ const AcceptPlanAdjustmentArgs = AcceptPlanAdjustmentToolRequest.omit({
   tool: true,
 });
 const RejectPlanAdjustmentArgs = RejectPlanAdjustmentToolRequest.omit({
+  toolCallId: true,
+  requestedAt: true,
+  tool: true,
+});
+const ClearPlanOverridesArgs = ClearPlanOverridesToolRequest.omit({
   toolCallId: true,
   requestedAt: true,
   tool: true,
@@ -176,6 +244,23 @@ export function buildCoachToolRegistry(
         dayKey: parsed.data.dayKey,
         exerciseName: parsed.data.exerciseName,
         scope: parsed.data.scope,
+        dayPatches: parsed.data.dayPatches,
+        painTriage: parsed.data.painTriage,
+        recoveryDays: parsed.data.recoveryDays,
+      });
+      return { ok: true, ...result };
+    },
+    clear_plan_overrides: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      const parsed = ClearPlanOverridesArgs.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "clear_plan_overrides", parsed.error.issues);
+        return { ok: false, error: "invalid_clear_plan_overrides_args" };
+      }
+      const result = await createClearOverridesProposalFromTool({
+        db,
+        userId,
+        userNote: parsed.data.userNote,
       });
       return { ok: true, ...result };
     },

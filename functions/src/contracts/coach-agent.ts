@@ -101,13 +101,15 @@ export const PlanAdjustmentDecision = z.enum([
 //                    (dailyOverrides keyed by ISO date); the repeating
 //                    template is untouched, so the same weekday next week
 //                    is unaffected.
+//   rest_of_week   — the target days' remaining occurrences over the next
+//                    7 calendar days, written as date-keyed dailyOverrides.
+//                    They expire by date, so the plan reverts to the
+//                    template automatically — no week-rollover machinery.
 //   going_forward  — the target day in the template and every materialized
 //                    week of the program from the active week onward.
-// A "rest_of_week" tier was cut in review: until real week-rollover exists
-// (nothing advances activeWeekIndex yet), it would be indistinguishable
-// from going_forward. Reintroduce it together with the rollover job.
 export const PlanAdjustmentScope = z.enum([
   "today",
+  "rest_of_week",
   "going_forward",
 ]);
 
@@ -609,6 +611,7 @@ export const PlanAdjustmentProposal = z.object({
       "shorten_workout",
       "reschedule_day",
       "replace_day_focus",
+      "clear_overrides",
     ]),
     title: z.string().min(1),
     changes: z.array(z.string().min(1)).default([]),
@@ -618,13 +621,49 @@ export const PlanAdjustmentProposal = z.object({
     // a subset rather than swapping the whole day.
     removeExercises: z.array(z.string().min(1)).default([]),
     addExercises: z.array(PlannedExercise).default([]),
+    // Multi-day patch (model-authored substitutions, e.g. a back-safe
+    // week). When present it wins over the single-day fields above; each
+    // entry swaps that weekday's content wholesale. Bounded at the tool
+    // layer (≤7 days, ≤12 exercises/day) and re-validated here.
+    dayPatches: z
+      .array(
+        z.object({
+          dayKey: z.string().min(1),
+          replacementDay: PlannedWorkoutDay,
+        }).strict(),
+      )
+      .max(7)
+      .optional(),
+    // clear_overrides patches carry no day content — accept deletes all
+    // future-dated dailyOverrides so the template shows through again.
+    clearOverrides: z.boolean().optional(),
   }).strict(),
   sourceCorpusEntryIds: z.array(z.string()).default([]),
   safetyNotes: z.array(z.string()).default([]),
   requiresFollowUp: z.boolean().default(false),
+  // Days until the coach checks back in after this change is accepted
+  // (injury adjustments schedule a recovery re-check). Clamped 3–14.
+  recoveryDays: z.number().int().min(3).max(14).optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   createdAt: ISODateTime,
   decidedAt: ISODateTime.optional(),
+}).strict();
+
+// A scheduled coach check-in ("it's been 5 days since we eased off for
+// your back — feeling better?"). Written server-side when an injury
+// adjustment is accepted; a daily scheduled function delivers due ones as
+// coach messages and flips status to sent. Server-only collection.
+export const CoachFollowUp = z.object({
+  userId: z.string().min(1),
+  followUpId: z.string().min(1),
+  kind: z.enum(["injury_recheck"]),
+  // Plain-language context baked into the check-in message.
+  context: z.string().min(1).max(300),
+  proposalId: z.string().min(1),
+  dueAt: ISODateTime,
+  status: z.enum(["scheduled", "sent", "cancelled"]).default("scheduled"),
+  createdAt: ISODateTime,
+  sentAt: ISODateTime.optional(),
 }).strict();
 
 export const CoachSession = z.object({
@@ -690,6 +729,7 @@ export type CoachSession = z.infer<typeof CoachSession>;
 export type CoachResponse = z.infer<typeof CoachResponse>;
 export type ProgramProposal = z.infer<typeof ProgramProposal>;
 export type PlanAdjustmentProposal = z.infer<typeof PlanAdjustmentProposal>;
+export type CoachFollowUp = z.infer<typeof CoachFollowUp>;
 export type PlanAdjustmentScope = z.infer<typeof PlanAdjustmentScope>;
 export type ResearchCorpusEntry = z.infer<typeof ResearchCorpusEntry>;
 export type HealthSampleCategory = z.infer<typeof HealthSampleCategory>;

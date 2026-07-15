@@ -14,6 +14,7 @@ import {
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import {
+  coachFollowUpPath,
   memoryFactPath,
   planAdjustmentProposalPath,
   planAdjustmentProposalsCollectionPath,
@@ -124,6 +125,23 @@ const ADAPT_PLAN_REASON_TO_CATEGORY: Record<
   missed_session: "skip_or_reschedule",
 };
 
+export type ToolDayPatch = {
+  dayKey: string;
+  dayName: string;
+  replacementExercises: { name: string; sets: number; reps: number; weight: number }[];
+};
+
+export type PainTriage = {
+  redFlagsAsked: true;
+  userReportsSevere: boolean;
+  description: string;
+};
+
+const INJURY_SAFETY_NOTES = [
+  "Stop immediately if pain sharpens, radiates, or changes character.",
+  "This is training guidance, not medical advice — see a clinician if pain persists or worsens.",
+];
+
 export async function createPlanAdjustmentProposalFromTool(input: {
   db: Firestore;
   userId: string;
@@ -132,25 +150,83 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   dayKey?: string;
   exerciseName?: string;
   scope?: AdjustmentScope;
+  dayPatches?: ToolDayPatch[];
+  painTriage?: PainTriage;
+  recoveryDays?: number;
 }) {
   const category = ADAPT_PLAN_REASON_TO_CATEGORY[input.reason];
   const originalUserText = input.userNote?.trim() || `User requested a plan change (${input.reason}) via chat.`;
-  const riskLevel = riskForCategory(category, originalUserText);
+
+  // Risk resolution. For pain: the deterministic severe screen runs over
+  // BOTH the user note and the triage description and is absolute. Only
+  // when it comes back clean can a completed triage (red flags asked, user
+  // reports non-severe) lower injury risk to appliable.
+  const severeText = `${originalUserText} ${input.painTriage?.description ?? ""}`;
+  let riskLevel = riskForCategory(category, severeText);
   let requiresFollowUp = needsFollowUp(category, riskLevel);
+  let triageCleared = false;
+  if (
+    category === "injury_pain" &&
+    !hasSevereMarkers(severeText) &&
+    input.painTriage?.redFlagsAsked === true &&
+    input.painTriage.userReportsSevere === false &&
+    (input.dayPatches?.length ?? 0) > 0
+  ) {
+    // Triage-cleared, with a concrete modification to review: appliable.
+    riskLevel = "low";
+    requiresFollowUp = false;
+    triageCleared = true;
+  }
+
   const appliesTo = {
     planId: "current",
-    ...resolveAppliesToDayKey(category, input.dayKey),
+    ...resolveAppliesToDayKey(category, input.dayKey ?? input.dayPatches?.[0]?.dayKey),
     ...(input.exerciseName ? { exerciseName: input.exerciseName } : {}),
     ...(input.scope ? { scope: input.scope } : {}),
   };
 
   let targetDay: PlannedWorkoutDayType | undefined;
-  if (!requiresFollowUp && appliesTo.dayKey) {
+  if (!requiresFollowUp && appliesTo.dayKey && !input.dayPatches?.length) {
     targetDay = await loadPlanDay(input.db, input.userId, appliesTo.dayKey);
     if (category === "time_limit" && (targetDay?.exercises.length ?? 0) < 2) {
       requiresFollowUp = true;
     }
   }
+
+  // Model-authored multi-day patch: build the proposal content directly
+  // from the (Zod-validated, bounded) replacement days.
+  const dayPatchesForProposal = input.dayPatches?.length
+    ? input.dayPatches.map((patch) => ({
+        dayKey: patch.dayKey,
+        replacementDay: {
+          name: patch.dayName,
+          muscles: [],
+          exercises: patch.replacementExercises,
+        },
+      }))
+    : undefined;
+  const patchOverride = dayPatchesForProposal
+    ? {
+        type: "replace_day_focus" as const,
+        title: triageCleared
+          ? "Adjusted week — works around the reported pain"
+          : "Adjusted days",
+        changes: dayPatchesForProposal.map(
+          (patch) =>
+            `${patch.dayKey}: ${patch.replacementDay.name} (${patch.replacementDay.exercises.length} exercises)`,
+        ),
+        dayPatches: dayPatchesForProposal,
+      }
+    : undefined;
+  const summaryOverride = dayPatchesForProposal
+    ? `Adjusted plan for ${dayPatchesForProposal.map((patch) => patch.dayKey).join(", ")}${
+        triageCleared ? " to work around reported pain" : ""
+      }.`
+    : undefined;
+  const recoveryDays =
+    category === "injury_pain" && triageCleared
+      ? Math.min(14, Math.max(3, input.recoveryDays ?? 5))
+      : undefined;
 
   // An appliable proposal with no scope yet is a QUESTION, not a proposal —
   // the model is instructed to ask "just today, or going forward?" and call
@@ -180,6 +256,10 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     originalUserText,
     appliesTo,
     targetDay,
+    patchOverride,
+    summaryOverride,
+    extraSafetyNotes: triageCleared ? INJURY_SAFETY_NOTES : undefined,
+    recoveryDays,
   });
 
   // Revise flow: the new proposal replaces whatever pending one the user
@@ -199,6 +279,41 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     supersededCount: supersededProposalIds.length,
     needsScopeConfirmation: false,
   };
+}
+
+// Ramp-back-up proposal ("feeling better — bring the intensity back").
+// Accepting deletes all future-dated dailyOverrides so the template shows
+// through again. Low risk by construction: it restores the user's own
+// baseline plan, never invents new load.
+export async function createClearOverridesProposalFromTool(input: {
+  db: Firestore;
+  userId: string;
+  userNote: string;
+}) {
+  const persisted = await persistPlanAdjustmentProposal({
+    db: input.db,
+    userId: input.userId,
+    source: "coach_chat",
+    category: "other",
+    riskLevel: "low",
+    requiresFollowUp: false,
+    originalUserText: input.userNote.trim() || "Ramp back up to the regular plan.",
+    appliesTo: { planId: "current" },
+    targetDay: undefined,
+    patchOverride: {
+      type: "clear_overrides",
+      title: "Back to your regular plan",
+      changes: ["Remove the temporary adjustments and return to your normal programming."],
+      clearOverrides: true,
+    },
+    summaryOverride: "Restore the regular plan by clearing temporary day adjustments.",
+  });
+  const supersededProposalIds = await supersedePendingProposals(
+    input.db,
+    input.userId,
+    persisted.proposalId,
+  );
+  return { ...persisted, supersededCount: supersededProposalIds.length };
 }
 
 // The single most recent pending proposal — what the iOS card shows and
@@ -307,9 +422,12 @@ export async function acceptLatestPlanAdjustmentFromChat(
     isRecord(pending.appliesTo) ? pending.appliesTo.scope : undefined,
   );
   const effectiveScope = scope ?? (presetScope.success ? presetScope.data : undefined);
-  if (effectiveScope === undefined) {
+  const isClearOverrides =
+    isRecord(pending.proposedPlanPatch) && pending.proposedPlanPatch.type === "clear_overrides";
+  if (effectiveScope === undefined && !isClearOverrides) {
     // The user hasn't said how far this should reach — the model must ask
     // before accepting, exactly like the card's two-button picker.
+    // clear_overrides is scope-free by design (it deletes future overrides).
     return { ok: false as const, error: "scope_required", proposalId };
   }
   try {
@@ -382,6 +500,11 @@ async function persistPlanAdjustmentProposal(input: {
   appliesTo: { planId: string; dayKey?: string; exerciseName?: string; scope?: AdjustmentScope };
   targetDay: PlannedWorkoutDayType | undefined;
   structuredAnswer?: Record<string, unknown>;
+  // Tool-path extensions: model-authored patch content + injury metadata.
+  patchOverride?: Record<string, unknown>;
+  summaryOverride?: string;
+  extraSafetyNotes?: string[];
+  recoveryDays?: number;
 }) {
   const profileSnap = await input.db.doc(profilePath(input.userId)).get();
   const profile = profileSnap.exists ? profileSnap.data() ?? null : null;
@@ -402,13 +525,18 @@ async function persistPlanAdjustmentProposal(input: {
     category: input.category,
     riskLevel: input.riskLevel,
     originalUserText: input.originalUserText,
-    summary: summaryForCategory(input.category, input.appliesTo.exerciseName),
+    summary: input.summaryOverride ?? summaryForCategory(input.category, input.appliesTo.exerciseName),
     rationale: rationaleForCategory(input.category),
     appliesTo: input.appliesTo,
-    proposedPlanPatch: patchForCategory(input.category, input.requiresFollowUp, input.targetDay),
+    proposedPlanPatch:
+      input.patchOverride ?? patchForCategory(input.category, input.requiresFollowUp, input.targetDay),
     sourceCorpusEntryIds: retrievedCorpus.map((entry) => entry.entryId),
-    safetyNotes: safetyNotesForCategory(input.category, retrievedCorpus.flatMap((entry) => entry.safetyBoundaries)),
+    safetyNotes: [
+      ...(input.extraSafetyNotes ?? []),
+      ...safetyNotesForCategory(input.category, retrievedCorpus.flatMap((entry) => entry.safetyBoundaries)),
+    ].slice(0, 8),
     requiresFollowUp: input.requiresFollowUp,
+    ...(input.recoveryDays !== undefined ? { recoveryDays: input.recoveryDays } : {}),
     ...(input.structuredAnswer ? { structuredAnswer: input.structuredAnswer } : {}),
     createdAt: now,
   });
@@ -544,6 +672,25 @@ export async function acceptPlanAdjustmentProposal(
       { merge: true },
     );
 
+    // Injury adjustments schedule a recovery re-check: the daily follow-up
+    // function turns due docs into a coach message ("been 5 days — feeling
+    // better? want to ramp back up?").
+    if (proposal.recoveryDays !== undefined) {
+      const followUpId = `followup_${proposal.proposalId}`;
+      const dueAt = new Date(Date.now() + proposal.recoveryDays * 86_400_000).toISOString();
+      transaction.set(db.doc(coachFollowUpPath(userId, followUpId)), {
+        userId,
+        followUpId,
+        kind: "injury_recheck",
+        context: proposal.summary.slice(0, 300),
+        proposalId: proposal.proposalId,
+        dueAt,
+        status: "scheduled",
+        createdAt: serverDecidedAt,
+        serverCreatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
     // Record what changed and why, so a later coach turn can reference it
     // ("since we shortened Tuesday's session...") instead of re-asking.
     // Written `confirmed` (not `proposed`, unlike upsertMemoryFact's default
@@ -598,6 +745,7 @@ function parsePlanAdjustmentProposalDocument(data: FirebaseFirestore.DocumentDat
     sourceCorpusEntryIds: raw.sourceCorpusEntryIds,
     safetyNotes: raw.safetyNotes,
     requiresFollowUp: raw.requiresFollowUp,
+    recoveryDays: raw.recoveryDays,
     structuredAnswer: raw.structuredAnswer,
     createdAt: raw.createdAt,
     decidedAt: raw.decidedAt,
@@ -686,9 +834,72 @@ function planPatchForAcceptedProposal(
 ): { planPatch: Record<string, unknown>; programPatch?: Record<string, unknown> } {
   const days = isRecord(plan.days) ? plan.days : {};
   const today = clientDate ?? currentDateISO();
+
+  // Ramp-back-up: delete every override dated today or later so the
+  // template shows through again. Scope-independent by design.
+  if (proposal.proposedPlanPatch.type === "clear_overrides") {
+    const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const deleteMarkers = Object.fromEntries(
+      Object.keys(existing)
+        .filter((date) => date >= today)
+        .map((date) => [date, FieldValue.delete()]),
+    );
+    return { planPatch: { dailyOverrides: deleteMarkers } };
+  }
+
+  // Multi-day (model-authored) patches: one dated override per patched
+  // day's next occurrence within the coming 7 days. "today" and
+  // "rest_of_week" share this shape — a weekday occurs once per 7-day
+  // window, so per-day dated overrides ARE the rest-of-week semantics,
+  // and they expire by date (next week reverts to the template).
+  const contractDayPatches = proposal.proposedPlanPatch.dayPatches;
+  if (contractDayPatches && contractDayPatches.length > 0) {
+    if (scope === "going_forward") {
+      if (!program) {
+        throw new Error("training_program_not_loaded_for_cascade");
+      }
+      let nextDays = { ...days };
+      let weeks = program.weeks;
+      for (const patch of contractDayPatches) {
+        nextDays = { ...nextDays, [patch.dayKey]: patch.replacementDay };
+        weeks = patchProgramWeeks({ ...program, weeks }, patch.dayKey, patch.replacementDay).weeks;
+      }
+      return { planPatch: { days: nextDays }, programPatch: { weeks } };
+    }
+    const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const pruneMarkers = Object.fromEntries(
+      Object.keys(existing)
+        .filter((date) => date < today)
+        .map((date) => [date, FieldValue.delete()]),
+    );
+    const overrides = Object.fromEntries(
+      contractDayPatches.map((patch) => [
+        nextOccurrenceOfWeekday(patch.dayKey, today),
+        patch.replacementDay,
+      ]),
+    );
+    return { planPatch: { dailyOverrides: { ...pruneMarkers, ...overrides } } };
+  }
+
   const dayKey = proposal.appliesTo.dayKey ?? weekdayOfISODate(today);
   const currentDay = isRecord(days[dayKey]) ? (days[dayKey] as PlannedWorkoutDayType) : undefined;
   const patchedDay = computePatchedDay(proposal.proposedPlanPatch, currentDay);
+
+  // Single-day rest_of_week degenerates to the dated-override shape too:
+  // the day's next occurrence, expiring naturally.
+  if (scope === "rest_of_week") {
+    const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const pruneMarkers = Object.fromEntries(
+      Object.keys(existing)
+        .filter((date) => date < today)
+        .map((date) => [date, FieldValue.delete()]),
+    );
+    return {
+      planPatch: {
+        dailyOverrides: { ...pruneMarkers, [nextOccurrenceOfWeekday(dayKey, today)]: patchedDay },
+      },
+    };
+  }
 
   if (scope === "today") {
     // Key the override to the date of the proposal's TARGET day — its next
@@ -775,6 +986,7 @@ export function nextOccurrenceOfWeekday(dayKey: string, fromDate: string): strin
 
 const SCOPE_LABEL: Record<AdjustmentScope, string> = {
   today: "for that day only",
+  rest_of_week: "for the rest of this week",
   going_forward: "going forward",
 };
 
@@ -866,21 +1078,31 @@ function matchesAny(text: string, needles: string[]) {
   return needles.some((needle) => text.includes(needle));
 }
 
-function riskForCategory(category: AdjustmentCategory, content: string): AdjustmentRiskLevel {
+// The ABSOLUTE severe-symptom screen. Deterministic, server-side, and not
+// model-overridable: no triage attestation can clear a text that trips it.
+export function hasSevereMarkers(content: string): boolean {
   const text = content.toLowerCase();
-  if (
-    matchesAny(text, [
-      "chest pain",
-      "can't breathe",
-      "cannot breathe",
-      "faint",
-      "fainted",
-      "bleeding",
-      "numb",
-      "deformity",
-      "severe pain",
-    ])
-  ) {
+  return matchesAny(text, [
+    "chest pain",
+    "can't breathe",
+    "cannot breathe",
+    "faint",
+    "fainted",
+    "bleeding",
+    "numb",
+    "tingling",
+    "deformity",
+    "severe pain",
+    "sharp pain",
+    "shooting",
+    "radiating",
+    "can't move",
+    "cannot move",
+  ]);
+}
+
+function riskForCategory(category: AdjustmentCategory, content: string): AdjustmentRiskLevel {
+  if (hasSevereMarkers(content)) {
     return "high";
   }
   if (category === "injury_pain" || category === "pregnancy_postpartum") return "high";

@@ -465,21 +465,33 @@ struct PlanAdjustmentProposalCard: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
 
-                        HStack(spacing: 8) {
-                            Button {
-                                apply("today")
-                            } label: {
-                                Text(isApplying ? "Applying..." : justOnceButtonTitle)
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
+                        VStack(spacing: 8) {
+                            HStack(spacing: 8) {
+                                Button {
+                                    apply("today")
+                                } label: {
+                                    Text(isApplying ? "Applying..." : justOnceButtonTitle)
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isApplying)
+
+                                Button {
+                                    apply("rest_of_week")
+                                } label: {
+                                    Text(isApplying ? "Applying..." : "This week")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(isApplying)
                             }
-                            .buttonStyle(.bordered)
-                            .disabled(isApplying)
 
                             Button {
                                 apply("going_forward")
                             } label: {
-                                Text(isApplying ? "Applying..." : "Rest of plan")
+                                Text(isApplying ? "Applying..." : "Rest of plan (permanent)")
                                     .font(.subheadline.weight(.semibold))
                                     .frame(maxWidth: .infinity)
                             }
@@ -529,6 +541,8 @@ struct PlanAdjustmentProposalCard: View {
         switch proposal.scope {
         case "today":
             return "Apply to \(target) — that day only"
+        case "rest_of_week":
+            return "Apply — this week only"
         case "going_forward":
             return "Apply to \(target) — going forward"
         default:
@@ -548,9 +562,9 @@ struct PlanAdjustmentProposalCard: View {
 
     private var scopeQuestion: String {
         guard let dayKey = proposal.dayKey, dayKey != Self.currentDayKey() else {
-            return "Apply this to just today, or carry it forward?"
+            return "Just today, this week only, or permanently?"
         }
-        return "Apply this to just this \(dayKey), or carry it forward?"
+        return "Apply this to just this \(dayKey), this week, or permanently?"
     }
 
     private static func currentDayKey() -> String {
