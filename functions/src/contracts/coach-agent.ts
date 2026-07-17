@@ -470,6 +470,101 @@ export const DerivedHealthContext = z.object({
   updatedAt: ISODateTime,
 }).strict();
 
+// MYO progress layer (docs/plans/myo-progress-tracking-plan.md, slices 1-3).
+//
+// Derived doc at users/{uid}/derivedSummaries/progress_current — the single
+// fixed-window (42-day) rollup the coach and (later) the iOS Progress
+// surface read. Server-only write (see access/userScopedSchema.ts:
+// derivedSummaries is server_only); rebuilt by progress/store.ts from
+// workoutLogs + healthSamples + the plan/program + the profile.
+//
+// Conventions:
+//   - Weekly arrays are CHRONOLOGICAL (oldest bucket first), one entry per
+//     full 7-day bucket counting back from `computedAt`'s date — 6 buckets
+//     for the 42-day window, so there is never a partial week.
+//   - Series are capped (8 points, 5 lifts) to respect the prompt token
+//     budget; trend fields are computed from the FULL window before capping.
+//   - Sparse data degrades to empty arrays / omitted optionals, never NaN —
+//     z.number() rejects NaN, so a parse failure is the backstop.
+
+export const TrendDirection = z.enum(["up", "flat", "down"]);
+
+export const ProgressSeriesPoint = z.object({
+  date: z.string().date(),
+  value: z.number(),
+}).strict();
+
+export const BodyWeightPoint = z.object({
+  date: z.string().date(),
+  kg: z.number().positive(),
+}).strict();
+
+// Per-lift estimated-1RM trend. e1RM via the Epley formula
+// (loadKg × (1 + reps/30)) from the best set per session; bodyweight sets
+// (no loadKg) are excluded — reps-at-bodyweight is a different metric
+// (later slice). Lifts are the top 5 by session frequency in the window.
+export const ProgressLiftTrend = z.object({
+  exerciseName: z.string().min(1),
+  e1rmSeries: z.array(ProgressSeriesPoint).max(8),
+  // Percent change from the first to the last session e1RM in the window
+  // (computed before the series is capped to 8 points). 0 when fewer than
+  // two sessions exist.
+  trendPct: z.number(),
+}).strict();
+
+export const ProgressSummary = z.object({
+  userId: z.string().min(1),
+  computedAt: ISODateTime,
+  windowDays: z.literal(42),
+  adherence: z.object({
+    // plannedSessions = plan's non-empty training days per week × 6 buckets.
+    plannedSessions: z.number().int().nonnegative(),
+    completedSessions: z.number().int().nonnegative(),
+    // Per-bucket completed/planned, clamped to [0, 1]; zeros when no plan.
+    weeklyRate: z.array(z.number().min(0).max(1)).max(6),
+    // Consecutive buckets (newest backwards) meeting the plan's weekly
+    // training-day count. 0 when the plan has no training days.
+    streakWeeks: z.number().int().nonnegative(),
+  }).strict(),
+  volume: z.object({
+    // Σ reps × loadKg per bucket (each entry in a log's sets array is one
+    // set). Sets without both reps and loadKg contribute 0.
+    weeklyTotals: z.array(z.number().nonnegative()).max(6),
+    trend: TrendDirection,
+  }).strict(),
+  lifts: z.array(ProgressLiftTrend).max(5),
+  body: z.object({
+    // Daily-averaged weight points (HealthKit body_weight_kg samples +
+    // manual metricSnapshots), downsampled evenly to ≤8 points with the
+    // endpoints preserved.
+    weightSeries: z.array(BodyWeightPoint).max(8),
+    // Mean of the trailing 7 calendar days' points (falls back to the most
+    // recent point when the data is older than a week). Omitted with no data.
+    rollingAvgKg: z.number().positive().optional(),
+    // Least-squares slope over the full window's daily points, as percent of
+    // mean body weight per week. Omitted with <2 points.
+    trendPctPerWeek: z.number().optional(),
+    // Which way "good" points for THIS user's goal (profile.goals):
+    // fat_loss → down, muscle_gain → up, everything else → flat.
+    goalDirection: z.enum(["down", "up", "flat"]),
+    // Safe-band classification (docs/plans/myo-progress-tracking-plan.md
+    // §Safety). Loss faster than 1%/wk is UNSAFE under every goal → false.
+    // For a "down" goal the on-band range is additionally 0.25–1%/wk of
+    // loss, so a plateau reads false (off-target — the coach must check
+    // trendPctPerWeek to distinguish "too slow" from "too fast"; only
+    // too-fast is a safety caution). True when no trend is computable —
+    // absence of data is not evidence of an unsafe rate.
+    withinSafeBand: z.boolean(),
+  }).strict(),
+  // healthSamples-derived recovery trends — optional, not populated in
+  // slices 1-3 (defined so consumers can take the dependency now).
+  recovery: z.object({
+    hrvTrend: TrendDirection.optional(),
+    sleepConsistency: z.number().min(0).max(1).optional(),
+    restingHrTrend: TrendDirection.optional(),
+  }).strict().optional(),
+}).strict();
+
 // Phase 3 Task 3.4 — Audit log for sensitive writes.
 //
 // Records WHAT happened (eventType + actor) and WHEN, never WHAT VALUE. The
@@ -738,6 +833,11 @@ export type IngestHealthSampleInput = z.infer<typeof IngestHealthSampleInput>;
 export type IngestHealthSamplesRequest = z.infer<typeof IngestHealthSamplesRequest>;
 export type IngestHealthSamplesResult = z.infer<typeof IngestHealthSamplesResult>;
 export type DerivedHealthContext = z.infer<typeof DerivedHealthContext>;
+export type TrendDirection = z.infer<typeof TrendDirection>;
+export type ProgressSeriesPoint = z.infer<typeof ProgressSeriesPoint>;
+export type BodyWeightPoint = z.infer<typeof BodyWeightPoint>;
+export type ProgressLiftTrend = z.infer<typeof ProgressLiftTrend>;
+export type ProgressSummary = z.infer<typeof ProgressSummary>;
 export type AuditEventType = z.infer<typeof AuditEventType>;
 export type AuditActor = z.infer<typeof AuditActor>;
 export type AuditEvent = z.infer<typeof AuditEvent>;

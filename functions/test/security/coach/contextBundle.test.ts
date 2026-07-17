@@ -316,6 +316,122 @@ describe("coach context bundle", () => {
     expect(flagOff.system).not.toContain("<recent_plan_changes>");
   });
 
+  it("bundle_surfaces_progress_summary_and_the_prompt_tags_it_flag_on_only", () => {
+    const manyLifts = Array.from({ length: 6 }, (_, index) => ({
+      exerciseName: `Lift ${index}`,
+      e1rmSeries: Array.from({ length: 10 }, (_, point) => ({
+        date: `2026-07-${String(point + 1).padStart(2, "0")}`,
+        value: 100 + point,
+      })),
+      trendPct: 5,
+    }));
+
+    const bundle = buildCoachContextBundle(
+      {
+        profile: { ageYears: 30 },
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+        progressSummary: {
+          // Server-written doc still gets field-picked: neither the stored
+          // userId nor server sentinels may leak into the prompt payload.
+          userId: "attacker-user",
+          serverUpdatedAt: "sentinel-should-not-leak",
+          computedAt: "2026-07-16T12:00:00.000Z",
+          windowDays: 42,
+          adherence: {
+            plannedSessions: 18,
+            completedSessions: 11,
+            weeklyRate: [0, 0, 0.67, 1, 1, 1],
+            streakWeeks: 3,
+          },
+          volume: { weeklyTotals: [0, 0, 900, 2400, 2400, 2600], trend: "up" },
+          lifts: manyLifts,
+          body: {
+            weightSeries: [{ date: "2026-07-10", kg: 88 }],
+            rollingAvgKg: 87.85,
+            trendPctPerWeek: -0.44,
+            goalDirection: "down",
+            withinSafeBand: true,
+          },
+        },
+      },
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-07-16T12:00:00.000Z",
+      },
+    );
+
+    expect(bundle.progressSummary?.windowDays).toBe(42);
+    expect(bundle.progressSummary?.adherence?.streakWeeks).toBe(3);
+    expect(bundle.progressSummary?.body?.withinSafeBand).toBe(true);
+    // Token-budget caps are re-applied at the bundle boundary.
+    expect(bundle.progressSummary?.lifts).toHaveLength(5);
+    expect(bundle.progressSummary?.lifts?.[0].e1rmSeries).toHaveLength(8);
+    expect(JSON.stringify(bundle.progressSummary)).not.toContain("attacker-user");
+    expect(JSON.stringify(bundle.progressSummary)).not.toContain("sentinel-should-not-leak");
+
+    // Ships with the tool-loop feature bundle: tools on → tag + rules present…
+    const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi", {
+      toolsEnabled: true,
+    });
+    expect(userMessage).toContain("<progress_summary>");
+    expect(userMessage).toContain("withinSafeBand");
+    expect(system).toContain("<progress_summary>");
+    expect(system).toContain("never invent trends");
+    expect(system).toContain("a caution, never a win");
+
+    // …tools off → prompt byte-identical to the pre-feature build.
+    const flagOff = assembleCoachPrompt(coachConfig, bundle, "hi");
+    expect(flagOff.userMessage).not.toContain("<progress_summary>");
+    expect(flagOff.userMessage).not.toContain("withinSafeBand");
+    expect(flagOff.system).not.toContain("<progress_summary>");
+    expect(flagOff.system).not.toContain("never invent trends");
+  });
+
+  it("bundle_renders_progress_summary_null_when_absent_and_the_prompt_says_null", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: { ageYears: 30 },
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+        progressSummary: null,
+      },
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-07-16T12:00:00.000Z",
+      },
+    );
+
+    expect(bundle.progressSummary).toBeNull();
+    const { userMessage } = assembleCoachPrompt(coachConfig, bundle, "hi", {
+      toolsEnabled: true,
+    });
+    // The tag is still present with an explicit null so the model applies
+    // the "say the data isn't available" rule instead of guessing.
+    expect(userMessage).toContain("<progress_summary>null</progress_summary>");
+  });
+
+  it("bundle_defaults_progressSummary_to_null_for_legacy_contexts", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: null,
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+      } as never,
+      {
+        userId: "u",
+        sessionId: "s",
+        now: "2026-07-16T12:00:00.000Z",
+      },
+    );
+    expect(bundle.progressSummary).toBeNull();
+  });
+
   it("bundle_defaults_recentPlanChanges_to_empty_for_legacy_contexts", () => {
     const bundle = buildCoachContextBundle(
       {

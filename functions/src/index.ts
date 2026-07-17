@@ -10,6 +10,7 @@ import { z } from "zod";
 import { auth, db } from "./firebase.js";
 import { isCoachToolLoopEnabled, orchestrateCoachTurn } from "./coach/orchestrate.js";
 import { sweepCoachFollowUps } from "./followups/sweep.js";
+import { recomputeProgressSummaryIfStale } from "./progress/store.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
@@ -1302,6 +1303,37 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       clientDate: typeof data.clientDate === "string" ? data.clientDate : undefined,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
     });
+  },
+);
+
+// MYO progress layer — a finished session is the natural heartbeat for the
+// derived progress doc (users/{uid}/derivedSummaries/progress_current).
+// Debounce (≤1 rebuild/hour, keyed off the doc's computedAt) lives in
+// recomputeProgressSummaryIfStale so the emulator suite can exercise it
+// directly. retry:false + swallow-and-warn because the summary is derived
+// advisory context: the next log (or any later trigger) heals it, and a
+// rebuild failure must never look like a failed workout log to the platform.
+export const onWorkoutLogCreated = onDocumentCreated(
+  {
+    region: "us-central1",
+    document: "users/{userId}/workoutLogs/{sessionId}",
+    timeoutSeconds: 60,
+    maxInstances: 10,
+    retry: false,
+  },
+  async (event) => {
+    const { userId } = event.params;
+    try {
+      await recomputeProgressSummaryIfStale(db, userId);
+    } catch (error) {
+      safeLogger.warn("Progress summary recompute failed", {
+        event: "progress_summary_recompute_failed",
+        userId,
+        errorCode: error instanceof Error ? error.name : "unknown_error",
+        errorDetail:
+          error instanceof Error ? error.message.slice(0, 180) : "unknown_error",
+      });
+    }
   },
 );
 
