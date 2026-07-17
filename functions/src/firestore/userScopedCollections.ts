@@ -6,6 +6,7 @@ export const userScopedCollections = [
   "activeWorkout/current",
   "workoutSessions/test-session",
   "metricSnapshots/test-snapshot",
+  "derivedSummaries/progress_current",
   "memoryFacts/test-fact",
   "consentRecords/test-consent",
   "usage/2026-05-08",

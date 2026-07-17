@@ -109,3 +109,11 @@ export function healthSamplePath(userId: string, sampleHash: string) {
 export function healthContextSummaryPath(userId: string, date: string) {
   return `${userRoot(userId)}/derivedSummaries/healthContext_${date}`;
 }
+
+// Derived progress rollup over the trailing 42 days (ProgressSummary in
+// contracts/coach-agent.ts, built by progress/store.ts). Single fixed-window
+// doc per the progress plan — per-horizon docs (progress_90d, ...) only if a
+// real need appears.
+export function progressSummaryPath(userId: string) {
+  return `${userRoot(userId)}/derivedSummaries/progress_current`;
+}

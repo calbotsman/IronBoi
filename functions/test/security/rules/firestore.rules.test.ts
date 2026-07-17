@@ -307,6 +307,29 @@ describe("Firestore rules isolation", () => {
     );
   });
 
+  it("derivedSummaries_owner_can_read_but_not_write", async () => {
+    // The derived progress doc (progress/store.ts) is server-only: owner
+    // reads it for the (future) Progress surface, but any client write —
+    // including "fixing" their own numbers — must be denied.
+    await withAdminDb(async (admin) => {
+      await setDoc(doc(admin, `users/${USER_A}/derivedSummaries/progress_current`), {
+        userId: USER_A,
+        windowDays: 42,
+      });
+    });
+
+    const db = await authedDb(USER_A);
+    await assertSucceeds(
+      getDoc(doc(db, `users/${USER_A}/derivedSummaries/progress_current`)),
+    );
+    await assertFails(
+      setDoc(doc(db, `users/${USER_A}/derivedSummaries/progress_current`), {
+        userId: USER_A,
+        windowDays: 1,
+      }),
+    );
+  });
+
   it("workoutSessions_owner_can_read_but_not_write", async () => {
     await withAdminDb(async (admin) => {
       await setDoc(doc(admin, `users/${USER_A}/workoutSessions/s1`), {

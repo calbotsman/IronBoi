@@ -15,6 +15,20 @@
       ]
     },
     {
+      "collectionGroup": "healthSamples",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "category",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startDate",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "coachFollowUps",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

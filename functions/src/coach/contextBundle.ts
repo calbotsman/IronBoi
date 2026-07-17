@@ -24,6 +24,10 @@ export type CoachContextBundleV1 = {
   // Recently accepted plan-adjustment proposals — so the coach can
   // reference a past change instead of re-asking about it.
   recentPlanChanges: CoachContextPlanChange[];
+  // Compact projection of derivedSummaries/progress_current — the only
+  // numbers the coach may ground progress claims in. Null until the first
+  // rebuild has run (or when the read was gated off / failed).
+  progressSummary: CoachContextProgressSummary | null;
 };
 
 export type CoachContextMemoryFact = {
@@ -59,6 +63,38 @@ export type CoachContextPlanChange = {
   scope?: string;
   summary: string;
   decidedAt?: string;
+};
+
+// Mirrors the ProgressSummary contract minus userId (the bundle already
+// carries the authenticated userId; repeating it per-section is what the
+// attacker-user stripping tests exist to prevent). Values are re-capped
+// here (series ≤8, lifts ≤5) even though the builder already caps them —
+// the bundle is the token-budget boundary and must not trust doc contents.
+export type CoachContextProgressSummary = {
+  computedAt?: string;
+  windowDays?: number;
+  adherence?: {
+    plannedSessions?: number;
+    completedSessions?: number;
+    weeklyRate?: number[];
+    streakWeeks?: number;
+  };
+  volume?: {
+    weeklyTotals?: number[];
+    trend?: string;
+  };
+  lifts?: Array<{
+    exerciseName: string;
+    e1rmSeries: Array<{ date?: string; value?: number }>;
+    trendPct?: number;
+  }>;
+  body?: {
+    weightSeries?: Array<{ date?: string; kg?: number }>;
+    rollingAvgKg?: number;
+    trendPctPerWeek?: number;
+    goalDirection?: string;
+    withinSafeBand?: boolean;
+  };
 };
 
 const PROFILE_FIELDS = [
@@ -124,6 +160,10 @@ export function buildCoachContextBundle(
     recentPlanChanges: (context.recentPlanChanges ?? [])
       .map(planChangeForPrompt)
       .filter((change): change is CoachContextPlanChange => hasText(change.summary)),
+    // Defaults to null for callers/fixtures built before this field existed.
+    progressSummary: context.progressSummary
+      ? progressSummaryForPrompt(context.progressSummary)
+      : null,
   };
 }
 
@@ -202,6 +242,82 @@ function planChangeForPrompt(proposal: DocumentData): CoachContextPlanChange {
     summary: stringValue(proposal.summary, 300) ?? "",
     decidedAt: stringValue(proposal.decidedAt, 80),
   });
+}
+
+const MAX_PROGRESS_SERIES_POINTS = 8;
+const MAX_PROGRESS_LIFTS = 5;
+
+// Field-picks the derived progress doc into the compact prompt shape. The
+// doc is server-written and contract-validated at write time, but the
+// mapping still guards every read: server sentinels (serverUpdatedAt) are
+// dropped by the picking, and series are re-capped so a future contract
+// widening can't silently blow the token budget.
+function progressSummaryForPrompt(summary: DocumentData): CoachContextProgressSummary {
+  const adherence = isPlainObject(summary.adherence) ? summary.adherence : {};
+  const volume = isPlainObject(summary.volume) ? summary.volume : {};
+  const body = isPlainObject(summary.body) ? summary.body : {};
+  const lifts = Array.isArray(summary.lifts) ? summary.lifts : [];
+
+  return compactObject({
+    computedAt: stringValue(summary.computedAt, 80),
+    windowDays: numberValue(summary.windowDays),
+    adherence: compactObject({
+      plannedSessions: numberValue(adherence.plannedSessions),
+      completedSessions: numberValue(adherence.completedSessions),
+      weeklyRate: numberArray(adherence.weeklyRate),
+      streakWeeks: numberValue(adherence.streakWeeks),
+    }),
+    volume: compactObject({
+      weeklyTotals: numberArray(volume.weeklyTotals),
+      trend: stringValue(volume.trend, 20),
+    }),
+    lifts: lifts
+      .slice(0, MAX_PROGRESS_LIFTS)
+      .map((lift) => {
+        if (!isPlainObject(lift)) return null;
+        const exerciseName = stringValue(lift.exerciseName, 120);
+        if (!exerciseName) return null;
+        const series = Array.isArray(lift.e1rmSeries) ? lift.e1rmSeries : [];
+        return compactObject({
+          exerciseName,
+          e1rmSeries: series
+            .slice(-MAX_PROGRESS_SERIES_POINTS)
+            .filter(isPlainObject)
+            .map((point) =>
+              compactObject({
+                date: stringValue(point.date, 20),
+                value: numberValue(point.value),
+              }),
+            ),
+          trendPct: numberValue(lift.trendPct),
+        });
+      })
+      .filter((lift): lift is NonNullable<typeof lift> => lift !== null),
+    body: compactObject({
+      weightSeries: (Array.isArray(body.weightSeries) ? body.weightSeries : [])
+        .slice(-MAX_PROGRESS_SERIES_POINTS)
+        .filter(isPlainObject)
+        .map((point) =>
+          compactObject({
+            date: stringValue(point.date, 20),
+            kg: numberValue(point.kg),
+          }),
+        ),
+      rollingAvgKg: numberValue(body.rollingAvgKg),
+      trendPctPerWeek: numberValue(body.trendPctPerWeek),
+      goalDirection: stringValue(body.goalDirection, 20),
+      withinSafeBand:
+        typeof body.withinSafeBand === "boolean" ? body.withinSafeBand : undefined,
+    }),
+  }) as CoachContextProgressSummary;
+}
+
+function numberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const numbers = value
+    .map(numberValue)
+    .filter((entry): entry is number => entry !== undefined);
+  return numbers;
 }
 
 function safeRole(role: unknown): CoachContextMessage["role"] {

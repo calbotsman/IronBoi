@@ -1,5 +1,10 @@
 import type { DocumentData, Firestore } from "firebase-admin/firestore";
-import { coachSessionPath, profilePath, userRoot } from "../paths.js";
+import {
+  coachSessionPath,
+  profilePath,
+  progressSummaryPath,
+  userRoot,
+} from "../paths.js";
 
 export type CoachLoadedContext = {
   profile: DocumentData | null;
@@ -14,6 +19,10 @@ export type CoachLoadedContext = {
   // a past change ("since we shortened Tuesday's session...") instead of
   // re-asking. See workouts/planAdjustments.ts acceptPlanAdjustmentProposal.
   recentPlanChanges: DocumentData[];
+  // Derived progress rollup (derivedSummaries/progress_current, built by
+  // progress/store.ts). Null when the doc doesn't exist yet, the read
+  // failed, or the includeProgress option is off.
+  progressSummary: DocumentData | null;
 };
 
 // A fact is "confirmed-for-prompt" if either:
@@ -28,7 +37,7 @@ export async function loadCoachContext(
   db: Firestore,
   userId: string,
   sessionId: string,
-  options: { includePlanChanges?: boolean } = {},
+  options: { includePlanChanges?: boolean; includeProgress?: boolean } = {},
 ): Promise<CoachLoadedContext> {
   // The plan-change read needs a composite index (decision asc, decidedAt
   // desc). It's advisory context, never load-bearing — so it's (a) gated
@@ -46,7 +55,25 @@ export async function loadCoachContext(
         .catch(() => [] as DocumentData[])
     : Promise.resolve([] as DocumentData[]);
 
-  const [profileSnap, recentFactsSnap, recentLogsSnap, sessionHistorySnap, recentPlanChanges] =
+  // Derived progress rollup — same posture as the plan-change read: gated
+  // behind the tool-loop feature bundle, degraded to null on any failure
+  // (missing doc, read error) so progress can never take down a coach turn.
+  const progressSummaryPromise = options.includeProgress
+    ? db
+        .doc(progressSummaryPath(userId))
+        .get()
+        .then((snap) => (snap.exists ? snap.data() ?? null : null))
+        .catch(() => null)
+    : Promise.resolve(null);
+
+  const [
+    profileSnap,
+    recentFactsSnap,
+    recentLogsSnap,
+    sessionHistorySnap,
+    recentPlanChanges,
+    progressSummary,
+  ] =
     await Promise.all([
       db.doc(profilePath(userId)).get(),
       db
@@ -65,6 +92,7 @@ export async function loadCoachContext(
         .limit(40)
         .get(),
       recentPlanChangesPromise,
+      progressSummaryPromise,
     ]);
 
   const allFacts = recentFactsSnap.docs
@@ -83,5 +111,6 @@ export async function loadCoachContext(
     sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()),
     pendingProposalCount,
     recentPlanChanges,
+    progressSummary,
   };
 }
