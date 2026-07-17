@@ -96,6 +96,10 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       recoveryDays: 5,
+      // Pin the reference date (a Wednesday) — without it the rest_of_week
+      // kept-days filter uses the real wall clock and drops the Wed patch
+      // when the suite runs Thu–Sun (calendar time-bomb).
+      clientDate: "2026-07-15",
     });
 
     expect(created).toMatchObject({
@@ -152,6 +156,10 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       recoveryDays: 5,
+      // Pin the reference date (a Wednesday) — without it the rest_of_week
+      // kept-days filter uses the real wall clock and drops the Wed patch
+      // when the suite runs Thu–Sun (calendar time-bomb).
+      clientDate: "2026-07-15",
     });
 
     // 2026-07-15 is a Wednesday. Wed patch → same day; Fri patch → 07-17.
