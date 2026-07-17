@@ -55,34 +55,47 @@ import {
 import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { safeLogger } from "./logging/safeLogger.js";
 
-// Phase 3 Task 3.2 — App Check enforcement.
+// Phase 3 Task 3.2 — App Check enforcement (env-gated).
 //
-// Every callable function REQUIRES a valid App Check token from the
-// client. iOS clients vend tokens via AppAttestProvider (Release) or
-// AppCheckDebugProvider (Debug); the Firebase iOS SDK ships them in
-// the request automatically once configured. Requests without a token
-// or with a token Firebase can't verify get rejected at the platform
-// before our handler runs.
+// Enforcement is driven by IRONBOI_ENFORCE_APP_CHECK and defaults OFF.
+// It was disabled because it was the only thing enforced on the onCall
+// surface (the *Http endpoints never enforced it), so a Debug build whose
+// debug token wasn't registered had every callable — including profile
+// save — rejected with app:INVALID while auth was VALID. Auth still
+// protects every function. See docs/audits/myo-engineering-qa-2026-06-23.md.
 //
-// consumeAppCheckToken: true means each token is one-shot — the same
-// token can't be replayed. Costs a Firestore-side check; cheap.
+// TO FLIP IT ON (console prerequisites first — full steps in
+// docs/operations/appcheck-enable-runbook.md):
+//   1. Register the iOS app for App Attest in Firebase Console → App Check,
+//      and register developer debug tokens.
+//   2. Add IRONBOI_ENFORCE_APP_CHECK=true to functions/.env.<project>.
+//   3. Run a FULL `firebase deploy --only functions --project <project>`.
+// Never flip it per-service with `gcloud run services update` — one flag
+// gates every callable across all services; flipping one creates a
+// split-brain, and the next firebase deploy silently clobbers gcloud-set
+// env anyway (same rule as IRONBOI_COACH_TOOL_LOOP_ENABLED).
 //
-// HTTP endpoints (onRequest) are NOT yet covered. The PWA (Iron Lab)
-// may still be calling them and doesn't ship App Check tokens. Migrate
-// the PWA OR retire the HTTP endpoints, then flip enforcement on them
-// in a follow-up PR.
-export const CALLABLE_OPTS = {
-  region: "us-central1",
-  // App Check enforcement is OFF for now. It was the only thing enforced on
-  // the onCall surface (the *Http endpoints never enforced it), so a Debug
-  // build whose debug token isn't registered had every callable — including
-  // profile save — rejected with app:INVALID while auth was VALID. Auth still
-  // protects every function. RE-ENABLE this (with iOS App Attest configured +
-  // debug tokens registered) before the public App Store launch. See
-  // docs/audits/myo-engineering-qa-2026-06-23.md.
-  enforceAppCheck: false,
-  consumeAppCheckToken: false,
-} as const;
+// When enforced, every callable REQUIRES a valid App Check token: iOS vends
+// them via AppAttestProvider (Release) or AppCheckDebugProvider (Debug) and
+// the Firebase SDK ships them automatically. consumeAppCheckToken makes each
+// token one-shot (no replay).
+//
+// SCOPE CAVEAT: this gates the onCall surface only. The iOS app reaches the
+// backend almost entirely through the *Http onRequest endpoints (bearer
+// ID-token auth; the X-Firebase-AppCheck header it sends is never verified
+// server-side), so flipping this protects little by itself. Before public
+// launch, ALSO migrate the client off the *Http endpoints or add
+// getAppCheck().verifyToken(...) inside each onRequest handler.
+export function callableOpts(env: NodeJS.ProcessEnv = process.env) {
+  const enforced = env.IRONBOI_ENFORCE_APP_CHECK === "true";
+  return {
+    region: "us-central1",
+    enforceAppCheck: enforced,
+    consumeAppCheckToken: enforced,
+  } as const;
+}
+
+export const CALLABLE_OPTS = callableOpts();
 import {
   AcceptProgramProposalRequest,
   OnboardingAnswerRequest,
