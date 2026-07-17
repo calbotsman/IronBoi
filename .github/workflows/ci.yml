@@ -56,29 +56,19 @@ jobs:
         working-directory: functions
         run: npm run build
 
-      # ──────────────────────────────────────────────────────────────────────
-      # KNOWN EXCLUSION — test/security/static/appCheckEnforcement.test.ts
-      #
-      # That test asserts CALLABLE_OPTS.enforceAppCheck === true, but the code
-      # deliberately ships enforceAppCheck: false today (see the explanatory
-      # comment in functions/src). A separate in-flight App Check workstream
-      # owns flipping enforcement on properly. Until it lands, the test fails
-      # on main by design, so CI excludes that ONE file — in BOTH vitest
-      # invocations below (lint:security's static set includes it too).
-      #
-      # >>> RE-INCLUDE when the App Check workstream lands: delete the two
-      # >>> `--exclude test/security/static/appCheckEnforcement.test.ts` flags.
-      # ──────────────────────────────────────────────────────────────────────
+      # appCheckEnforcement.test.ts is INCLUDED: enforcement became env-gated
+      # (PR #5), the test pins the contract both ways, and the suite is fully
+      # green on main.
 
       - name: Static security lint (no emulator)
         working-directory: functions
-        run: npm run lint:security -- --exclude test/security/static/appCheckEnforcement.test.ts
+        run: npm run lint:security
 
       - name: Security suite (Firestore emulator)
         # Run from the repo root so firebase-tools picks up firebase.json.
         run: |
           npx firebase-tools emulators:exec --only firestore --project demo-ironboi-security \
-            "cd functions && npx vitest run test/security --exclude test/security/static/appCheckEnforcement.test.ts --fileParallelism=false"
+            "cd functions && npx vitest run test/security --fileParallelism=false"
 
   # Cheap ubuntu job that decides whether the expensive macOS job runs at all.
   changes:
