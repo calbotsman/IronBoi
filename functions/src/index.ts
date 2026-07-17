@@ -53,6 +53,7 @@ import {
   weekdayOfISODate,
 } from "./workouts/planAdjustments.js";
 import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
+import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
 
 // Phase 3 Task 3.2 — App Check enforcement.
@@ -1301,5 +1302,21 @@ export const dailyCoachFollowUps = onSchedule(
   },
   async () => {
     await sweepCoachFollowUps(db);
+  },
+);
+
+// Week rollover — see workouts/rollover.ts. Scheduled DAILY (shortly after
+// midnight ET) rather than weekly because users start programs on any
+// weekday, so every user's week boundary falls on a different calendar day;
+// programs already on the right week are a no-op read.
+export const weeklyProgramRollover = onSchedule(
+  {
+    schedule: "every day 00:30",
+    timeZone: "America/New_York",
+    region: "us-central1",
+    retryCount: 1,
+  },
+  async () => {
+    await rolloverTrainingPrograms(db);
   },
 );

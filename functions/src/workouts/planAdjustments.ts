@@ -1038,7 +1038,10 @@ function currentDayKey() {
   return weekday;
 }
 
-function currentDateISO() {
+// Exported for workouts/rollover.ts, which needs the same "server today"
+// definition so a scheduled rollover and a clientDate-less accept agree on
+// what date it is.
+export function currentDateISO() {
   // en-CA formats as YYYY-MM-DD, matching the ISO date keys dailyOverrides
   // and TrainingProgram.startDate use. Fallback only — clients that send
   // clientDate get their own local date instead.
