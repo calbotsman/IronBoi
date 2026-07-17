@@ -70,6 +70,15 @@ const CLEAN_TRIAGE = {
   description: "dull ache in lower back after yesterday, no other symptoms",
 };
 
+// Frozen "today" for every proposal creation in this suite. 2026-07-15 is a
+// Wednesday, so BOTH the Wed and Fri patches fall inside the same
+// rest-of-week window. Without pinning clientDate at CREATION time the
+// rest_of_week filter uses the real wall clock (clientDate ?? currentDateISO())
+// and silently drops patches depending on the day the suite runs — the Wed
+// patch disappears on any real-world Thu–Sun run. Matches the "2026-07-15"
+// already passed to acceptLatestPlanAdjustmentFromChat below.
+const TEST_TODAY = "2026-07-15";
+
 describe("injury triage → week rebuilder → recovery arc", () => {
   beforeAll(() => {
     app = getApps()[0] ?? initializeApp({ projectId: "demo-ironboi-security" });
@@ -96,10 +105,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       recoveryDays: 5,
-      // Pin the reference date (a Wednesday) — without it the rest_of_week
-      // kept-days filter uses the real wall clock and drops the Wed patch
-      // when the suite runs Thu–Sun (calendar time-bomb).
-      clientDate: "2026-07-15",
+      clientDate: TEST_TODAY,
     });
 
     expect(created).toMatchObject({
@@ -120,6 +126,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       scope: "rest_of_week",
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
+      clientDate: TEST_TODAY,
     });
 
     expect(created).toMatchObject({ riskLevel: "high", requiresFollowUp: true });
@@ -156,10 +163,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       recoveryDays: 5,
-      // Pin the reference date (a Wednesday) — without it the rest_of_week
-      // kept-days filter uses the real wall clock and drops the Wed patch
-      // when the suite runs Thu–Sun (calendar time-bomb).
-      clientDate: "2026-07-15",
+      clientDate: TEST_TODAY,
     });
 
     // 2026-07-15 is a Wednesday. Wed patch → same day; Fri patch → 07-17.
@@ -247,6 +251,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       scope: "rest_of_week",
       dayPatches: BACK_SAFE_PATCHES,
       rawUserText: "my back hurts, can we update this weeks workouts",
+      clientDate: TEST_TODAY,
     });
     expect(mislabeled).toMatchObject({ category: "injury_pain", riskLevel: "high" });
 
@@ -260,6 +265,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       rawUserText: "the pain is shooting down my leg",
+      clientDate: TEST_TODAY,
     });
     expect(severe).toMatchObject({ riskLevel: "high", requiresFollowUp: true });
   });
