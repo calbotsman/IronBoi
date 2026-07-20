@@ -115,6 +115,99 @@ describe("coach tool registry", () => {
     expect(result).toEqual({ ok: false, error: "invalid_adapt_plan_args" });
   });
 
+  it("locked pain proposal tells the model which fields were missing (self-correcting loop)", async () => {
+    const registry = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      rawUserText: "my back hurts, can we update this weeks workouts",
+    });
+    // Pain adapt_plan WITHOUT painTriage or dayPatches — the live E2E
+    // failure shape. Must persist high-risk AND explain itself so the
+    // model can re-call with the missing fields in the same turn.
+    const result = (await executeTool(
+      registry,
+      "adapt_plan",
+      { reason: "pain_or_discomfort", userNote: "back hurts", scope: "rest_of_week" },
+      { authenticatedUserId: USER_ID },
+    )) as Record<string, unknown>;
+
+    expect(result).toMatchObject({
+      ok: true,
+      category: "injury_pain",
+      riskLevel: "high",
+      proposalLocked: true,
+    });
+    expect(result.lockReason).toMatch(/painTriage/);
+    expect(result.lockReason).toMatch(/dayPatches/);
+    expect(result.lockReason).toMatch(/call adapt_plan again/);
+  });
+
+  it("locked pain proposal with severe raw text says do-not-retry instead", async () => {
+    const registry = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      rawUserText: "sharp pain shooting down my leg",
+    });
+    const result = (await executeTool(
+      registry,
+      "adapt_plan",
+      {
+        reason: "pain_or_discomfort",
+        userNote: "leg pain",
+        scope: "rest_of_week",
+        dayPatches: [
+          {
+            dayKey: "Fri",
+            dayName: "Easy core",
+            replacementExercises: [{ name: "Dead Bug", sets: 3, reps: 10, weight: 0 }],
+          },
+        ],
+        painTriage: {
+          redFlagsAsked: true,
+          userReportsSevere: false,
+          description: "says it is fine",
+        },
+      },
+      { authenticatedUserId: USER_ID },
+    )) as Record<string, unknown>;
+
+    expect(result).toMatchObject({ ok: true, riskLevel: "high", proposalLocked: true });
+    expect(result.lockReason).toMatch(/Do NOT retry/);
+    expect(result.lockReason).not.toMatch(/call adapt_plan again/);
+  });
+
+  it("triage-cleared pain proposal carries no lock fields", async () => {
+    const registry = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      rawUserText: "no sharp pain, no numbness, nothing radiating, just a dull ache",
+      clientDate: "2026-07-15",
+    });
+    const result = (await executeTool(
+      registry,
+      "adapt_plan",
+      {
+        reason: "pain_or_discomfort",
+        userNote: "dull ache in lower back",
+        scope: "rest_of_week",
+        dayPatches: [
+          {
+            dayKey: "Fri",
+            dayName: "Back-safe core",
+            replacementExercises: [{ name: "Bird Dog", sets: 3, reps: 10, weight: 0 }],
+          },
+        ],
+        painTriage: {
+          redFlagsAsked: true,
+          userReportsSevere: false,
+          description: "no sharp pain, no numbness, nothing radiating",
+        },
+      },
+      { authenticatedUserId: USER_ID },
+    )) as Record<string, unknown>;
+
+    expect(result).toMatchObject({ ok: true, riskLevel: "low", requiresFollowUp: false });
+    expect(result.proposalLocked).toBeUndefined();
+    expect(result.lockReason).toBeUndefined();
+  });
+
   it("ask_follow_up_question returns the rendered question", async () => {
     const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
     const result = await executeTool(
