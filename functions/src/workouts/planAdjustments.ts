@@ -1330,7 +1330,16 @@ const NEGATION_CLAUSE = new RegExp(
 //   clear — the recovery arc depends on them). so/too also deliberately
 //   excluded ("not so sharp anymore").
 const NEGATION_SHAPED_SEVERE =
-  /no (?:more )?feeling\b|lost (?:all )?(?:the )?feeling\b|zero feeling\b|no sensation\b|lost sensation\b|can'?t feel\b|(?:unable|not able|n'?t been able) to feel\b|(?:pop|pain\w*|numb\w*|tingl\w*|swell\w*|faint\w*)[^.,;\n]{0,12}like (?:this|that)\b|this chest pain\b|(?:pain\w*|hurts?|ach\w*) (?:this|that) (?:sharp|severe|intense|unbearable|excruciating|numb|swollen|faint)\b|(?:it|been|felt|feel|feels|being) this (?:sharp|severe|intense|unbearable|excruciating|numb|swollen|faint)\b|worst pain/;
+  /no (?:more )?feeling\b|lost (?:all )?(?:the )?feeling\b|zero feeling\b|no sensation\b|lost sensation\b|can'?t feel\b|(?:unable|not able|n'?t been able) to feel\b|\b(?:pop|pains?|numb(?:ness)?|tingling|swelling|faint(?:ing|ness)?)\b[^.,;\n]{0,24}like (?:this|that)\b|this chest pain\b|(?:pain\w*|hurts?|ach\w*) (?:this|that) (?:sharp|severe|intense|unbearable|excruciating|numb|swollen|faint)\b|(?:it|been|felt|feel|feels|being) this (?:numb|swollen|faint|unbearable|excruciating)\b|(?:pain\w*|hurts?|ach\w*|it)[^.,;\n]{0,16}(?:been|felt|feels?|being) this (?:sharp|severe|intense|unbearable|excruciating)\b|worst pain/;
+
+// A masked denial that CONTAINS a severe phrase and is immediately followed
+// by a report-continuation verb is a report resuming with a bare symptom
+// noun — "no numbness and chest pain IS back" — not a denial. The mask
+// keeps it locked instead of eating it. Denial lists never continue into
+// one of these verbs ("no numbness and tingling" just ends), so the only
+// cost is conservative ("no numbness or tingling is present" locks).
+const REPORT_CONTINUATION =
+  /^[^\S\n]*(?:is|was|has|came|got|started|returned|keeps?|won'?t|again)\b/;
 
 export function hasSevereMarkers(content: string): boolean {
   // iOS smart punctuation is on by default — normalize curly apostrophes so
@@ -1339,7 +1348,19 @@ export function hasSevereMarkers(content: string): boolean {
   if (NEGATION_SHAPED_SEVERE.test(lower)) {
     return true;
   }
-  const text = lower.replace(NEGATION_CLAUSE, " ");
+  let reLock = false;
+  const text = lower.replace(NEGATION_CLAUSE, (span, offset: number, whole: string) => {
+    if (
+      SEVERE_MARKER_PATTERNS.some((pattern) => pattern.test(span)) &&
+      REPORT_CONTINUATION.test(whole.slice(offset + span.length))
+    ) {
+      reLock = true;
+    }
+    return " ";
+  });
+  if (reLock) {
+    return true;
+  }
   return SEVERE_MARKER_PATTERNS.some((pattern) => pattern.test(text));
 }
 

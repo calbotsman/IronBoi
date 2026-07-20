@@ -61,6 +61,16 @@ const MUST_LOCK: string[] = [
   // Round-2 review: "able to feel" family + window-stop control.
   "haven't been able to feel my toes",
   "never noticed the numbness until my leg gave out",
+  // Round-3 review: bare-noun report resumption after and/or — a masked
+  // span containing a severe phrase followed by a continuation verb
+  // re-locks.
+  "no numbness and chest pain is back",
+  "no numbness and chest pain returned",
+  "no numbness and tingling has started in my left hand",
+  // Round-3 review: anaphoric gap widened for locative insertions.
+  "never felt sharp pain in my lower back like this",
+  // Round-3 review: pain-subject state-verb superlative control.
+  "the pain has never been this severe",
   // Plain severe reports (base patterns, no negation involved).
   "chest pain when I go hard",
   "the pain is shooting down my leg",
@@ -102,6 +112,13 @@ const MUST_CLEAR: string[] = [
   "I've never done a program this intense",
   "this severe workout split",
   "keep the programming that sharp",
+  // Round-3 review: anaphoric stems must be word-bounded real nouns.
+  "never hit numbers like this before",
+  "been painting like this all summer",
+  // Round-3 review: state-verb superlative must not lock positive-progress
+  // chat (sharp/severe/intense need a pain-ish subject).
+  "my workouts have never been this intense",
+  "my form has never been this sharp",
   // Innocent fitness vocabulary near the pattern space.
   "lower the numbers on squats",
   "can't move my Thursday session to Friday",
