@@ -137,6 +137,10 @@ struct ProgressSummaryModel: Equatable {
     let volumeTrend: String
     let lifts: [ProgressLift]
     let body: ProgressBody
+    // Server-templated per-lens framings (computeLensHighlights). Empty for
+    // docs written before the lens slice or when the lens is "none" — the
+    // protocol card hides on empty.
+    let lensHighlights: [ProgressLensHighlight]
 }
 
 struct ProgressAdherence: Equatable {
@@ -164,4 +168,11 @@ struct ProgressBody: Equatable {
     let trendPctPerWeek: Double?
     let goalDirection: String
     let withinSafeBand: Bool
+}
+
+struct ProgressLensHighlight: Equatable, Identifiable {
+    var id: String { metric }
+    let metric: String
+    let framing: String
+    let note: String
 }

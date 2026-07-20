@@ -864,6 +864,24 @@ final class AppModel: NSObject, ObservableObject {
             )
         }
 
+        // Optional on the contract: docs written before the lens slice have
+        // no field, and the builder omits it (never []) when there is
+        // nothing to frame — either way this parses to [] and the protocol
+        // card stays hidden.
+        let lensHighlights = (data["lensHighlights"] as? [[String: Any]] ?? [])
+            .prefix(3)
+            .compactMap { raw -> ProgressLensHighlight? in
+                guard let metric = raw["metric"] as? String,
+                      let framing = raw["framing"] as? String,
+                      !framing.isEmpty
+                else { return nil }
+                return ProgressLensHighlight(
+                    metric: metric,
+                    framing: framing,
+                    note: raw["note"] as? String ?? ""
+                )
+            }
+
         return ProgressSummaryModel(
             computedAt: data["computedAt"] as? String ?? "",
             adherence: ProgressAdherence(
@@ -881,7 +899,8 @@ final class AppModel: NSObject, ObservableObject {
                 trendPctPerWeek: Self.makeDouble(from: bodyRaw["trendPctPerWeek"]),
                 goalDirection: bodyRaw["goalDirection"] as? String ?? "flat",
                 withinSafeBand: bodyRaw["withinSafeBand"] as? Bool ?? true
-            )
+            ),
+            lensHighlights: lensHighlights
         )
     }
 

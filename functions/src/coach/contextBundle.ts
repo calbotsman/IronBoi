@@ -95,6 +95,10 @@ export type CoachContextProgressSummary = {
     goalDirection?: string;
     withinSafeBand?: boolean;
   };
+  // Server-templated lens framings (build.ts computeLensHighlights). Rides
+  // inside the same <progress_summary> tag; absent (not []) when the doc
+  // has none, so pre-slice-5 docs produce byte-identical prompts.
+  lensHighlights?: Array<{ metric: string; framing: string; note?: string }>;
 };
 
 const PROFILE_FIELDS = [
@@ -246,6 +250,7 @@ function planChangeForPrompt(proposal: DocumentData): CoachContextPlanChange {
 
 const MAX_PROGRESS_SERIES_POINTS = 8;
 const MAX_PROGRESS_LIFTS = 5;
+const MAX_PROGRESS_LENS_HIGHLIGHTS = 3;
 
 // Field-picks the derived progress doc into the compact prompt shape. The
 // doc is server-written and contract-validated at write time, but the
@@ -257,6 +262,24 @@ function progressSummaryForPrompt(summary: DocumentData): CoachContextProgressSu
   const volume = isPlainObject(summary.volume) ? summary.volume : {};
   const body = isPlainObject(summary.body) ? summary.body : {};
   const lifts = Array.isArray(summary.lifts) ? summary.lifts : [];
+
+  // Re-capped like every other section (≤3 entries, string caps mirroring
+  // the ProgressLensHighlight contract) so a widened doc can't blow the
+  // token budget. Entries missing metric or framing are dropped whole.
+  const lensHighlights = (Array.isArray(summary.lensHighlights) ? summary.lensHighlights : [])
+    .slice(0, MAX_PROGRESS_LENS_HIGHLIGHTS)
+    .map((highlight) => {
+      if (!isPlainObject(highlight)) return null;
+      const metric = stringValue(highlight.metric, 40);
+      const framing = stringValue(highlight.framing, 120);
+      if (!metric || !framing) return null;
+      return compactObject({
+        metric,
+        framing,
+        note: stringValue(highlight.note, 200),
+      });
+    })
+    .filter((highlight): highlight is NonNullable<typeof highlight> => highlight !== null);
 
   return compactObject({
     computedAt: stringValue(summary.computedAt, 80),
@@ -309,6 +332,9 @@ function progressSummaryForPrompt(summary: DocumentData): CoachContextProgressSu
       withinSafeBand:
         typeof body.withinSafeBand === "boolean" ? body.withinSafeBand : undefined,
     }),
+    // undefined (dropped by compactObject) when empty, so docs without
+    // highlights keep their pre-slice-5 prompt bytes.
+    lensHighlights: lensHighlights.length > 0 ? lensHighlights : undefined,
   }) as CoachContextProgressSummary;
 }
 

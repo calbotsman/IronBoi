@@ -512,6 +512,24 @@ export const ProgressLiftTrend = z.object({
   trendPct: z.number(),
 }).strict();
 
+// One lens-framed highlight — a server-templated string pair rendered
+// verbatim by the iOS "through your protocol's eyes" card and carried into
+// the coach's <progress_summary> context. Deterministic: the builder
+// (progress/build.ts computeLensHighlights) templates every framing/note
+// from numbers that exist in the same summary — no LLM call, no invented
+// trends. The coach-prompt lens guardrail applies verbatim: a protocol
+// shapes emphasis and explanation, never what is safe. In particular the
+// blueprint lens never surfaces supplements / biomarkers / age-reversal,
+// and the sims lens makes no cycle claims without (future, consent-gated)
+// cycle data.
+export const ProgressLensHighlight = z.object({
+  // Which computed metric the highlight frames, e.g. "consistency",
+  // "volume_trend", "top_lift_e1rm", "streak".
+  metric: z.string().min(1).max(40),
+  framing: z.string().min(1).max(120),
+  note: z.string().min(1).max(200),
+}).strict();
+
 export const ProgressSummary = z.object({
   userId: z.string().min(1),
   computedAt: ISODateTime,
@@ -561,6 +579,12 @@ export const ProgressSummary = z.object({
     sleepConsistency: z.number().min(0).max(1).optional(),
     restingHrTrend: TrendDirection.optional(),
   }).strict().optional(),
+  // Highlights framed per profile.preferences.coachingLens. OPTIONAL and
+  // NOT defaulted — persisted docs written before slice 5 must still parse,
+  // and the builder omits the field (never writes []) for lens "none" or
+  // when no data exists to frame, so consumers can gate rendering on
+  // presence alone.
+  lensHighlights: z.array(ProgressLensHighlight).max(3).optional(),
 }).strict();
 
 // Phase 3 Task 3.4 — Audit log for sensitive writes.
@@ -835,7 +859,9 @@ export type TrendDirection = z.infer<typeof TrendDirection>;
 export type ProgressSeriesPoint = z.infer<typeof ProgressSeriesPoint>;
 export type BodyWeightPoint = z.infer<typeof BodyWeightPoint>;
 export type ProgressLiftTrend = z.infer<typeof ProgressLiftTrend>;
+export type ProgressLensHighlight = z.infer<typeof ProgressLensHighlight>;
 export type ProgressSummary = z.infer<typeof ProgressSummary>;
+export type CoachingLens = z.infer<typeof CoachingLens>;
 export type AuditEventType = z.infer<typeof AuditEventType>;
 export type AuditActor = z.infer<typeof AuditActor>;
 export type AuditEvent = z.infer<typeof AuditEvent>;

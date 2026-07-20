@@ -409,3 +409,156 @@ describe("buildProgressSummary — sparse and malformed data", () => {
     expect(JSON.stringify(summary)).not.toContain("NaN");
   });
 });
+
+describe("buildProgressSummary — lens highlights (slice 5)", () => {
+  function lensProfile(lens: string) {
+    return {
+      goals: ["general_fitness"],
+      preferences: { coachingTone: "balanced", coachingLens: lens },
+    };
+  }
+
+  // Enough logs for a 1-week streak on the 3-day plan, plus a rising bench.
+  const trainingLogs = [
+    log("2026-06-27", [{ name: "Bench Press", sets: [{ reps: 5, loadKg: 100 }] }]),
+    log("2026-07-06", [{ name: "Bench Press", sets: [{ reps: 5, loadKg: 102.5 }] }]),
+    log("2026-07-10", [{ name: "Bench Press", sets: [{ reps: 5, loadKg: 105 }] }]),
+    log("2026-07-12", [{ name: "Bench Press", sets: [{ reps: 5, loadKg: 105 }] }]),
+    log("2026-07-14", [{ name: "Bench Press", sets: [{ reps: 5, loadKg: 105 }] }]),
+  ];
+
+  it("huberman leads with consistency and promises (never fakes) recovery signals", () => {
+    const summary = build({
+      logs: trainingLogs,
+      plan: threeDayPlan(),
+      profile: lensProfile("huberman"),
+    });
+
+    expect(summary.lensHighlights).toHaveLength(1);
+    const [highlight] = summary.lensHighlights ?? [];
+    expect(highlight.metric).toBe("consistency");
+    expect(highlight.framing).toContain("5 sessions in 6 weeks");
+    expect(highlight.framing).toContain("nervous system's best friend");
+    // recovery is unpopulated in slices 1-3: the note points at the future
+    // HealthKit connection instead of inventing an HRV/sleep reading.
+    expect(highlight.note).toContain("1-week streak");
+    expect(highlight.note).toContain("once HealthKit is connected");
+    expect(JSON.stringify(summary.lensHighlights)).not.toMatch(/HRV (is|was|trend(ed|ing))/i);
+  });
+
+  it("schoenfeld headlines the volume trend and the top lift's e1RM trend", () => {
+    const summary = build({
+      logs: trainingLogs,
+      plan: threeDayPlan(),
+      profile: lensProfile("schoenfeld"),
+    });
+
+    expect(summary.lensHighlights?.map((h) => h.metric)).toEqual([
+      "volume_trend",
+      "top_lift_e1rm",
+    ]);
+    const [volume, lift] = summary.lensHighlights ?? [];
+    // Training starts mid-window → halves trend reads up.
+    expect(volume.framing).toBe(
+      "Weekly working volume is trending up across the 6-week window",
+    );
+    expect(volume.note).toContain("Progressive overload is the signal that matters");
+    expect(volume.note).toContain("1575 kg"); // 3 sessions × (5 × 105) in the newest bucket
+    // (122.5 − 116.667) / 116.667 = 5% across the window, same as the lifts test.
+    expect(lift.framing).toBe("Bench Press e1RM up 5% over the 6-week window");
+    expect(lift.note).toContain("best set each session");
+  });
+
+  it("sims reframes adherence as readiness and makes NO cycle claims without data", () => {
+    const summary = build({
+      logs: trainingLogs,
+      plan: threeDayPlan(),
+      profile: lensProfile("sims"),
+    });
+
+    expect(summary.lensHighlights).toHaveLength(1);
+    const [highlight] = summary.lensHighlights ?? [];
+    expect(highlight.metric).toBe("readiness");
+    expect(highlight.framing).toContain("5 sessions logged in 6 weeks");
+    expect(highlight.note).toContain("only if you opt in");
+    // No cycle claim may exist before the consent-gated cycle-data slice.
+    expect(JSON.stringify(summary.lensHighlights)).not.toMatch(
+      /luteal|follicular|your cycle (is|was)|phase of your cycle/i,
+    );
+  });
+
+  it("blueprint frames streak + adherence as consistency over intensity, no biohacking", () => {
+    const summary = build({
+      logs: trainingLogs,
+      plan: threeDayPlan(),
+      profile: lensProfile("blueprint"),
+    });
+
+    expect(summary.lensHighlights).toHaveLength(1);
+    const [highlight] = summary.lensHighlights ?? [];
+    expect(highlight.metric).toBe("streak");
+    expect(highlight.framing).toBe(
+      "1-week streak, 5 of 18 planned sessions — consistency over intensity",
+    );
+    expect(highlight.note).toContain("The habit is the protocol");
+    // The prompt guardrail, enforced at the string level: never supplements,
+    // biomarkers, or age-reversal framing.
+    expect(JSON.stringify(summary.lensHighlights)).not.toMatch(
+      /supplement|biomarker|age.?reversal|epigenetic|blood ?panel/i,
+    );
+  });
+
+  it("blueprint defers to the safety caution when the loss rate is outside the band", () => {
+    const weeklyDates = [
+      "2026-06-05", "2026-06-12", "2026-06-19", "2026-06-26",
+      "2026-07-03", "2026-07-10", "2026-07-16",
+    ];
+    const kgs = [90, 88.8, 87.6, 86.4, 85.2, 84, 83]; // ~1.4%/wk loss
+    const summary = build({
+      logs: trainingLogs,
+      plan: threeDayPlan(),
+      healthSamples: weeklyDates.map((date, i) => weightSample(`${date}T08:00:00.000Z`, kgs[i])),
+      profile: { ...lensProfile("blueprint"), goals: ["fat_loss"] },
+    });
+
+    expect(summary.body.withinSafeBand).toBe(false);
+    const [highlight] = summary.lensHighlights ?? [];
+    expect(highlight.note).toContain("faster than the safe pace");
+    expect(highlight.note).not.toContain("The habit is the protocol");
+  });
+
+  it("omits the field for lens none and for unknown lens values", () => {
+    for (const lens of ["none", "keto-warrior"]) {
+      const summary = build({
+        logs: trainingLogs,
+        plan: threeDayPlan(),
+        profile: lensProfile(lens),
+      });
+      expect(summary.lensHighlights).toBeUndefined();
+      expect("lensHighlights" in summary).toBe(false);
+    }
+  });
+
+  it("degrades to an omitted field when there is no data to frame, for every lens", () => {
+    for (const lens of ["huberman", "schoenfeld", "sims", "blueprint"]) {
+      const summary = build({ profile: lensProfile(lens) });
+      expect(summary.lensHighlights).toBeUndefined();
+    }
+  });
+
+  it("clamps a pathological exercise name so the framing respects the contract cap", () => {
+    const longName = "Extremely Long Machine Name ".repeat(6).trim(); // > 120 chars
+    const summary = build({
+      logs: [
+        log("2026-07-06", [{ name: longName, sets: [{ reps: 5, loadKg: 50 }] }]),
+        log("2026-07-12", [{ name: longName, sets: [{ reps: 5, loadKg: 55 }] }]),
+      ],
+      profile: lensProfile("schoenfeld"),
+    });
+
+    // build() strict-parses, so getting here proves the ≤120 cap held.
+    const lift = summary.lensHighlights?.find((h) => h.metric === "top_lift_e1rm");
+    expect(lift?.framing.length).toBeLessThanOrEqual(120);
+    expect(lift?.framing).toContain(longName.slice(0, 40));
+  });
+});

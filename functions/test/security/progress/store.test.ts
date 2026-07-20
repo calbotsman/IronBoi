@@ -185,6 +185,34 @@ describe("progress summary storage", () => {
     expect(afterRecompute.data()?.adherence.completedSessions).toBe(4);
   });
 
+  it("writes lensHighlights only when the profile carries a coaching lens", async () => {
+    // The seeded fixture profile has no coachingLens → the field is omitted
+    // from the persisted doc, not written as [].
+    await writeProgressSummary(db, USER_ID, TODAY);
+    const bare = await db.doc(progressSummaryPath(USER_ID)).get();
+    expect(bare.data()).not.toHaveProperty("lensHighlights");
+
+    await db.doc(profilePath(USER_ID)).set({
+      ...baseProfile,
+      userId: USER_ID,
+      goals: ["fat_loss"],
+      preferences: { ...baseProfile.preferences, coachingLens: "schoenfeld" },
+    });
+    const summary = await writeProgressSummary(db, USER_ID, TODAY);
+    expect(summary.lensHighlights?.map((h) => h.metric)).toEqual([
+      "volume_trend",
+      "top_lift_e1rm",
+    ]);
+
+    // The persisted doc round-trips through the strict contract, sentinel
+    // field-picked off first (repo-wide gotcha).
+    const snap = await db.doc(progressSummaryPath(USER_ID)).get();
+    const { serverUpdatedAt, ...data } = snap.data() ?? {};
+    expect(serverUpdatedAt).toBeDefined();
+    const parsed = ProgressSummary.parse(data);
+    expect(parsed.lensHighlights?.[0].framing).toContain("Weekly working volume");
+  });
+
   it("recomputes immediately when no summary doc exists yet", async () => {
     const result = await recomputeProgressSummaryIfStale(db, USER_ID, TODAY);
     expect(result.recomputed).toBe(true);

@@ -223,6 +223,10 @@ private struct ProgressSection: View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
             MyoSectionLabel(text: "Progress — last 6 weeks")
 
+            if !summary.lensHighlights.isEmpty {
+                lensCard
+            }
+
             adherenceCard
 
             if !summary.lifts.isEmpty {
@@ -233,6 +237,38 @@ private struct ProgressSection: View {
                 weightCard
             }
         }
+    }
+
+    /// "Through your protocol's eyes" — the coaching-lens callout. Every
+    /// string is server-templated from computed numbers in
+    /// functions/src/progress/build.ts (computeLensHighlights); the app
+    /// renders them verbatim. Hidden entirely when the doc has no
+    /// lensHighlights (lens "none", pre-lens docs, or nothing to frame).
+    private var lensCard: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+            Text("Through your protocol's eyes")
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                .foregroundStyle(MyoColor.redPen)
+                .textCase(.uppercase)
+
+            ForEach(summary.lensHighlights) { highlight in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(highlight.framing)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(MyoColor.Text.primary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !highlight.note.isEmpty {
+                        Text(highlight.note)
+                            .myoStyle(.detail)
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(MyoTheme.Spacing.md)
+        .myoCard()
     }
 
     private var adherenceCard: some View {
