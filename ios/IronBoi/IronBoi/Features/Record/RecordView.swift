@@ -34,6 +34,10 @@ struct RecordView: View {
     private var content: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MyoTheme.Spacing.xl) {
+                if let summary = appModel.progressSummary {
+                    ProgressSection(summary: summary)
+                }
+
                 if !stamps.isEmpty {
                     VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
                         MyoSectionLabel(text: "Milestones")
@@ -207,3 +211,188 @@ private struct SessionCard: View {
     RecordView()
         .environmentObject(AppModel())
 }
+
+// MARK: - Progress section (server-computed trends; the app only renders)
+
+/// "Am I getting somewhere?" — adherence, strength trends, weight trend.
+/// Every number comes from derivedSummaries/progress_current; no math here.
+private struct ProgressSection: View {
+    let summary: ProgressSummaryModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            MyoSectionLabel(text: "Progress — last 6 weeks")
+
+            adherenceCard
+
+            if !summary.lifts.isEmpty {
+                liftsCard
+            }
+
+            if !summary.body.weightSeries.isEmpty {
+                weightCard
+            }
+        }
+    }
+
+    private var adherenceCard: some View {
+        HStack(alignment: .center, spacing: MyoTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Showing up")
+                    .myoStyle(.title)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                Text("\(summary.adherence.completedSessions) of \(summary.adherence.plannedSessions) planned sessions")
+                    .myoStyle(.numeric)
+                    .foregroundStyle(MyoColor.Text.secondary.color)
+                if summary.adherence.streakWeeks > 0 {
+                    Text("\(summary.adherence.streakWeeks)-week streak")
+                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(MyoColor.redPen)
+                        .textCase(.uppercase)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            WeeklyBars(rates: summary.adherence.weeklyRate)
+                .frame(width: 96, height: 44)
+                .accessibilityLabel("Weekly adherence over the last six weeks")
+        }
+        .padding(MyoTheme.Spacing.md)
+        .myoCard()
+    }
+
+    private var liftsCard: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+            Text("Strength")
+                .myoStyle(.title)
+                .foregroundStyle(MyoColor.Text.primary.color)
+
+            ForEach(summary.lifts) { lift in
+                HStack(spacing: MyoTheme.Spacing.md) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(lift.exerciseName)
+                            .myoStyle(.detail)
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                            .lineLimit(1)
+                        Text(trendLabel(lift.trendPct))
+                            .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(trendColor(lift.trendPct))
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Sparkline(points: lift.e1rmSeries.map(\.value))
+                        .stroke(trendColor(lift.trendPct), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        .frame(width: 96, height: 26)
+                        .accessibilityLabel("\(lift.exerciseName) strength trend")
+                }
+            }
+        }
+        .padding(MyoTheme.Spacing.md)
+        .myoCard()
+    }
+
+    private var weightCard: some View {
+        HStack(alignment: .center, spacing: MyoTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Body weight")
+                    .myoStyle(.title)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+
+                if let avg = summary.body.rollingAvgKg {
+                    Text("\(Self.pounds(avg)) lb this week")
+                        .myoStyle(.numeric)
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                }
+
+                if let trend = summary.body.trendPctPerWeek {
+                    Text(weightTrendLabel(trend))
+                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(summary.body.withinSafeBand ? MyoColor.Text.tertiary.color : MyoColor.State.danger.color)
+                }
+
+                if !summary.body.withinSafeBand {
+                    Label("Faster than a safe pace — worth a chat with Coach", systemImage: "exclamationmark.shield")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(MyoColor.State.danger.color)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Sparkline(points: summary.body.weightSeries.map(\.value))
+                .stroke(MyoColor.Text.secondary.color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                .frame(width: 96, height: 32)
+                .accessibilityLabel("Body weight trend")
+        }
+        .padding(MyoTheme.Spacing.md)
+        .myoCard()
+    }
+
+    private func trendLabel(_ pct: Double) -> String {
+        if abs(pct) < 0.5 { return "holding steady" }
+        let arrow = pct > 0 ? "▲" : "▼"
+        return "\(arrow) \(String(format: "%.0f", abs(pct)))% over 6 wks"
+    }
+
+    private func trendColor(_ pct: Double) -> Color {
+        if pct > 0.5 { return MyoColor.redPen }
+        return MyoColor.Text.secondary.color
+    }
+
+    private func weightTrendLabel(_ pctPerWeek: Double) -> String {
+        if abs(pctPerWeek) < 0.05 { return "holding steady" }
+        let direction = pctPerWeek < 0 ? "down" : "up"
+        return "\(direction) \(String(format: "%.1f", abs(pctPerWeek)))% / week"
+    }
+
+    private static func pounds(_ kg: Double) -> String {
+        String(format: "%.1f", kg * 2.20462)
+    }
+}
+
+/// Six thin vertical bars, one per week bucket, oldest → newest.
+private struct WeeklyBars: View {
+    let rates: [Double]
+
+    var body: some View {
+        GeometryReader { geo in
+            let count = max(rates.count, 1)
+            let barWidth = max(4, (geo.size.width - CGFloat(count - 1) * 4) / CGFloat(count))
+            HStack(alignment: .bottom, spacing: 4) {
+                ForEach(Array(rates.enumerated()), id: \.offset) { _, rate in
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(rate >= 0.999 ? MyoColor.redPen : MyoTheme.Colors.ink.opacity(0.35))
+                        .frame(width: barWidth, height: max(3, geo.size.height * CGFloat(rate)))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+    }
+}
+
+/// A minimal normalized polyline — pen on paper, no axes.
+private struct Sparkline: Shape {
+    let points: [Double]
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard points.count > 1,
+              let minValue = points.min(),
+              let maxValue = points.max()
+        else { return path }
+        let range = maxValue - minValue
+        let stepX = rect.width / CGFloat(points.count - 1)
+        for (index, value) in points.enumerated() {
+            let normalized = range > 0 ? (value - minValue) / range : 0.5
+            let point = CGPoint(
+                x: rect.minX + CGFloat(index) * stepX,
+                y: rect.maxY - CGFloat(normalized) * rect.height
+            )
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        return path
+    }
+}
+

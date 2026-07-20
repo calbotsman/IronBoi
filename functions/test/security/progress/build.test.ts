@@ -299,16 +299,17 @@ describe("buildProgressSummary — body weight & safe band", () => {
     expect(summary.body.withinSafeBand).toBe(false);
   });
 
-  it("reads a plateau under a fat-loss goal as off-band (too slow), not unsafe-fast", () => {
+  it("reads a plateau under a fat-loss goal as SAFE (off-target is not unsafe)", () => {
     const summary = build({
       healthSamples: weeklyDates.map((date) => weightSample(`${date}T08:00:00.000Z`, 90)),
       profile: fatLossProfile,
     });
 
     expect(summary.body.trendPctPerWeek).toBe(0);
-    // Off the 0.25–1%/wk loss band. The coach distinguishes "too slow" from
-    // "too fast" via trendPctPerWeek — only below -1%/wk is a safety caution.
-    expect(summary.body.withinSafeBand).toBe(false);
+    // Operator decision 2026-07-17: withinSafeBand is PURE safety — only
+    // loss faster than 1%/wk flags. "On track" is derived separately from
+    // trendPctPerWeek + goalDirection.
+    expect(summary.body.withinSafeBand).toBe(true);
   });
 
   it("treats slow gain under a muscle-gain goal as safe", () => {

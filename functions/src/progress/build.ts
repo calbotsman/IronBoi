@@ -374,20 +374,17 @@ function goalDirectionOf(profile: Loose | null): "down" | "up" | "flat" {
   return "flat";
 }
 
-// See the ProgressSummary contract comment for the exact semantics. In
-// short: loss faster than 1%/wk → false under every goal (safety); a "down"
-// goal additionally requires ≥0.25%/wk of loss to read on-band; no
-// computable trend → true (no evidence of an unsafe rate).
+// PURE SAFETY semantics (operator decision 2026-07-17): withinSafeBand is
+// false ONLY when weight is being lost faster than 1%/wk — the one rate
+// that's a caution under every goal. A fat-loss plateau is off-target, not
+// unsafe; consumers that care about "on track" derive it from
+// trendPctPerWeek + goalDirection instead of overloading this boolean.
 function classifyWithinSafeBand(
   trendPctPerWeek: number | null,
-  goalDirection: "down" | "up" | "flat",
+  _goalDirection: "down" | "up" | "flat",
 ): boolean {
   if (trendPctPerWeek === null) return true;
-  if (trendPctPerWeek < -MAX_SAFE_LOSS_PCT_PER_WEEK) return false;
-  if (goalDirection === "down") {
-    return trendPctPerWeek <= -MIN_ON_BAND_LOSS_PCT_PER_WEEK;
-  }
-  return true;
+  return trendPctPerWeek >= -MAX_SAFE_LOSS_PCT_PER_WEEK;
 }
 
 // Even-index downsampling that preserves both endpoints, so the capped
