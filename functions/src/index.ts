@@ -92,10 +92,17 @@ import { safeLogger } from "./logging/safeLogger.js";
 // until a retirement PR removes them after the migration soaks.
 export function callableOpts(env: NodeJS.ProcessEnv = process.env) {
   const enforced = env.IRONBOI_ENFORCE_APP_CHECK === "true";
+  // Consumption is a SEPARATE opt-in: one-shot tokens + the iOS SDK's
+  // cached-token reuse means high-frequency callable traffic (which the
+  // client migration makes the norm) would replay-reject every call after
+  // the first within a token lifetime. Only enable after the client adopts
+  // limited-use tokens (HTTPSCallableOptions(requireLimitedUseAppCheckTokens))
+  // — see docs/operations/appcheck-enable-runbook.md.
+  const consume = env.IRONBOI_CONSUME_APP_CHECK === "true";
   return {
     region: "us-central1",
     enforceAppCheck: enforced,
-    consumeAppCheckToken: enforced,
+    consumeAppCheckToken: enforced && consume,
   } as const;
 }
 
@@ -116,6 +123,28 @@ const require = createRequire(import.meta.url);
 const coach = require("./coach/ironboi-coach.v0.json") as CoachConfig;
 const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
+
+// Callable-surface twin of writeHttpHandlerError's ZodError branch: a
+// malformed payload must surface as invalid-argument (not opaque INTERNAL)
+// and leave the same operator log breadcrumb (issue paths, never values).
+function parseCallablePayload<T>(schema: { parse(input: unknown): T }, data: unknown, endpoint: string): T {
+  try {
+    return schema.parse(data ?? {});
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      safeLogger.warn("Callable rejected invalid request", {
+        event: "callable_invalid_request",
+        errorCode: endpoint,
+        errorDetail: error.issues
+          .slice(0, 5)
+          .map((issue) => `${issue.path.join(".")}:${issue.code}`)
+          .join(","),
+      });
+      throw new HttpsError("invalid-argument", "invalid_request");
+    }
+    throw error;
+  }
+}
 
 function requireUserId(auth?: { uid?: string }) {
   if (!auth?.uid) {
@@ -826,7 +855,7 @@ export const createCoachSession = onCall(
 // IosCoachMessageRequest and call the same handleSendCoachMessage.
 export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
-  const parsed = IosCoachMessageRequest.parse(request.data ?? {});
+  const parsed = parseCallablePayload(IosCoachMessageRequest, request.data, "sendCoachMessage");
   return handleSendCoachMessage(db, userId, parsed);
 });
 
@@ -865,7 +894,7 @@ export const sendCoachMessageHttp = onRequest(
 // parity audit found no callable existed for this endpoint.
 export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
-  const parsed = OnboardingAnswerRequest.parse(request.data ?? {});
+  const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
   return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
 });
 
@@ -874,7 +903,7 @@ export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
 // endpoint.
 export const acceptProgramProposal = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
-  const parsed = AcceptProgramProposalRequest.parse(request.data ?? {});
+  const parsed = parseCallablePayload(AcceptProgramProposalRequest, request.data, "acceptProgramProposal");
   return acceptProgramProposalCore(db, userId, parsed);
 });
 
@@ -886,7 +915,7 @@ export const acceptPlanAdjustmentProposal = onCall(
   CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
-    const parsed = AcceptPlanAdjustmentProposalRequest.parse(request.data ?? {});
+    const parsed = parseCallablePayload(AcceptPlanAdjustmentProposalRequest, request.data, "acceptPlanAdjustmentProposal");
     return acceptPlanAdjustmentProposalCore(db, userId, parsed);
   },
 );

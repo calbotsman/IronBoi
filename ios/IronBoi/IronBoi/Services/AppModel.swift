@@ -81,7 +81,13 @@ final class AppModel: NSObject, ObservableObject {
     // callFunction(_:idToken:data:) — flip this ONE line to roll back.
     // The *Http endpoints stay deployed until a retirement PR after the
     // callable migration has soaked.
-    private let useCallableFunctions = true
+    // Transport switch for the callable migration. DEFAULT FALSE until the
+    // invoker-IAM drift found by the live E2E run (PR #13: a subset of
+    // callable Cloud Run services return platform-level 401) is fixed and
+    // verified — flipping early would break reset/regenerate/delete flows.
+    // Flip to true + rebuild once `gh`/console confirms all callable
+    // services accept invocations.
+    private let useCallableFunctions = false
     // Same region + construction as deleteAccount always used.
     private lazy var callableFunctions = Functions.functions(region: "us-central1")
 
