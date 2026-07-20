@@ -10,6 +10,7 @@ import {
   acceptLatestPlanAdjustmentFromChat,
   createClearOverridesProposalFromTool,
   createPlanAdjustmentProposalFromTool,
+  hasSevereMarkers,
   rejectLatestPlanAdjustmentFromChat,
 } from "../workouts/planAdjustments.js";
 import { safeLogger } from "../logging/safeLogger.js";
@@ -88,7 +89,11 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
           description:
             "REQUIRED for pain_or_discomfort proposals to be appliable. Only set after you have ASKED the red-flag questions (sharp/shooting pain? numbness or tingling? pain radiating? recent trauma?) and the user answered. Never fabricate.",
           properties: {
-            redFlagsAsked: { type: "boolean" },
+            redFlagsAsked: {
+              type: "boolean",
+              description:
+                "Must be true — set only after you ACTUALLY asked the red-flag questions. If you haven't asked yet, omit painTriage entirely and ask them first.",
+            },
             userReportsSevere: { type: "boolean" },
             description: {
               type: "string",
@@ -238,6 +243,21 @@ export function buildCoachToolRegistry(
       const parsed = AdaptPlanArgs.safeParse(args);
       if (!parsed.success) {
         logToolValidationFailure(userId, "adapt_plan", parsed.error.issues);
+        // The declaration types redFlagsAsked as boolean but the contract is
+        // literal true — an honest "I haven't asked yet" attestation must get
+        // guidance, not a dead-end error (this handler exists to make the
+        // loop self-correcting).
+        const redFlagsNotAsked = parsed.error.issues.some(
+          (issue) =>
+            issue.path.join(".") === "painTriage.redFlagsAsked",
+        );
+        if (redFlagsNotAsked) {
+          return {
+            ok: false,
+            error: "invalid_adapt_plan_args",
+            hint: "If you haven't asked the red-flag questions yet, ask them first and call adapt_plan WITHOUT painTriage; attest redFlagsAsked:true only after actually asking.",
+          };
+        }
         return { ok: false, error: "invalid_adapt_plan_args" };
       }
       const result = await createPlanAdjustmentProposalFromTool({
@@ -280,6 +300,19 @@ export function buildCoachToolRegistry(
         result.category === "injury_pain" &&
         result.riskLevel === "high"
       ) {
+        // Severe screen first: when the ABSOLUTE screen (or a reported red
+        // flag) is what locked the proposal, no retry can ever make it
+        // appliable — promising one would burn tool rounds on a dead end.
+        // Same joined-text shape the risk resolution itself screens.
+        const severeLocked =
+          parsed.data.painTriage?.userReportsSevere === true ||
+          hasSevereMarkers(
+            [
+              parsed.data.userNote ?? "",
+              parsed.data.painTriage?.description ?? "",
+              context.rawUserText ?? "",
+            ].join(". "),
+          );
         const missing: string[] = [];
         if (!parsed.data.painTriage) {
           missing.push(
@@ -293,9 +326,10 @@ export function buildCoachToolRegistry(
           ok: true,
           ...result,
           proposalLocked: true,
-          lockReason: missing.length
-            ? `Proposal saved but HIGH RISK and NOT appliable — missing: ${missing.join("; ")}. If the user has ALREADY answered the red-flag questions and denied all red flags, call adapt_plan again NOW with the missing fields filled in — the new proposal replaces this one and becomes approvable. If they haven't answered yet, ask the red-flag questions first.`
-            : "Proposal saved but HIGH RISK — either the user's words contain a severe symptom marker or they reported a red flag. Do NOT retry; keep the reply brief and recommend a clinician.",
+          lockReason:
+            !severeLocked && missing.length
+              ? `Proposal saved but HIGH RISK and NOT appliable — missing: ${missing.join("; ")}. If the user has ALREADY answered the red-flag questions and denied all red flags, call adapt_plan again NOW with the missing fields filled in — the new proposal replaces this one and becomes approvable. If they haven't answered yet, ask the red-flag questions first.`
+              : "Proposal saved but HIGH RISK — either the user's words contain a severe symptom marker or they reported a red flag. Do NOT retry; keep the reply brief and recommend a clinician.",
         };
       }
       return { ok: true, ...result };

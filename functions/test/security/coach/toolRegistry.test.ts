@@ -174,6 +174,82 @@ describe("coach tool registry", () => {
     expect(result.lockReason).not.toMatch(/call adapt_plan again/);
   });
 
+  it("userReportsSevere=true fires do-not-retry even with all fields present", async () => {
+    const registry = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      rawUserText: "my back hurts",
+    });
+    const result = (await executeTool(
+      registry,
+      "adapt_plan",
+      {
+        reason: "pain_or_discomfort",
+        userNote: "back pain",
+        scope: "rest_of_week",
+        dayPatches: [
+          {
+            dayKey: "Fri",
+            dayName: "Easy core",
+            replacementExercises: [{ name: "Dead Bug", sets: 3, reps: 10, weight: 0 }],
+          },
+        ],
+        painTriage: {
+          redFlagsAsked: true,
+          userReportsSevere: true,
+          description: "user reports the pain is severe",
+        },
+      },
+      { authenticatedUserId: USER_ID },
+    )) as Record<string, unknown>;
+
+    expect(result).toMatchObject({ ok: true, riskLevel: "high", proposalLocked: true });
+    expect(result.lockReason).toMatch(/Do NOT retry/);
+  });
+
+  it("severe raw text + missing fields fires do-not-retry, never a retry promise", async () => {
+    // The absolute screen means no retry can EVER make this appliable — the
+    // lockReason must not promise one just because fields were missing.
+    const registry = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      rawUserText: "sharp pain shooting down my leg",
+    });
+    const result = (await executeTool(
+      registry,
+      "adapt_plan",
+      { reason: "pain_or_discomfort", userNote: "leg pain", scope: "rest_of_week" },
+      { authenticatedUserId: USER_ID },
+    )) as Record<string, unknown>;
+
+    expect(result).toMatchObject({ ok: true, riskLevel: "high", proposalLocked: true });
+    expect(result.lockReason).toMatch(/Do NOT retry/);
+    expect(result.lockReason).not.toMatch(/call adapt_plan again/);
+  });
+
+  it("redFlagsAsked:false gets a guided hint instead of a dead-end validation error", async () => {
+    const registry = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      rawUserText: "my back hurts",
+    });
+    const result = (await executeTool(
+      registry,
+      "adapt_plan",
+      {
+        reason: "pain_or_discomfort",
+        userNote: "back pain",
+        scope: "rest_of_week",
+        painTriage: {
+          redFlagsAsked: false,
+          userReportsSevere: false,
+          description: "haven't asked yet",
+        },
+      },
+      { authenticatedUserId: USER_ID },
+    )) as Record<string, unknown>;
+
+    expect(result).toMatchObject({ ok: false, error: "invalid_adapt_plan_args" });
+    expect(result.hint).toMatch(/ask them first/);
+  });
+
   it("triage-cleared pain proposal carries no lock fields", async () => {
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
