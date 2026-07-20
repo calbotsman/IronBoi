@@ -1289,23 +1289,42 @@ const SEVERE_MARKER_PATTERNS: RegExp[] = [
 // user answers triage questions is "no sharp pain, no numbness, nothing
 // radiating" — without masking, the symptom words inside those denials
 // tripped the screen and permanently locked every honestly-answered triage
-// at high risk (live E2E finding, 2026-07-20). The mask is deliberately
-// narrow — the negation word plus at most 4 following words, stopping at
-// any punctuation or contrast word — so a severe report AFTER a denial
-// ("no numbness but shooting pain down my leg", "no other symptoms. the
-// pain is shooting") keeps its severe phrase un-masked. Coordination
-// words (and/or) are NOT stoppers: "no numbness or tingling" is one
-// joint denial.
-const NEGATION_CLAUSE =
-  /\b(?:no|not|without|nothing|none|never|denies?|denied|don'?t|doesn'?t|didn'?t|haven'?t|hasn'?t|isn'?t|aren'?t|free of)\b(?:\s+(?!(?:but|however|though|except|yet)\b)[a-z'-]+){0,4}/gi;
+// at high risk (live E2E finding, 2026-07-20).
+//
+// The mask is NegEx-shaped: after a negation word it may consume ONLY
+// closed-class connectors, verbs of experiencing, and the symptom
+// vocabulary itself. Any other word ends the mask immediately — so
+// pseudo-negation intensifiers ("not gonna lie sharp pain", "nothing
+// helps the sharp pain", "without warning sharp pain") keep their severe
+// report un-masked, while arbitrarily long joint denials ("no numbness or
+// tingling or radiating pain", "haven't passed out or felt faint") mask
+// fully. The window never crosses newlines or punctuation, so a denial on
+// one line can't eat a report on the next ("no numbness\n- sharp pain").
+const NEGATION_WORD =
+  "(?:no|not|without|nothing|none|never|den(?:y|ies|ied|ying)|don'?t|doesn'?t|didn'?t|haven'?t|hasn'?t|isn'?t|aren'?t|free of)";
+const NEGATION_WINDOW_WORD =
+  "(?:or|and|any|of|the|that|this|these|those|a|an|anything|some|more|stuff|other|either|really|ever|even|at|all|in|on|my|to|had|have|has|having|been|felt|feel|feels|feeling|experienced?|experiencing|noticed?|noticing|getting|got|gotten|symptoms?|issues?|problems?|sharp|shooting|radiat\\w*|numb(?:ness)?|tingl\\w*|pins|needles|pains?|painful|swelling|swollen|bruising|bleeding|faint\\w*|dizz\\w*|severe|chest|deform\\w*|weakness|pop|popping|passed|blacked|out|breath\\w*)";
+const NEGATION_CLAUSE = new RegExp(
+  `\\b${NEGATION_WORD}\\b(?:[^\\S\\n]+${NEGATION_WINDOW_WORD}\\b)*`,
+  "gi",
+);
 
-// "no feeling in my leg" is itself a severe report, not a denial - the one
-// severe marker family that STARTS with a negation word. Screen it against
-// the raw text BEFORE masking so the negation pass cannot eat it.
-const NEGATION_SHAPED_SEVERE = /no feeling|lost feeling|can'?t feel/;
+// Severe reports that a negation mask could otherwise eat, screened against
+// the raw text BEFORE masking:
+// - "no feeling in my foot" / "lost all feeling" — severe reports that
+//   START with (or contain) a negation word. \bfeeling\b keeps the
+//   "no feelings either way" idiom from locking.
+// - "pain this sharp" superlatives — severity phrased THROUGH negation
+//   ("never felt pain this sharp"), where every window word is maskable.
+//   Deliberately excludes so/too ("not so sharp anymore" is an
+//   improvement report and must stay clear).
+const NEGATION_SHAPED_SEVERE =
+  /no (?:more )?feeling\b|lost (?:all )?(?:the )?feeling\b|zero feeling\b|no sensation\b|lost sensation\b|can'?t feel\b|(?:this|that) (?:sharp|severe|intense|unbearable|excruciating)\b|worst pain/;
 
 export function hasSevereMarkers(content: string): boolean {
-  const lower = content.toLowerCase();
+  // iOS smart punctuation is on by default — normalize curly apostrophes so
+  // "can’t feel" matches the same patterns as "can't feel".
+  const lower = content.toLowerCase().replace(/[‘’]/g, "'");
   if (NEGATION_SHAPED_SEVERE.test(lower)) {
     return true;
   }

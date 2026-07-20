@@ -107,11 +107,10 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       // next occurrence wraps past Sunday — a calendar time bomb that made
       // these tests fail once the suite ran later in the week than the
       // fixture dates. All assertions below assume Wed 2026-07-15.
-      clientDate: "2026-07-15",
+      clientDate: TEST_TODAY,
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       recoveryDays: 5,
-      clientDate: TEST_TODAY,
     });
 
     expect(created).toMatchObject({
@@ -130,7 +129,6 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       reason: "pain_or_discomfort",
       userNote: "shooting pain down my leg, adjust my week",
       scope: "rest_of_week",
-      clientDate: "2026-07-15",
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       clientDate: TEST_TODAY,
@@ -233,7 +231,6 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       reason: "pain_or_discomfort",
       userNote: "my back hurts, can we update this weeks workouts",
       scope: "rest_of_week",
-      clientDate: "2026-07-15",
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       recoveryDays: 5,
@@ -323,7 +320,6 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       reason: "schedule_change",
       userNote: "move some days around",
       scope: "rest_of_week",
-      clientDate: "2026-07-15",
       dayPatches: BACK_SAFE_PATCHES,
       rawUserText: "my back hurts, can we update this weeks workouts",
       clientDate: TEST_TODAY,
@@ -337,7 +333,6 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       reason: "pain_or_discomfort",
       userNote: "back is a bit tight",
       scope: "rest_of_week",
-      clientDate: "2026-07-15",
       dayPatches: BACK_SAFE_PATCHES,
       painTriage: CLEAN_TRIAGE,
       rawUserText: "the pain is shooting down my leg",
