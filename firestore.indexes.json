@@ -15,6 +15,20 @@
       ]
     },
     {
+      "collectionGroup": "planAdjustmentProposals",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        {
+          "fieldPath": "decision",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "healthSamples",
       "queryScope": "COLLECTION",
       "fields": [

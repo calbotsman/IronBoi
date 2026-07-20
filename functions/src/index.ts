@@ -50,6 +50,7 @@ import {
 import {
   AcceptPlanAdjustmentProposalRequest,
   acceptPlanAdjustmentProposal,
+  expireStalePendingProposals,
   maybeCreatePlanAdjustmentProposal,
   weekdayOfISODate,
 } from "./workouts/planAdjustments.js";
@@ -1363,5 +1364,10 @@ export const weeklyProgramRollover = onSchedule(
   },
   async () => {
     await rolloverTrainingPrograms(db);
+    // Piggybacks on the same daily schedule (one scheduler, two sweeps —
+    // cheaper than a third onSchedule): retire pending plan-adjustment
+    // proposals older than 7 days. Both sweeps are idempotent, so the
+    // scheduler retry re-running the pair is safe.
+    await expireStalePendingProposals(db);
   },
 );

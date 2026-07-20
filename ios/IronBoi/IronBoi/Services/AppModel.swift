@@ -828,8 +828,15 @@ final class AppModel: NSObject, ObservableObject {
             .document(userId)
             .collection("derivedSummaries")
             .document("progress_current")
-            .addSnapshotListener { [weak self] snapshot, _ in
+            .addSnapshotListener { [weak self] snapshot, error in
                 Task { @MainActor in
+                    if let error {
+                        // Deliberately quieter than sibling listeners: progress is an
+                        // advisory surface, so a transient stream error keeps the
+                        // last-known summary and logs instead of raising errorMessage.
+                        NSLog("[IronBoi] Progress summary listener error: \(error.localizedDescription)")
+                        return
+                    }
                     guard let data = snapshot?.data() else {
                         self?.progressSummary = nil
                         return
