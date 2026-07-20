@@ -547,12 +547,10 @@ export const ProgressSummary = z.object({
     // Which way "good" points for THIS user's goal (profile.goals):
     // fat_loss → down, muscle_gain → up, everything else → flat.
     goalDirection: z.enum(["down", "up", "flat"]),
-    // Safe-band classification (docs/plans/myo-progress-tracking-plan.md
-    // §Safety). Loss faster than 1%/wk is UNSAFE under every goal → false.
-    // For a "down" goal the on-band range is additionally 0.25–1%/wk of
-    // loss, so a plateau reads false (off-target — the coach must check
-    // trendPctPerWeek to distinguish "too slow" from "too fast"; only
-    // too-fast is a safety caution). True when no trend is computable —
+    // PURE SAFETY flag: false only when weight loss exceeds 1%/wk — the
+    // rate that's a caution under every goal. A plateau under a fat-loss
+    // goal stays TRUE (off-target ≠ unsafe); derive "on track" from
+    // trendPctPerWeek + goalDirection. True when no trend is computable —
     // absence of data is not evidence of an unsafe rate.
     withinSafeBand: z.boolean(),
   }).strict(),

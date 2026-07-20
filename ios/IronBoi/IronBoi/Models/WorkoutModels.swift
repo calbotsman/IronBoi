@@ -125,3 +125,43 @@ struct FinishWorkoutResponse: Decodable {
     let ok: Bool
     let activeWorkout: ActiveWorkoutSession
 }
+
+// MARK: - Progress summary (derivedSummaries/progress_current)
+// Server-computed, read-only mirror of the backend ProgressSummary contract.
+// All math happens in functions/src/progress/build.ts — the app only renders.
+
+struct ProgressSummaryModel: Equatable {
+    let computedAt: String
+    let adherence: ProgressAdherence
+    let volumeWeeklyTotals: [Double]
+    let volumeTrend: String
+    let lifts: [ProgressLift]
+    let body: ProgressBody
+}
+
+struct ProgressAdherence: Equatable {
+    let plannedSessions: Int
+    let completedSessions: Int
+    let weeklyRate: [Double]
+    let streakWeeks: Int
+}
+
+struct ProgressLift: Equatable, Identifiable {
+    var id: String { exerciseName }
+    let exerciseName: String
+    let e1rmSeries: [ProgressPoint]
+    let trendPct: Double
+}
+
+struct ProgressPoint: Equatable {
+    let date: String
+    let value: Double
+}
+
+struct ProgressBody: Equatable {
+    let weightSeries: [ProgressPoint]
+    let rollingAvgKg: Double?
+    let trendPctPerWeek: Double?
+    let goalDirection: String
+    let withinSafeBand: Bool
+}

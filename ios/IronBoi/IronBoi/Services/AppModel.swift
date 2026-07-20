@@ -27,6 +27,7 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
     @Published private(set) var activeWorkout: ActiveWorkoutSession?
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
+    @Published private(set) var progressSummary: ProgressSummaryModel?
     @Published private(set) var profile: UserProfile = .empty
     @Published private(set) var isSending = false
     @Published private(set) var isOnboardingBusy = false
@@ -80,6 +81,7 @@ final class AppModel: NSObject, ObservableObject {
     private var workoutPlanListener: ListenerRegistration?
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
+    private var progressListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
     // bakes in "today's" dailyOverride) can be recomputed when the calendar
     // date changes without a server round-trip.
@@ -98,6 +100,7 @@ final class AppModel: NSObject, ObservableObject {
         workoutPlanListener?.remove()
         activeWorkoutListener?.remove()
         workoutLogListener?.remove()
+        progressListener?.remove()
     }
 
     func start() {
@@ -120,6 +123,7 @@ final class AppModel: NSObject, ObservableObject {
                 self.listenForCurrentWorkoutPlan(userId: user?.uid)
                 self.listenForActiveWorkout(userId: user?.uid)
                 self.listenForWorkoutLogs(userId: user?.uid)
+                self.listenForProgressSummary(userId: user?.uid)
             }
         }
     }
@@ -811,6 +815,74 @@ final class AppModel: NSObject, ObservableObject {
                         .compactMap { Self.makeWorkoutLogSummary(from: $0.data()) }
                 }
             }
+    }
+
+    private func listenForProgressSummary(userId: String?) {
+        progressListener?.remove()
+        progressSummary = nil
+
+        guard let userId else { return }
+
+        progressListener = db
+            .collection("users")
+            .document(userId)
+            .collection("derivedSummaries")
+            .document("progress_current")
+            .addSnapshotListener { [weak self] snapshot, _ in
+                Task { @MainActor in
+                    guard let data = snapshot?.data() else {
+                        self?.progressSummary = nil
+                        return
+                    }
+                    self?.progressSummary = Self.makeProgressSummary(from: data)
+                }
+            }
+    }
+
+    private static func makeProgressSummary(from data: [String: Any]) -> ProgressSummaryModel? {
+        guard
+            let adherenceRaw = data["adherence"] as? [String: Any],
+            let volumeRaw = data["volume"] as? [String: Any],
+            let bodyRaw = data["body"] as? [String: Any]
+        else { return nil }
+
+        let points: ([[String: Any]]) -> [ProgressPoint] = { raw in
+            raw.compactMap { point in
+                guard let date = point["date"] as? String,
+                      let value = Self.makeDouble(from: point["value"] ?? point["kg"])
+                else { return nil }
+                return ProgressPoint(date: date, value: value)
+            }
+        }
+
+        let lifts = (data["lifts"] as? [[String: Any]] ?? []).compactMap { raw -> ProgressLift? in
+            guard let name = raw["exerciseName"] as? String else { return nil }
+            return ProgressLift(
+                exerciseName: name,
+                e1rmSeries: points(raw["e1rmSeries"] as? [[String: Any]] ?? []),
+                trendPct: Self.makeDouble(from: raw["trendPct"]) ?? 0
+            )
+        }
+
+        return ProgressSummaryModel(
+            computedAt: data["computedAt"] as? String ?? "",
+            adherence: ProgressAdherence(
+                plannedSessions: adherenceRaw["plannedSessions"] as? Int ?? 0,
+                completedSessions: adherenceRaw["completedSessions"] as? Int ?? 0,
+                weeklyRate: (adherenceRaw["weeklyRate"] as? [Any] ?? []).compactMap(Self.makeDouble(from:)),
+                streakWeeks: adherenceRaw["streakWeeks"] as? Int ?? 0
+            ),
+            volumeWeeklyTotals: (volumeRaw["weeklyTotals"] as? [Any] ?? []).compactMap(Self.makeDouble(from:)),
+            volumeTrend: volumeRaw["trend"] as? String ?? "flat",
+            lifts: lifts,
+            body: ProgressBody(
+                weightSeries: points(bodyRaw["weightSeries"] as? [[String: Any]] ?? []),
+                rollingAvgKg: Self.makeDouble(from: bodyRaw["rollingAvgKg"]),
+                trendPctPerWeek: Self.makeDouble(from: bodyRaw["trendPctPerWeek"]),
+                goalDirection: bodyRaw["goalDirection"] as? String ?? "flat",
+                withinSafeBand: bodyRaw["withinSafeBand"] as? Bool ?? true
+            )
+        )
     }
 
     private static func makeWorkoutLogSummary(from data: [String: Any]) -> WorkoutLogSummary? {
