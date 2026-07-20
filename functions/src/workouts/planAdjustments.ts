@@ -15,6 +15,7 @@ import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import {
   coachFollowUpPath,
+  coachFollowUpsCollectionPath,
   memoryFactPath,
   planAdjustmentProposalPath,
   planAdjustmentProposalsCollectionPath,
@@ -424,6 +425,64 @@ async function supersedePendingProposals(
   });
 }
 
+// A pending proposal is an OFFER, not a standing order. After a week the
+// context that produced it (a pain report, a busy day) is stale — accepting
+// it would apply a patch the user no longer means, and until then it inflates
+// pendingProposalCount and can shadow newer work. This daily sweep flips
+// pending docs older than the TTL to the terminal `expired` decision; the
+// iOS pending-only listener drops the card automatically. Runs from the same
+// daily scheduler as the program rollover (index.ts) — one schedule, two
+// sweeps. Requires the (decision ASC, createdAt ASC) COLLECTION_GROUP
+// composite index in firestore.indexes.json.
+const PENDING_PROPOSAL_TTL_MS = 7 * 86_400_000;
+const EXPIRY_SCAN_LIMIT = 200;
+
+export async function expireStalePendingProposals(db: Firestore, nowISO?: string) {
+  const now = nowISO ?? new Date().toISOString();
+  const cutoff = new Date(Date.parse(now) - PENDING_PROPOSAL_TTL_MS).toISOString();
+  const stale = await db
+    .collectionGroup("planAdjustmentProposals")
+    .where("decision", "==", "pending")
+    .where("createdAt", "<", cutoff)
+    .limit(EXPIRY_SCAN_LIMIT)
+    .get();
+
+  let expired = 0;
+  let failed = 0;
+  for (const doc of stale.docs) {
+    try {
+      // Transactional per-doc flip: only a doc STILL pending at the
+      // transaction's own read time gets expired — a concurrent card-tap
+      // accept that commits first wins, same discipline as supersede/reject.
+      const flipped = await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(doc.ref);
+        if (!snap.exists || snap.get("decision") !== "pending") return false;
+        transaction.set(
+          doc.ref,
+          { decision: "expired", decidedAt: now, serverDecidedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+        return true;
+      });
+      if (flipped) expired += 1;
+    } catch (error) {
+      // One bad doc must not starve the rest of the sweep.
+      failed += 1;
+      safeLogger.warn("Plan adjustment proposal expiry failed", {
+        event: "plan_adjustment_proposal_expiry_failed",
+        proposalId: doc.id,
+        errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+      });
+    }
+  }
+
+  safeLogger.info("Stale pending plan adjustment proposals expired", {
+    event: "plan_adjustment_proposals_expired",
+    outcome: `expired_${expired}_failed_${failed}_of_${stale.size}`,
+  });
+  return { expired, failed, scanned: stale.size };
+}
+
 // Error codes the model may see verbatim. Anything else (ZodError dumps,
 // Firestore infra errors) is mapped to accept_failed and logged server-side
 // only — same values-never-leave-the-server convention as the HTTP handlers.
@@ -672,6 +731,21 @@ export async function acceptPlanAdjustmentProposal(
       throw new Error("plan_adjustment_requires_review");
     }
 
+    // Ramping back up (clear_overrides) means the user just told us they're
+    // better — any still-scheduled recovery check-in ("feeling better?") is
+    // now noise, so cancel it. The query read happens HERE, inside the
+    // transaction and before any write (Firestore requires all transaction
+    // reads before the first write); the cancels join the same commit below,
+    // so a delivery sweep racing this accept forces a retry rather than
+    // sending a check-in the user already answered.
+    let scheduledFollowUpRefs: FirebaseFirestore.DocumentReference[] = [];
+    if (proposal.proposedPlanPatch.type === "clear_overrides") {
+      const scheduledSnap = await transaction.get(
+        db.collection(coachFollowUpsCollectionPath(userId)).where("status", "==", "scheduled"),
+      );
+      scheduledFollowUpRefs = scheduledSnap.docs.map((docSnap) => docSnap.ref);
+    }
+
     // clear_overrides is scope-free: recording whatever button an old
     // client sent would write a false label into appliesTo and the memory
     // fact ("for that day only" on a full restore).
@@ -731,6 +805,21 @@ export async function acceptPlanAdjustmentProposal(
       },
       { merge: true },
     );
+
+    // The early-recovery cancels read above; clear_overrides proposals never
+    // carry recoveryDays, so this can't cancel a follow-up scheduled in the
+    // same commit.
+    for (const followUpRef of scheduledFollowUpRefs) {
+      transaction.set(
+        followUpRef,
+        {
+          status: "cancelled",
+          cancelledAt: serverDecidedAt,
+          serverUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
 
     // Injury adjustments schedule a recovery re-check: the daily follow-up
     // function turns due docs into a coach message ("been 5 days — feeling

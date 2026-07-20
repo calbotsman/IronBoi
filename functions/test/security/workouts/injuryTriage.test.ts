@@ -341,4 +341,95 @@ describe("injury triage → week rebuilder → recovery arc", () => {
     // (it's expired by construction and pruned on the next today-write).
     expect(Object.keys(overrides)).toEqual(["2026-07-01"]);
   });
+
+  it("accepting a ramp-up cancels the user's scheduled recovery check-ins", async () => {
+    // The user ramped up early — the pending "feeling better?" check-in is
+    // now noise and must cancel on accept.
+    await db.doc(coachFollowUpPath(USER_ID, "followup_pending_recheck")).set({
+      userId: USER_ID,
+      followUpId: "followup_pending_recheck",
+      kind: "injury_recheck",
+      context: "Adjusted plan for Wed, Fri to work around reported pain.",
+      proposalId: "adjustment_prior",
+      dueAt: "2026-07-20T00:00:00.000Z",
+      status: "scheduled",
+      createdAt: "2026-07-13T00:00:00.000Z",
+    });
+    // Already-delivered check-ins are history, not noise — must stay "sent".
+    await db.doc(coachFollowUpPath(USER_ID, "followup_already_sent")).set({
+      userId: USER_ID,
+      followUpId: "followup_already_sent",
+      kind: "injury_recheck",
+      context: "An earlier adjustment.",
+      proposalId: "adjustment_older",
+      dueAt: "2026-07-10T00:00:00.000Z",
+      status: "sent",
+      sentAt: "2026-07-10T14:00:00.000Z",
+      createdAt: "2026-07-05T00:00:00.000Z",
+    });
+
+    await createClearOverridesProposalFromTool({
+      db,
+      userId: USER_ID,
+      userNote: "feeling much better, ramp me back up",
+    });
+    const accept = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      TEST_TODAY,
+    );
+    expect(accept).toMatchObject({ ok: true });
+
+    const cancelledSnap = await db
+      .doc(coachFollowUpPath(USER_ID, "followup_pending_recheck"))
+      .get();
+    expect(cancelledSnap.data()?.status).toBe("cancelled");
+    const sentSnap = await db.doc(coachFollowUpPath(USER_ID, "followup_already_sent")).get();
+    expect(sentSnap.data()?.status).toBe("sent");
+
+    // The cancelled check-in never becomes a chat message, even once due.
+    await sweepCoachFollowUps(db, "2026-07-21T00:00:00.000Z");
+    const messageSnap = await db
+      .doc(coachSessionMessagePath(USER_ID, "general", "followup_followup_pending_recheck"))
+      .get();
+    expect(messageSnap.exists).toBe(false);
+  });
+
+  it("accepting a non-ramp-up proposal leaves scheduled check-ins alone", async () => {
+    await db.doc(coachFollowUpPath(USER_ID, "followup_keep")).set({
+      userId: USER_ID,
+      followUpId: "followup_keep",
+      kind: "injury_recheck",
+      context: "An earlier adjustment.",
+      proposalId: "adjustment_prior",
+      dueAt: "2026-07-25T00:00:00.000Z",
+      status: "scheduled",
+      createdAt: "2026-07-13T00:00:00.000Z",
+    });
+
+    await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "my back hurts, can we update this weeks workouts",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: CLEAN_TRIAGE,
+      recoveryDays: 5,
+      clientDate: TEST_TODAY,
+    });
+    const accept = await acceptLatestPlanAdjustmentFromChat(
+      db,
+      USER_ID,
+      undefined,
+      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      TEST_TODAY,
+    );
+    expect(accept).toMatchObject({ ok: true });
+
+    const keptSnap = await db.doc(coachFollowUpPath(USER_ID, "followup_keep")).get();
+    expect(keptSnap.data()?.status).toBe("scheduled");
+  });
 });

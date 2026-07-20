@@ -94,6 +94,10 @@ export const PlanAdjustmentDecision = z.enum([
   // the user asks the coach to revise ("make it lighter instead") and the
   // coach proposes again. Superseded proposals are terminal, like rejected.
   "superseded",
+  // Still pending 7 days after creation — the context that produced it is
+  // long gone, so the daily sweep (expireStalePendingProposals) retires it
+  // rather than letting a stale patch be accepted weeks later. Terminal.
+  "expired",
 ]);
 
 // How far an accepted plan-adjustment patch reaches:

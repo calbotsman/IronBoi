@@ -524,7 +524,12 @@ struct PlanAdjustmentProposalCard: View {
                                     Button {
                                         apply("rest_of_week")
                                     } label: {
-                                        Text(isApplying ? "Applying..." : "This week")
+                                        // "only" is load-bearing: rest_of_week
+                                        // writes date-keyed overrides through
+                                        // Sunday that then expire — without it
+                                        // this reads like the start of a
+                                        // permanent change.
+                                        Text(isApplying ? "Applying..." : "This week only")
                                             .font(.subheadline.weight(.semibold))
                                             .frame(maxWidth: .infinity)
                                     }
@@ -609,7 +614,9 @@ struct PlanAdjustmentProposalCard: View {
         guard let dayKey = proposal.dayKey, dayKey != Self.currentDayKey() else {
             return "Just today, this week only, or permanently?"
         }
-        return "Apply this to just this \(dayKey), this week, or permanently?"
+        // "this week only" (not bare "this week") — matches the button and the
+        // today-variant above; the week option is temporary and expires Sunday.
+        return "Apply this to just this \(dayKey), this week only, or permanently?"
     }
 
     private static func currentDayKey() -> String {
