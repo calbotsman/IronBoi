@@ -354,6 +354,18 @@ describe("coach context bundle", () => {
             goalDirection: "down",
             withinSafeBand: true,
           },
+          lensHighlights: [
+            {
+              metric: "consistency",
+              framing: "11 sessions in 6 weeks — consistency is the nervous system's best friend",
+              note: "Sleep and HRV signals will sharpen this view once HealthKit is connected.",
+            },
+            // Malformed entry (no framing) — dropped whole, never half-mapped.
+            { metric: "broken", note: "should-not-leak-without-framing" },
+            { metric: "readiness", framing: "Second valid highlight" },
+            // Over the ≤3 cap once sliced — must not survive to the prompt.
+            { metric: "overflow-metric", framing: "Fourth highlight past the cap" },
+          ],
         },
       },
       {
@@ -372,12 +384,25 @@ describe("coach context bundle", () => {
     expect(JSON.stringify(bundle.progressSummary)).not.toContain("attacker-user");
     expect(JSON.stringify(bundle.progressSummary)).not.toContain("sentinel-should-not-leak");
 
+    // Lens highlights ride through compactly: capped to 3 before filtering,
+    // entries without metric+framing dropped whole.
+    expect(bundle.progressSummary?.lensHighlights?.map((h) => h.metric)).toEqual([
+      "consistency",
+      "readiness",
+    ]);
+    expect(bundle.progressSummary?.lensHighlights?.[0].note).toContain("HealthKit");
+    expect(JSON.stringify(bundle.progressSummary)).not.toContain("should-not-leak-without-framing");
+    expect(JSON.stringify(bundle.progressSummary)).not.toContain("overflow-metric");
+
     // Ships with the tool-loop feature bundle: tools on → tag + rules present…
     const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi", {
       toolsEnabled: true,
     });
     expect(userMessage).toContain("<progress_summary>");
     expect(userMessage).toContain("withinSafeBand");
+    // The highlights ride inside the existing tag — no new prompt section.
+    expect(userMessage).toContain("lensHighlights");
+    expect(userMessage).toContain("nervous system's best friend");
     expect(system).toContain("<progress_summary>");
     expect(system).toContain("never invent trends");
     expect(system).toContain("a caution, never a win");
@@ -388,6 +413,30 @@ describe("coach context bundle", () => {
     expect(flagOff.userMessage).not.toContain("withinSafeBand");
     expect(flagOff.system).not.toContain("<progress_summary>");
     expect(flagOff.system).not.toContain("never invent trends");
+  });
+
+  it("omits lensHighlights entirely for docs written before the lens slice", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: { ageYears: 30 },
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+        progressSummary: {
+          computedAt: "2026-07-16T12:00:00.000Z",
+          windowDays: 42,
+          adherence: { plannedSessions: 0, completedSessions: 0, weeklyRate: [], streakWeeks: 0 },
+          volume: { weeklyTotals: [], trend: "flat" },
+          lifts: [],
+          body: { weightSeries: [], goalDirection: "flat", withinSafeBand: true },
+        },
+      },
+      { userId: "u", sessionId: "s", now: "2026-07-16T12:00:00.000Z" },
+    );
+
+    // Absent, not [] — pre-slice-5 docs keep byte-identical prompt payloads.
+    expect(bundle.progressSummary).not.toBeNull();
+    expect(JSON.stringify(bundle.progressSummary)).not.toContain("lensHighlights");
   });
 
   it("bundle_renders_progress_summary_null_when_absent_and_the_prompt_says_null", () => {

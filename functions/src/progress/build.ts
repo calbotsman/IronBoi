@@ -12,6 +12,8 @@
 
 import {
   ProgressSummary,
+  type CoachingLens,
+  type ProgressLensHighlight,
   type ProgressSummary as ProgressSummaryType,
   type TrendDirection,
 } from "../contracts/coach-agent.js";
@@ -55,14 +57,29 @@ export function buildProgressSummary(inputs: ProgressBuildInputs): ProgressSumma
   const logs = windowedLogs(inputs.logs, todayDay);
   const plannedPerWeek = plannedSessionsPerWeek(inputs.plan, inputs.program);
 
+  const adherence = buildAdherence(logs, plannedPerWeek);
+  const volume = buildVolume(logs);
+  const lifts = buildLifts(logs);
+  const body = buildBody(inputs.healthSamples, inputs.profile, todayDay);
+  const lensHighlights = computeLensHighlights(coachingLensOf(inputs.profile), {
+    adherence,
+    volume,
+    lifts,
+    body,
+  });
+
   const summary: ProgressSummaryType = {
     userId: inputs.userId,
     computedAt: toISODateTime(inputs.todayISO),
     windowDays: PROGRESS_WINDOW_DAYS,
-    adherence: buildAdherence(logs, plannedPerWeek),
-    volume: buildVolume(logs),
-    lifts: buildLifts(logs),
-    body: buildBody(inputs.healthSamples, inputs.profile, todayDay),
+    adherence,
+    volume,
+    lifts,
+    body,
+    // Omitted (never []) when empty — persisted docs written before the
+    // lens slice look identical to a "none" lens, and the iOS card gates
+    // on presence.
+    ...(lensHighlights.length > 0 ? { lensHighlights } : {}),
   };
 
   // Strict-parse backstop: catches NaN, negative counts, over-long series.
@@ -394,6 +411,190 @@ function downsampleEvenly<T>(points: T[], max: number): T[] {
     result.push(points[Math.round((index * (points.length - 1)) / (max - 1))]);
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Lens highlights (slice 5)
+// ---------------------------------------------------------------------------
+//
+// Deterministic, server-templated framings of the numbers computed above —
+// NO LLM call. The coach-prompt guardrail applies verbatim: a protocol
+// shapes emphasis and explanation, never what is safe. Every framing uses
+// only numbers that exist in the same summary; with nothing to frame the
+// result is [] and the field is omitted entirely.
+
+const KNOWN_LENSES: ReadonlySet<string> = new Set([
+  "huberman",
+  "schoenfeld",
+  "sims",
+  "blueprint",
+]);
+
+// profile.preferences.coachingLens, guarded like every other profile read.
+// Unknown or missing values read as "none" — never throw over a legacy doc.
+export function coachingLensOf(profile: Loose | null): CoachingLens {
+  const preferences = isRecord(profile?.preferences) ? profile.preferences : null;
+  const lens = preferences?.coachingLens;
+  return typeof lens === "string" && KNOWN_LENSES.has(lens)
+    ? (lens as CoachingLens)
+    : "none";
+}
+
+// The already-built summary sections the lens framings draw from. recovery
+// is DEFINED on the contract but unpopulated in slices 1-3, so every lens
+// must degrade to the data that exists today.
+export type LensSummaryParts = Pick<
+  ProgressSummaryType,
+  "adherence" | "volume" | "lifts" | "body"
+> & { recovery?: ProgressSummaryType["recovery"] };
+
+const MAX_LENS_HIGHLIGHTS = 3;
+const FRAMING_MAX = 120;
+const NOTE_MAX = 200;
+const LIFT_NAME_MAX = 40;
+
+export function computeLensHighlights(
+  lens: CoachingLens,
+  parts: LensSummaryParts,
+): ProgressLensHighlight[] {
+  const highlights = (() => {
+    switch (lens) {
+      case "huberman":
+        return hubermanHighlights(parts);
+      case "schoenfeld":
+        return schoenfeldHighlights(parts);
+      case "sims":
+        return simsHighlights(parts);
+      case "blueprint":
+        return blueprintHighlights(parts);
+      case "none":
+        return [];
+    }
+  })();
+
+  // Clamp defensively so a wide number or long exercise name can never trip
+  // the contract's max-length parse in buildProgressSummary.
+  return highlights.slice(0, MAX_LENS_HIGHLIGHTS).map((highlight) => ({
+    metric: highlight.metric,
+    framing: clampText(highlight.framing, FRAMING_MAX),
+    note: clampText(highlight.note, NOTE_MAX),
+  }));
+}
+
+// huberman — recovery-first. With recovery unpopulated (slices 1-3), lead
+// with consistency, and say plainly that the recovery signals arrive when
+// HealthKit connects — never fabricate an HRV/sleep reading.
+function hubermanHighlights(parts: LensSummaryParts): ProgressLensHighlight[] {
+  const { completedSessions, streakWeeks } = parts.adherence;
+  if (completedSessions <= 0) return [];
+  return [
+    {
+      metric: "consistency",
+      framing:
+        `${completedSessions} ${sessionWord(completedSessions)} in 6 weeks — ` +
+        "consistency is the nervous system's best friend",
+      note:
+        (streakWeeks > 0
+          ? `A ${streakWeeks}-week streak keeps your training rhythm steady. `
+          : "Recovery-first coaching starts with a steady rhythm of showing up. ") +
+        "Sleep and HRV signals will sharpen this view once HealthKit is connected.",
+    },
+  ];
+}
+
+// schoenfeld — hypertrophy mechanics headline: weekly volume trend plus the
+// top lift's e1RM trend. Each highlight guards its own data.
+function schoenfeldHighlights(parts: LensSummaryParts): ProgressLensHighlight[] {
+  const highlights: ProgressLensHighlight[] = [];
+
+  const totals = parts.volume.weeklyTotals;
+  if (totals.some((total) => total > 0)) {
+    const latest = Math.round(totals[totals.length - 1] ?? 0);
+    highlights.push({
+      metric: "volume_trend",
+      framing: `Weekly working volume is ${trendPhrase(parts.volume.trend)} across the 6-week window`,
+      note:
+        "Progressive overload is the signal that matters — " +
+        `latest week: ${latest} kg moved across your logged sets.`,
+    });
+  }
+
+  const topLift = parts.lifts[0];
+  if (topLift) {
+    const name = clampText(topLift.exerciseName, LIFT_NAME_MAX);
+    const pct = topLift.trendPct;
+    const direction =
+      topLift.e1rmSeries.length >= 2 && pct !== 0
+        ? `${pct > 0 ? "up" : "down"} ${Math.abs(pct)}%`
+        : "holding steady";
+    highlights.push({
+      metric: "top_lift_e1rm",
+      framing: `${name} e1RM ${direction} over the 6-week window`,
+      note:
+        "e1RM is estimated from your best set each session — " +
+        "progressive overload is the signal that matters.",
+    });
+  }
+
+  return highlights;
+}
+
+// sims — readiness-aware, neutral framing on adherence. NO cycle claims:
+// cycle data is a future, consent-gated slice, and until the user opts in
+// the lens only reframes what exists.
+function simsHighlights(parts: LensSummaryParts): ProgressLensHighlight[] {
+  const { completedSessions } = parts.adherence;
+  if (completedSessions <= 0) return [];
+  return [
+    {
+      metric: "readiness",
+      framing:
+        `${completedSessions} ${sessionWord(completedSessions)} logged in 6 weeks — ` +
+        "a steady base to read readiness against",
+      note:
+        "Some weeks feel harder than others; that's normal physiology, not lost fitness. " +
+        "Cycle-aware insights need cycle data you haven't shared — they arrive only if you opt in later.",
+    },
+  ];
+}
+
+// blueprint — consistency over intensity: streak + adherence. When the
+// safety flag is down, the note defers to the safety caution instead of
+// cheering. NEVER supplements, biomarkers, or age-reversal framing.
+function blueprintHighlights(parts: LensSummaryParts): ProgressLensHighlight[] {
+  const { completedSessions, plannedSessions, streakWeeks } = parts.adherence;
+  if (completedSessions <= 0) return [];
+
+  const framing =
+    streakWeeks > 0
+      ? plannedSessions > 0
+        ? `${streakWeeks}-week streak, ${completedSessions} of ${plannedSessions} planned sessions — consistency over intensity`
+        : `${streakWeeks}-week streak, ${completedSessions} ${sessionWord(completedSessions)} logged — consistency over intensity`
+      : `${completedSessions} ${sessionWord(completedSessions)} in 6 weeks — consistency over intensity`;
+
+  return [
+    {
+      metric: "streak",
+      framing,
+      note: parts.body.withinSafeBand
+        ? "The habit is the protocol: repeatable weeks compound further than hero sessions."
+        : "Weight is moving faster than the safe pace — that caution comes before any protocol framing.",
+    },
+  ];
+}
+
+function sessionWord(count: number): string {
+  return count === 1 ? "session" : "sessions";
+}
+
+function trendPhrase(trend: TrendDirection): string {
+  if (trend === "up") return "trending up";
+  if (trend === "down") return "trending down";
+  return "holding steady";
+}
+
+function clampText(value: string, max: number): string {
+  return value.length > max ? value.slice(0, max) : value;
 }
 
 // ---------------------------------------------------------------------------
