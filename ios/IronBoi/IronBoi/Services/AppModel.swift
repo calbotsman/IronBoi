@@ -71,6 +71,20 @@ final class AppModel: NSObject, ObservableObject {
         return URL(string: "https://us-central1-ironboi-staging.cloudfunctions.net")!
     }
 
+    // MARK: - Backend transport switch
+    //
+    // `true` routes every backend call through the Firebase SDK callables
+    // (onCall twins in functions/src/index.ts). The SDK attaches the Auth
+    // ID token AND the App Check token automatically, so App Check
+    // enforcement (IRONBOI_ENFORCE_APP_CHECK) can eventually protect real
+    // traffic. `false` restores the legacy bearer-token *Http path via
+    // callFunction(_:idToken:data:) — flip this ONE line to roll back.
+    // The *Http endpoints stay deployed until a retirement PR after the
+    // callable migration has soaked.
+    private let useCallableFunctions = true
+    // Same region + construction as deleteAccount always used.
+    private lazy var callableFunctions = Functions.functions(region: "us-central1")
+
     private lazy var db = Firestore.firestore()
     private var authHandle: AuthStateDidChangeListenerHandle?
     private var messageListener: ListenerRegistration?
@@ -211,8 +225,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isOnboardingBusy = false }
 
         do {
-            let functions = Functions.functions(region: "us-central1")
-            let callable = functions.httpsCallable("deleteAccount")
+            let callable = callableFunctions.httpsCallable("deleteAccount")
             _ = try await callable.call([:] as [String: Any])
             // Server wipe succeeded — locally drop the session. The auth
             // state listener attached in start() will fire user=nil and
@@ -229,8 +242,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isOnboardingBusy = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
-            try await callFunction("resetMyDataHttp", idToken: idToken, data: [:])
+            try await callBackend(httpName: "resetMyDataHttp", callableName: "resetMyData", data: [:])
             onboardingMessages = []
             messages = []
             onboardingStatus = .notStarted
@@ -257,10 +269,8 @@ final class AppModel: NSObject, ObservableObject {
         defer { isSending = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
-
             let now = ISO8601DateFormatter().string(from: Date())
-            try await callFunction("sendCoachMessageHttp", idToken: idToken, data: [
+            try await callBackend(httpName: "sendCoachMessageHttp", callableName: "sendCoachMessage", data: [
                 "sessionId": sessionId,
                 "messageId": "ios_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
@@ -316,9 +326,8 @@ final class AppModel: NSObject, ObservableObject {
         defer { isOnboardingBusy = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
             let now = Self.isoString(from: Date())
-            try await callFunction("sendOnboardingAnswerHttp", idToken: idToken, data: [
+            try await callBackend(httpName: "sendOnboardingAnswerHttp", callableName: "sendOnboardingAnswer", data: [
                 "messageId": "ios_onboarding_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
                 "timestamp": now,
@@ -337,8 +346,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isOnboardingBusy = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
-            try await callFunction("acceptProgramProposalHttp", idToken: idToken, data: [
+            try await callBackend(httpName: "acceptProgramProposalHttp", callableName: "acceptProgramProposal", data: [
                 "proposalId": pendingProgramProposal.proposalId,
                 "decidedAt": Self.isoString(from: Date()),
             ])
@@ -357,7 +365,6 @@ final class AppModel: NSObject, ObservableObject {
         defer { isSending = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
             var data: [String: Any] = [
                 "proposalId": pendingPlanAdjustmentProposal.proposalId,
                 "decidedAt": Self.isoString(from: Date()),
@@ -368,7 +375,7 @@ final class AppModel: NSObject, ObservableObject {
             if let scope {
                 data["scope"] = scope
             }
-            try await callFunction("acceptPlanAdjustmentProposalHttp", idToken: idToken, data: data)
+            try await callBackend(httpName: "acceptPlanAdjustmentProposalHttp", callableName: "acceptPlanAdjustmentProposal", data: data)
             try await refreshCurrentWorkoutPlan()
         } catch {
             errorMessage = error.localizedDescription
@@ -385,11 +392,10 @@ final class AppModel: NSObject, ObservableObject {
         defer { isWorkoutBusy = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
             let now = Self.isoString(from: Date())
-            let response: StartWorkoutResponse = try await callFunction(
-                "startWorkoutSessionHttp",
-                idToken: idToken,
+            let response: StartWorkoutResponse = try await callBackend(
+                httpName: "startWorkoutSessionHttp",
+                callableName: "startWorkoutSessionCallable",
                 data: [
                     "dayKey": dayKey,
                     "startedAt": now,
@@ -440,11 +446,10 @@ final class AppModel: NSObject, ObservableObject {
         defer { isWorkoutBusy = false }
 
         do {
-            let idToken = try await requireFreshFirebaseAuthToken()
             let completedAt = Self.isoString(from: Date())
-            let response: FinishWorkoutResponse = try await callFunction(
-                "finishWorkoutSessionHttp",
-                idToken: idToken,
+            let response: FinishWorkoutResponse = try await callBackend(
+                httpName: "finishWorkoutSessionHttp",
+                callableName: "finishWorkoutSessionCallable",
                 data: [
                     "sessionId": activeWorkout.sessionId,
                     "completedAt": completedAt,
@@ -468,6 +473,44 @@ final class AppModel: NSObject, ObservableObject {
         let idToken = try await currentUser.getIDToken()
         user = currentUser
         return idToken
+    }
+
+    /// Single entry point for every backend call. Routes to the Firebase
+    /// SDK callable (`callableName`) or the legacy bearer-token *Http
+    /// endpoint (`httpName`) depending on `useCallableFunctions`. Both
+    /// transports return the same `{ok: ..., ...}` payload shape, so call
+    /// sites decode the same Decodable models either way.
+    private func callBackend(httpName: String, callableName: String, data: [String: Any]) async throws {
+        let _: EmptyFunctionResponse = try await callBackend(httpName: httpName, callableName: callableName, data: data)
+    }
+
+    private func callBackend<T: Decodable>(httpName: String, callableName: String, data: [String: Any]) async throws -> T {
+        if useCallableFunctions {
+            return try await callCallable(callableName, data: data)
+        }
+        let idToken = try await requireFreshFirebaseAuthToken()
+        return try await callFunction(httpName, idToken: idToken, data: data)
+    }
+
+    private func callCallable<T: Decodable>(_ name: String, data: [String: Any]) async throws -> T {
+        // Fail fast with the same friendly message the HTTP path produced
+        // via requireFreshFirebaseAuthToken, instead of an opaque
+        // UNAUTHENTICATED from the backend. Also keeps `user` fresh.
+        guard let currentUser = Auth.auth().currentUser else {
+            throw CoachAuthError.missingFirebaseUser
+        }
+        user = currentUser
+
+        // The SDK attaches the Auth ID token and App Check token itself —
+        // this is the exact pattern deleteAccount has always used.
+        let result = try await callableFunctions.httpsCallable(name).call(data)
+
+        // Callables surface the function's return value as
+        // `HTTPSCallableResult.data` (an `Any` of JSON-compatible values).
+        // Round-trip it through JSONSerialization so the existing Decodable
+        // models decode it exactly like an HTTP response body.
+        let json = try JSONSerialization.data(withJSONObject: result.data, options: [.fragmentsAllowed])
+        return try JSONDecoder().decode(T.self, from: json)
     }
 
     private func callFunction(_ name: String, idToken: String, data: [String: Any]) async throws {
@@ -611,12 +654,12 @@ final class AppModel: NSObject, ObservableObject {
         defer { isSavingProfile = false }
 
         do {
-            // Resilient HTTP endpoint (auth-only), NOT the SDK callable. The
-            // callable attaches an App Check token that's invalid on Debug
-            // builds, and callables reject invalid tokens — which silently
-            // broke every profile save on device. The *Http path checks auth.
-            let idToken = try await requireFreshFirebaseAuthToken()
-            try await callFunction("upsertProfileHttp", idToken: idToken, data: next.firestorePayload())
+            // The upsertProfile callable now shares the *Http handler
+            // (server-owned createdAt/updatedAt injection). The old "broken
+            // App Check token" failure mode is what registering debug
+            // tokens + AppAttestProvider fixes; useCallableFunctions=false
+            // restores the resilient auth-only *Http path if needed.
+            try await callBackend(httpName: "upsertProfileHttp", callableName: "upsertProfile", data: next.firestorePayload())
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -633,9 +676,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isWorkoutBusy = false }
 
         do {
-            // Resilient HTTP endpoint (auth-only), same reason as upsertProfile.
-            let idToken = try await requireFreshFirebaseAuthToken()
-            try await callFunction("regenerateWorkoutPlanHttp", idToken: idToken, data: [:])
+            try await callBackend(httpName: "regenerateWorkoutPlanHttp", callableName: "regenerateWorkoutPlan", data: [:])
             // The Firestore listener picks up the new plan and republishes
             // currentWorkoutPlan automatically — no local mutation needed.
         } catch {
