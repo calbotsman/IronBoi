@@ -147,11 +147,10 @@ describe("shared coach-message handler (callable/*Http parity)", () => {
   it("runs the deterministic weight update and patches matching overrides", async () => {
     await db.doc(workoutPlanPath(USER_ID, "current")).set(basePlan());
 
-    // NOTE: parseRequestedPounds takes the FIRST "<n> lb" match in the
-    // content, so this fixture mentions exactly one weight. (The iOS
-    // askCoachAboutWorkout prefix "…currently 3x8 at 135 lb." would win
-    // over the user's requested weight — a pre-existing *Http behavior
-    // this migration preserves, flagged in the PR.)
+    // parseRequestedPounds takes the LAST "<n> lb" match (hardening PR
+    // fix, re-ported after the extraction): the iOS askCoachAboutWorkout
+    // context prefix "…currently 3x8 at 135 lb." precedes the user's
+    // requested weight, so last-match applies what the user asked for.
     const parsed = IosCoachMessageRequest.parse(
       iosPayload({
         content: "Bump bench press to 145 lbs please",
