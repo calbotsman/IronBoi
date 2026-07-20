@@ -148,6 +148,72 @@ describe("injury triage → week rebuilder → recovery arc", () => {
     expect(accept).toMatchObject({ ok: false, error: "plan_adjustment_requires_review" });
   });
 
+  it("negated red-flag answers do NOT trip the severe screen", async () => {
+    // The natural triage answer. Before negation masking, "no sharp pain,
+    // no numbness, nothing radiating" matched the severe patterns inside
+    // the denials and locked every honest triage at high risk.
+    const created = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "dull ache in lower back",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: {
+        redFlagsAsked: true,
+        userReportsSevere: false,
+        description: "no sharp pain, no numbness, nothing radiating, just a dull ache",
+      },
+      rawUserText: "no sharp pain, no numbness, nothing radiating, just a dull ache from yesterday — adjust this week please",
+      clientDate: TEST_TODAY,
+    });
+    expect(created).toMatchObject({ riskLevel: "low", requiresFollowUp: false });
+
+    // "no feeling" is a severe REPORT that starts with a negation word -
+    // the masking pass must not eat it.
+    const noFeeling = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "back pain",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: CLEAN_TRIAGE,
+      rawUserText: "back hurts and there is no feeling in my left foot",
+      clientDate: TEST_TODAY,
+    });
+    expect(noFeeling).toMatchObject({ riskLevel: "high", requiresFollowUp: true });
+
+    // A denial followed WITHOUT punctuation by a severe report: the
+    // word-bounded mask must leave the severe phrase intact.
+    const denialThenSevere = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "back pain",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: CLEAN_TRIAGE,
+      rawUserText: "no numbness but shooting pain down my left leg when I twist",
+      clientDate: TEST_TODAY,
+    });
+    expect(denialThenSevere).toMatchObject({ riskLevel: "high", requiresFollowUp: true });
+
+    // Un-negated severe language still locks, even next to denials.
+    const severe = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "pain_or_discomfort",
+      userNote: "back pain",
+      scope: "rest_of_week",
+      dayPatches: BACK_SAFE_PATCHES,
+      painTriage: CLEAN_TRIAGE,
+      rawUserText: "not sure honestly, sharp pain when I bend over",
+      clientDate: TEST_TODAY,
+    });
+    expect(severe).toMatchObject({ riskLevel: "high", requiresFollowUp: true });
+  });
+
   it("injury proposal WITHOUT triage stays high-risk (model must ask first)", async () => {
     const created = await createPlanAdjustmentProposalFromTool({
       db,

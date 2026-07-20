@@ -176,7 +176,10 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // the user note, the triage description, AND the raw user turn — and is
   // absolute. Only when it comes back clean can a completed triage (red
   // flags asked, user reports non-severe) lower injury risk to appliable.
-  const severeText = `${originalUserText} ${input.painTriage?.description ?? ""} ${rawText}`;
+  // Joined with ". " (not spaces) so the negation mask in hasSevereMarkers
+  // cannot bleed across utterance boundaries — a triage description ending
+  // in a denial must not mask a severe phrase at the start of the raw turn.
+  const severeText = [originalUserText, input.painTriage?.description ?? "", rawText].join(". ");
   let riskLevel = riskForCategory(category, severeText);
   let requiresFollowUp = needsFollowUp(category, riskLevel);
   let triageCleared = false;
@@ -1282,8 +1285,31 @@ const SEVERE_MARKER_PATTERNS: RegExp[] = [
   /heard a pop|felt a pop|\bgave out\b/,
 ];
 
+// Negated clauses are masked BEFORE the severe sweep: the natural way a
+// user answers triage questions is "no sharp pain, no numbness, nothing
+// radiating" — without masking, the symptom words inside those denials
+// tripped the screen and permanently locked every honestly-answered triage
+// at high risk (live E2E finding, 2026-07-20). The mask is deliberately
+// narrow — the negation word plus at most 4 following words, stopping at
+// any punctuation or contrast word — so a severe report AFTER a denial
+// ("no numbness but shooting pain down my leg", "no other symptoms. the
+// pain is shooting") keeps its severe phrase un-masked. Coordination
+// words (and/or) are NOT stoppers: "no numbness or tingling" is one
+// joint denial.
+const NEGATION_CLAUSE =
+  /\b(?:no|not|without|nothing|none|never|denies?|denied|don'?t|doesn'?t|didn'?t|haven'?t|hasn'?t|isn'?t|aren'?t|free of)\b(?:\s+(?!(?:but|however|though|except|yet)\b)[a-z'-]+){0,4}/gi;
+
+// "no feeling in my leg" is itself a severe report, not a denial - the one
+// severe marker family that STARTS with a negation word. Screen it against
+// the raw text BEFORE masking so the negation pass cannot eat it.
+const NEGATION_SHAPED_SEVERE = /no feeling|lost feeling|can'?t feel/;
+
 export function hasSevereMarkers(content: string): boolean {
-  const text = content.toLowerCase();
+  const lower = content.toLowerCase();
+  if (NEGATION_SHAPED_SEVERE.test(lower)) {
+    return true;
+  }
+  const text = lower.replace(NEGATION_CLAUSE, " ");
   return SEVERE_MARKER_PATTERNS.some((pattern) => pattern.test(text));
 }
 
