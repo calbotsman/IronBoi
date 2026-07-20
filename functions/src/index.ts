@@ -344,7 +344,11 @@ async function maybeApplyWorkoutPlanAdjustment(
 }
 
 function parseRequestedPounds(content: string) {
-  const match = content.match(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)\b/i);
+  // LAST match wins: the workout-sheet context prefix ("currently 3x8 at
+  // 135 lb.") precedes the user's actual request ("make it 155 lb"), so
+  // first-match kept re-applying the CURRENT weight (live-audit finding).
+  const matches = [...content.matchAll(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)\b/gi)];
+  const match = matches[matches.length - 1];
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isFinite(value) && value >= 0 ? value : null;
