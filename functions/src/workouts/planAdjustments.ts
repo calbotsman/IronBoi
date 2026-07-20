@@ -1302,8 +1302,15 @@ const SEVERE_MARKER_PATTERNS: RegExp[] = [
 // one line can't eat a report on the next ("no numbness\n- sharp pain").
 const NEGATION_WORD =
   "(?:no|not|without|nothing|none|never|den(?:y|ies|ied|ying)|don'?t|doesn'?t|didn'?t|haven'?t|hasn'?t|isn'?t|aren'?t|free of)";
+// and/or are guarded: a denial list continues with BARE symptom nouns
+// ("no numbness or tingling"), while a report resumes with an anaphor
+// ("and MY chest pain is back", "and THE pain is sharp") — so and/or
+// followed by a determiner ends the mask and the report survives. "my"
+// is deliberately absent from the window for the same reason (no denial
+// needs it: "no pain in my chest" already clears with the mask stopping
+// at "my").
 const NEGATION_WINDOW_WORD =
-  "(?:or|and|any|of|the|that|this|these|those|a|an|anything|some|more|stuff|other|either|really|ever|even|at|all|in|on|my|to|had|have|has|having|been|felt|feel|feels|feeling|experienced?|experiencing|noticed?|noticing|getting|got|gotten|symptoms?|issues?|problems?|sharp|shooting|radiat\\w*|numb(?:ness)?|tingl\\w*|pins|needles|pains?|painful|swelling|swollen|bruising|bleeding|faint\\w*|dizz\\w*|severe|chest|deform\\w*|weakness|pop|popping|passed|blacked|out|breath\\w*)";
+  "(?:(?:and|or)(?![^\\S\\n]+(?:my|the|this|that|it)\\b)|any|of|the|that|this|these|those|a|an|anything|some|more|stuff|other|either|really|ever|even|at|all|in|on|to|had|have|has|having|been|felt|feel|feels|feeling|experienced?|experiencing|noticed?|noticing|getting|got|gotten|symptoms?|issues?|problems?|sharp|shooting|radiat\\w*|numb(?:ness)?|tingl\\w*|pins|needles|pains?|painful|swelling|swollen|bruising|bleeding|faint\\w*|dizz\\w*|severe|chest|deform\\w*|weakness|pop|popping|passed|blacked|out|breath\\w*)";
 const NEGATION_CLAUSE = new RegExp(
   `\\b${NEGATION_WORD}\\b(?:[^\\S\\n]+${NEGATION_WINDOW_WORD}\\b)*`,
   "gi",
@@ -1311,15 +1318,19 @@ const NEGATION_CLAUSE = new RegExp(
 
 // Severe reports that a negation mask could otherwise eat, screened against
 // the raw text BEFORE masking:
-// - "no feeling in my foot" / "lost all feeling" — severe reports that
-//   START with (or contain) a negation word. \bfeeling\b keeps the
-//   "no feelings either way" idiom from locking.
-// - "pain this sharp" superlatives — severity phrased THROUGH negation
-//   ("never felt pain this sharp"), where every window word is maskable.
-//   Deliberately excludes so/too ("not so sharp anymore" is an
-//   improvement report and must stay clear).
+// - "no feeling in my foot" / "lost all feeling" / "haven't been able to
+//   feel" — severe reports that START with (or contain) a negation word.
+//   \bfeeling\b keeps the "no feelings either way" idiom from locking.
+// - "never had chest pain like this" — the anaphoric new-onset shape,
+//   built entirely from window-maskable words. Textbook cardiac language.
+// - "pain this sharp" / "been this swollen" superlatives — severity
+//   phrased THROUGH negation. Pain-noun anchors accept this|that; state
+//   verbs accept only "this" ("hasn't been THAT swollen lately" and "the
+//   pain isn't that sharp anymore" are improvement reports and must stay
+//   clear — the recovery arc depends on them). so/too also deliberately
+//   excluded ("not so sharp anymore").
 const NEGATION_SHAPED_SEVERE =
-  /no (?:more )?feeling\b|lost (?:all )?(?:the )?feeling\b|zero feeling\b|no sensation\b|lost sensation\b|can'?t feel\b|(?:this|that) (?:sharp|severe|intense|unbearable|excruciating)\b|worst pain/;
+  /no (?:more )?feeling\b|lost (?:all )?(?:the )?feeling\b|zero feeling\b|no sensation\b|lost sensation\b|can'?t feel\b|(?:unable|not able|n'?t been able) to feel\b|(?:pop|pain\w*|numb\w*|tingl\w*|swell\w*|faint\w*)[^.,;\n]{0,12}like (?:this|that)\b|this chest pain\b|(?:pain\w*|hurts?|ach\w*) (?:this|that) (?:sharp|severe|intense|unbearable|excruciating|numb|swollen|faint)\b|(?:it|been|felt|feel|feels|being) this (?:sharp|severe|intense|unbearable|excruciating|numb|swollen|faint)\b|worst pain/;
 
 export function hasSevereMarkers(content: string): boolean {
   // iOS smart punctuation is on by default — normalize curly apostrophes so

@@ -41,6 +41,26 @@ const MUST_LOCK: string[] = [
   "I've lost all feeling in my foot",
   "zero feeling in my foot",
   "can’t feel my left foot", // curly apostrophe — iOS smart punctuation
+  // Round-2 review: "and"-coordinated deny-then-report chains — a report
+  // resumes with a determiner after and/or, which ends the mask.
+  "no numbness and my chest pain is back",
+  "no bruising and my chest pain came back",
+  "no swelling and the pain is sharp",
+  "no numbness and the tingling in my chest got worse",
+  // Round-2 review: anaphoric new-onset reports built from window words.
+  "never had chest pain like this",
+  "never felt chest pain like this before",
+  "never had this chest pain before",
+  "I've never experienced severe pain like this",
+  "never felt sharp pain like this",
+  "never felt a pop like that in my knee",
+  // Round-2 review: comparative "this + symptom adjective" reports.
+  "my knee has never been this swollen",
+  "my leg has never been this numb",
+  "never felt this faint before during a workout",
+  // Round-2 review: "able to feel" family + window-stop control.
+  "haven't been able to feel my toes",
+  "never noticed the numbness until my leg gave out",
   // Plain severe reports (base patterns, no negation involved).
   "chest pain when I go hard",
   "the pain is shooting down my leg",
@@ -71,6 +91,17 @@ const MUST_CLEAR: string[] = [
   "no pain at all",
   // Improvement reports (recovery check-ins must not lock).
   "not so sharp anymore, feeling better",
+  // Round-2 review: bare-noun joint denial after "and" (no determiner).
+  "no numbness and tingling",
+  // Round-2 review: improvement reports use "that" with state verbs.
+  "the pain isn't that sharp anymore",
+  "hasn't been that swollen lately",
+  // Round-2 review: intensity chat must not lock (superlative is anchored
+  // to pain nouns / state verbs, not programs and splits).
+  "is this intense enough for me",
+  "I've never done a program this intense",
+  "this severe workout split",
+  "keep the programming that sharp",
   // Innocent fitness vocabulary near the pattern space.
   "lower the numbers on squats",
   "can't move my Thursday session to Friday",
