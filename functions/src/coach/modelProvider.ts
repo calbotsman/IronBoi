@@ -17,6 +17,8 @@ export type CoachToolExecutor = (
   args: Record<string, unknown>,
 ) => Promise<Record<string, unknown>>;
 
+import { safeLogger } from "../logging/safeLogger.js";
+
 type GenerateCoachReplyArgs = {
   system: string;
   userContent: string;
@@ -134,7 +136,12 @@ export class GeminiCoachProvider implements CoachModelProvider {
               }
             : {}),
           generationConfig: {
-            maxOutputTokens: 900,
+            // 900 was enough for prose, but a multi-day dayPatches
+            // functionCall (7 days × exercises with sets/reps/weight) is
+            // easily larger — truncated tool JSON shows up as malformed or
+            // hallucinated calls (live E2E finding, 2026-07-17). Prose-only
+            // turns keep the tighter cap.
+            maxOutputTokens: tools && tools.length > 0 ? 2048 : 900,
             temperature: 0.4,
           },
           // Phase 1 Task 1.3 — explicit safety thresholds.
@@ -176,17 +183,47 @@ export class GeminiCoachProvider implements CoachModelProvider {
     signal: AbortSignal | undefined,
   ): Promise<GeminiResponsePayload> {
     const TRANSIENT_STATUS = new Set([429, 500, 503]);
-    const MAX_ATTEMPTS = 3;
+    // 5 attempts with jittered/backed-off waits fits inside the
+    // orchestrator's 55s abort budget even in the worst case (~15s of
+    // waiting + request time). The live E2E run (2026-07-17) showed bursts
+    // of transient failures exhausting the old 3-attempt/6.5s window
+    // exactly on the heaviest tool-call turns.
+    const MAX_ATTEMPTS = 5;
     let response!: Response;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       response = await this.callGemini(system, contents, tools, signal);
       if (response.ok || !TRANSIENT_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+      // Honor Retry-After when Gemini sends one (429s often do); otherwise
+      // exponential-ish backoff with jitter to avoid thundering re-hits.
+      const retryAfterHeader = Number(response.headers.get("retry-after"));
+      const retryAfterMs =
+        Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? Math.min(retryAfterHeader * 1000, 8000)
+          : attempt * 1200 + Math.floor(Math.random() * 600);
+      safeLogger.warn("Gemini transient failure, retrying", {
+        event: "gemini_transient_retry",
+        outcome: `http_${response.status}_attempt_${attempt}`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
     }
 
     if (!response.ok) {
+      // Body snippet is Gemini's own error JSON (status/message), never user
+      // content — first 200 chars is enough to distinguish quota vs schema
+      // vs server errors when diagnosing live failures.
+      let bodySnippet = "";
+      try {
+        bodySnippet = (await response.text()).slice(0, 200);
+      } catch {
+        bodySnippet = "unreadable";
+      }
+      safeLogger.error("Gemini request failed after retries", {
+        event: "gemini_request_failed",
+        outcome: `http_${response.status}`,
+        errorDetail: bodySnippet,
+      });
       throw new Error(`Gemini request failed with HTTP ${response.status}`);
     }
 
