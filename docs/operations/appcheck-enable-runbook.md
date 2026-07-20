@@ -151,13 +151,16 @@ No code change needed; OFF is the default.
 
 ## Notes / known sharp edges
 
-- **`consumeAppCheckToken` is tied to the same flag.** When on, each token is
-  one-shot. The iOS Functions SDK reuses cached tokens unless the callable is
-  configured for limited-use tokens, so a second callable call inside one
-  token lifetime can be replay-rejected. Today only `deleteAccount` (a
-  once-per-account action) is affected, so this is acceptable; revisit before
-  migrating high-frequency traffic to callables (flagged in the 2026-06-23
-  audit).
+- **`consumeAppCheckToken` is now a SEPARATE opt-in** (updated 2026-07-18,
+  callable-migration PR): the client migration made callables the
+  high-frequency path, and one-shot tokens + the iOS SDK's cached-token
+  reuse would replay-reject every call after the first within a token
+  lifetime. Consumption therefore requires BOTH `IRONBOI_ENFORCE_APP_CHECK`
+  and `IRONBOI_CONSUME_APP_CHECK`. Do NOT set the consume flag until the
+  iOS client adopts limited-use tokens
+  (`HTTPSCallableOptions(requireLimitedUseAppCheckTokens: true)`).
+  Enforcement alone is safe to flip once App Attest + debug tokens are
+  registered.
 - **Prod (`ironboi-prod` or equivalent):** repeat steps 1–4 with that
   project's console and `functions/.env.<project>` file. Do staging first and
   soak for at least a day of normal use.

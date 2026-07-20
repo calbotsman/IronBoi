@@ -8,14 +8,17 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 import { z } from "zod";
 import { auth, db } from "./firebase.js";
-import { isCoachToolLoopEnabled, orchestrateCoachTurn } from "./coach/orchestrate.js";
+import { orchestrateCoachTurn } from "./coach/orchestrate.js";
+import {
+  IosCoachMessageRequest,
+  handleSendCoachMessage,
+  isRecord,
+} from "./coach/sendMessage.js";
 import { sweepCoachFollowUps } from "./followups/sweep.js";
 import { recomputeProgressSummaryIfStale } from "./progress/store.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
-  CoachInputMode,
-  CoachMessage,
   ConsentRecord,
   DailyCheck,
   IngestHealthSamplesRequest,
@@ -30,7 +33,6 @@ import {
 } from "./audit/log.js";
 import { getAuth } from "firebase-admin/auth";
 import {
-  coachSessionMessagePath,
   coachSessionPath,
   consentRecordPath,
   dailyCheckPath,
@@ -49,10 +51,8 @@ import {
 } from "./workouts/activeWorkout.js";
 import {
   AcceptPlanAdjustmentProposalRequest,
-  acceptPlanAdjustmentProposal,
+  acceptPlanAdjustmentProposal as acceptPlanAdjustmentProposalCore,
   expireStalePendingProposals,
-  maybeCreatePlanAdjustmentProposal,
-  weekdayOfISODate,
 } from "./workouts/planAdjustments.js";
 import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { rolloverTrainingPrograms } from "./workouts/rollover.js";
@@ -83,18 +83,26 @@ import { safeLogger } from "./logging/safeLogger.js";
 // the Firebase SDK ships them automatically. consumeAppCheckToken makes each
 // token one-shot (no replay).
 //
-// SCOPE CAVEAT: this gates the onCall surface only. The iOS app reaches the
-// backend almost entirely through the *Http onRequest endpoints (bearer
-// ID-token auth; the X-Firebase-AppCheck header it sends is never verified
-// server-side), so flipping this protects little by itself. Before public
-// launch, ALSO migrate the client off the *Http endpoints or add
-// getAppCheck().verifyToken(...) inside each onRequest handler.
+// SCOPE CAVEAT: this gates the onCall surface only. As of the callable
+// migration (claude/callable-migration) the iOS app routes through the
+// onCall callables by default (AppModel.useCallableFunctions), so flipping
+// this flag now protects real traffic. The *Http onRequest endpoints
+// (bearer ID-token auth; the X-Firebase-AppCheck header they receive is
+// never verified server-side) remain deployed ONLY as the rollback path
+// until a retirement PR removes them after the migration soaks.
 export function callableOpts(env: NodeJS.ProcessEnv = process.env) {
   const enforced = env.IRONBOI_ENFORCE_APP_CHECK === "true";
+  // Consumption is a SEPARATE opt-in: one-shot tokens + the iOS SDK's
+  // cached-token reuse means high-frequency callable traffic (which the
+  // client migration makes the norm) would replay-reject every call after
+  // the first within a token lifetime. Only enable after the client adopts
+  // limited-use tokens (HTTPSCallableOptions(requireLimitedUseAppCheckTokens))
+  // — see docs/operations/appcheck-enable-runbook.md.
+  const consume = env.IRONBOI_CONSUME_APP_CHECK === "true";
   return {
     region: "us-central1",
     enforceAppCheck: enforced,
-    consumeAppCheckToken: enforced,
+    consumeAppCheckToken: enforced && consume,
   } as const;
 }
 
@@ -102,7 +110,7 @@ export const CALLABLE_OPTS = callableOpts();
 import {
   AcceptProgramProposalRequest,
   OnboardingAnswerRequest,
-  acceptProgramProposal,
+  acceptProgramProposal as acceptProgramProposalCore,
   buildWorkoutPlanFromProfile,
   processOnboardingAnswer,
 } from "./onboarding/flow.js";
@@ -115,27 +123,28 @@ const require = createRequire(import.meta.url);
 const coach = require("./coach/ironboi-coach.v0.json") as CoachConfig;
 const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
-const IosCoachMessageRequest = z.object({
-  sessionId: z.string().min(1),
-  messageId: z.string().min(1),
-  content: z.string().min(1),
-  timestamp: z.string().datetime(),
-  toolCallIds: z.array(z.string()).default([]),
-  inputMode: CoachInputMode.default("text"),
-  structuredAnswer: z.record(z.string(), z.unknown()).optional(),
-  turnId: z.string().min(1).optional(),
-  startedAt: z.string().datetime().optional(),
-  // The client's local calendar date — lets a chat-driven "yes, just today"
-  // accept key its dailyOverride to the user's day, not the server's tz.
-  clientDate: z.string().date().optional(),
-});
-const WorkoutPlanAdjustmentStructuredAnswer = z
-  .object({
-    kind: z.literal("workout_plan_adjustment"),
-    dayKey: z.string().min(1),
-    exerciseName: z.string().min(1),
-  })
-  .passthrough();
+
+// Callable-surface twin of writeHttpHandlerError's ZodError branch: a
+// malformed payload must surface as invalid-argument (not opaque INTERNAL)
+// and leave the same operator log breadcrumb (issue paths, never values).
+function parseCallablePayload<T>(schema: { parse(input: unknown): T }, data: unknown, endpoint: string): T {
+  try {
+    return schema.parse(data ?? {});
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      safeLogger.warn("Callable rejected invalid request", {
+        event: "callable_invalid_request",
+        errorCode: endpoint,
+        errorDetail: error.issues
+          .slice(0, 5)
+          .map((issue) => `${issue.path.join(".")}:${issue.code}`)
+          .join(","),
+      });
+      throw new HttpsError("invalid-argument", "invalid_request");
+    }
+    throw error;
+  }
+}
 
 function requireUserId(auth?: { uid?: string }) {
   if (!auth?.uid) {
@@ -249,121 +258,9 @@ function writeHttpHandlerError(
   writeJsonResponse(response, 500, { ok: false, error: fallbackError });
 }
 
-async function maybeApplyWorkoutPlanAdjustment(
-  userId: string,
-  content: string,
-  structuredAnswer: unknown,
-) {
-  const context = WorkoutPlanAdjustmentStructuredAnswer.safeParse(structuredAnswer);
-  if (!context.success) return null;
-
-  const targetWeight = parseRequestedPounds(content);
-  if (targetWeight === null) return null;
-
-  const planRef = db.doc(workoutPlanPath(userId, "current"));
-  const now = new Date().toISOString();
-
-  return db.runTransaction(async (transaction) => {
-    const planSnap = await transaction.get(planRef);
-    if (!planSnap.exists) return null;
-
-    const plan = planSnap.data() ?? {};
-    const days = isRecord(plan.days) ? plan.days : {};
-    const rawDay = days[context.data.dayKey];
-    const day = isRecord(rawDay) ? rawDay : null;
-    const exercises: unknown[] =
-      day && Array.isArray(day.exercises) ? day.exercises : [];
-    const exerciseIndex = exercises.findIndex((exercise: unknown) => {
-      if (!isRecord(exercise)) return false;
-      return normalizeExerciseName(exercise.name) === normalizeExerciseName(context.data.exerciseName);
-    });
-
-    if (!day || exerciseIndex < 0) return null;
-
-    const nextExercises = exercises.map((exercise: unknown, index: number) => {
-      if (index !== exerciseIndex || !isRecord(exercise)) return exercise;
-      return { ...exercise, weight: targetWeight };
-    });
-    const nextDays = {
-      ...days,
-      [context.data.dayKey]: {
-        ...day,
-        exercises: nextExercises,
-      },
-    };
-
-    // If a dailyOverride is active for this day, the user is LOOKING at the
-    // override, not the template — updating only the template would make
-    // this weight change invisible. Patch the same exercise inside any
-    // override whose weekday matches too.
-    const overrides = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
-    const nextOverrides = Object.fromEntries(
-      Object.entries(overrides).map(([date, rawOverride]) => {
-        if (!isRecord(rawOverride) || weekdayOfISODate(date) !== context.data.dayKey) {
-          return [date, rawOverride];
-        }
-        const overrideExercises = Array.isArray(rawOverride.exercises) ? rawOverride.exercises : [];
-        return [
-          date,
-          {
-            ...rawOverride,
-            exercises: overrideExercises.map((exercise: unknown) =>
-              isRecord(exercise) &&
-              normalizeExerciseName(exercise.name) === normalizeExerciseName(context.data.exerciseName)
-                ? { ...exercise, weight: targetWeight }
-                : exercise,
-            ),
-          },
-        ];
-      }),
-    );
-
-    transaction.set(
-      planRef,
-      {
-        days: nextDays,
-        ...(Object.keys(nextOverrides).length > 0 ? { dailyOverrides: nextOverrides } : {}),
-        source: "user_edited",
-        updatedAt: now,
-        serverUpdatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
-
-    safeLogger.info("Workout plan adjusted from coach context", {
-      event: "workout_plan_adjusted_from_coach_context",
-      userId,
-      outcome: "weight_updated",
-    });
-
-    return {
-      dayKey: context.data.dayKey,
-      exerciseName: context.data.exerciseName,
-      targetWeight,
-    };
-  });
-}
-
-function parseRequestedPounds(content: string) {
-  // LAST match wins: the workout-sheet context prefix ("currently 3x8 at
-  // 135 lb.") precedes the user's actual request ("make it 155 lb"), so
-  // first-match kept re-applying the CURRENT weight (live-audit finding).
-  const matches = [...content.matchAll(/\b(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)\b/gi)];
-  const match = matches[matches.length - 1];
-  if (!match) return null;
-  const value = Number(match[1]);
-  return Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function normalizeExerciseName(value: unknown) {
-  return typeof value === "string"
-    ? value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ")
-    : "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+// maybeApplyWorkoutPlanAdjustment and the shared coach-message handler now
+// live in ./coach/sendMessage.ts so the onCall and *Http wrappers share one
+// implementation (and so the logic is unit-testable in the emulator suite).
 
 async function deleteDocumentTree(ref: DocumentReference) {
   const collections = await ref.listCollections();
@@ -396,9 +293,10 @@ async function deleteCollectionTree(collection: CollectionReference) {
 //
 // Overwrites the existing plan doc. The iOS UI puts a confirm step in
 // front of this — the callable itself doesn't second-guess.
-export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
-  const userId = requireUserId(request.auth);
-
+// Shared implementation behind BOTH regenerateWorkoutPlan (onCall) and
+// regenerateWorkoutPlanHttp. Throws HttpsError("failed-precondition") when
+// the profile is missing; the Http wrapper maps that to a 400.
+export async function handleRegenerateWorkoutPlan(userId: string) {
   const profileSnap = await db.doc(profilePath(userId)).get();
   if (!profileSnap.exists) {
     throw new HttpsError("failed-precondition", "profile_not_found");
@@ -437,7 +335,12 @@ export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
     payload: { source: "regenerate_plan", daysPerWeek: profile.schedule.daysPerWeek },
   });
 
-  return { ok: true, daysPerWeek: profile.schedule.daysPerWeek };
+  return { ok: true as const, daysPerWeek: profile.schedule.daysPerWeek };
+}
+
+export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  return handleRegenerateWorkoutPlan(userId);
 });
 
 export const deleteAccount = onCall(
@@ -489,6 +392,16 @@ export const getCoachBootstrap = onCall(CALLABLE_OPTS, async (request) => {
       philosophy: seed.PHILOSOPHY,
     },
   };
+});
+
+// onCall twin of resetMyDataHttp — wipes users/{uid}/** but (unlike
+// deleteAccount) keeps the auth user and writes no tombstone: this is
+// "start over", not "delete my account". The parity audit
+// (claude/callable-migration) found no callable existed for this endpoint.
+export const resetMyData = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  await deleteDocumentTree(db.doc(userRoot(userId)));
+  return { ok: true, userId };
 });
 
 export const resetMyDataHttp = onRequest(
@@ -545,9 +458,25 @@ export const getUserState = onCall(CALLABLE_OPTS, async (request) => {
   };
 });
 
-export const upsertProfile = onCall(CALLABLE_OPTS, async (request) => {
-  const userId = requireUserId(request.auth);
-  const parsed = UserHealthProfile.parse(stripUserId(request.data, userId));
+// Shared implementation behind BOTH upsertProfile (onCall) and
+// upsertProfileHttp. createdAt/updatedAt are required by the schema but
+// server-owned — the client never sends them. Inject here: preserve the
+// original createdAt on updates, stamp updatedAt now. (The pre-migration
+// onCall demanded them from the client and so rejected every real iOS
+// payload — drift found by the parity audit on claude/callable-migration.)
+export async function handleUpsertProfile(userId: string, rawData: unknown) {
+  const now = new Date().toISOString();
+  const existing = await db.doc(profilePath(userId)).get();
+  const createdAt =
+    existing.exists && typeof existing.data()?.createdAt === "string"
+      ? (existing.data()!.createdAt as string)
+      : now;
+  const body = isRecord(rawData) ? rawData : {};
+  const parsed = UserHealthProfile.parse({
+    ...stripUserId(body, userId),
+    createdAt,
+    updatedAt: now,
+  });
 
   await db.doc(profilePath(userId)).set(
     {
@@ -557,7 +486,12 @@ export const upsertProfile = onCall(CALLABLE_OPTS, async (request) => {
     { merge: true },
   );
 
-  return { ok: true, userId };
+  return { ok: true as const, userId };
+}
+
+export const upsertProfile = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  return handleUpsertProfile(userId, request.data);
 });
 
 export const recordConsent = onCall(CALLABLE_OPTS, async (request) => {
@@ -913,32 +847,16 @@ export const createCoachSession = onCall(
   },
 );
 
+// Parity-audited onCall twin of sendCoachMessageHttp. Pre-migration this
+// callable parsed CoachMessage.extend(...) STRICT — so the clientDate and
+// startedAt the iOS app sends were REJECTED — and it skipped the session
+// upsert and the deterministic weight-update path
+// (maybeApplyWorkoutPlanAdjustment). Both wrappers now parse the same
+// IosCoachMessageRequest and call the same handleSendCoachMessage.
 export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
-  const parsed = CoachMessage.extend({
-    sessionId: z.string().min(1),
-    role: z.literal("user"),
-  }).parse(stripUserId(request.data, userId));
-
-  await db.doc(coachSessionMessagePath(userId, parsed.sessionId, parsed.messageId)).set({
-    ...parsed,
-    status: "queued",
-    serverCreatedAt: FieldValue.serverTimestamp(),
-  });
-
-  // Flag on = the LLM tool loop (orchestrate.ts) owns proposal creation;
-  // running the keyword classifier too would double-create proposals for
-  // the same message.
-  const planAdjustment = isCoachToolLoopEnabled()
-    ? null
-    : await maybeCreatePlanAdjustmentProposal({
-        db,
-        userId,
-        content: parsed.content,
-        structuredAnswer: parsed.structuredAnswer,
-      });
-
-  return { ok: true, messageId: parsed.messageId, planAdjustment };
+  const parsed = parseCallablePayload(IosCoachMessageRequest, request.data, "sendCoachMessage");
+  return handleSendCoachMessage(db, userId, parsed);
 });
 
 export const sendCoachMessageHttp = onRequest(
@@ -963,73 +881,42 @@ export const sendCoachMessageHttp = onRequest(
 
     try {
       const parsed = IosCoachMessageRequest.parse(request.body?.data ?? request.body);
-      const startedAt = parsed.startedAt ?? parsed.timestamp;
-
-      await db.doc(coachSessionPath(userId, parsed.sessionId)).set(
-        {
-          userId,
-          sessionId: parsed.sessionId,
-          startedAt,
-          outcome: "active",
-          serverCreatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-
-      const messageData: Record<string, unknown> = {
-        userId,
-        sessionId: parsed.sessionId,
-        messageId: parsed.messageId,
-        role: "user",
-        content: parsed.content,
-        timestamp: parsed.timestamp,
-        toolCallIds: parsed.toolCallIds,
-        inputMode: parsed.inputMode,
-        status: "queued",
-        serverCreatedAt: FieldValue.serverTimestamp(),
-      };
-      if (parsed.structuredAnswer !== undefined) {
-        messageData.structuredAnswer = parsed.structuredAnswer;
-      }
-      if (parsed.turnId !== undefined) {
-        messageData.turnId = parsed.turnId;
-      }
-      if (parsed.clientDate !== undefined) {
-        messageData.clientDate = parsed.clientDate;
-      }
-
-      await db
-        .doc(coachSessionMessagePath(userId, parsed.sessionId, parsed.messageId))
-        .set(messageData);
-      const directPlanAdjustment = await maybeApplyWorkoutPlanAdjustment(
-        userId,
-        parsed.content,
-        parsed.structuredAnswer,
-      );
-      // Flag on = the LLM tool loop owns proposal creation (see
-      // sendCoachMessage above); the direct weight-update path stays either
-      // way — it's deterministic and narrower than anything the loop does.
-      const planAdjustment =
-        directPlanAdjustment ??
-        (isCoachToolLoopEnabled()
-          ? null
-          : await maybeCreatePlanAdjustmentProposal({
-              db,
-              userId,
-              content: parsed.content,
-              structuredAnswer: parsed.structuredAnswer,
-            }));
-
-      writeJsonResponse(response, 200, {
-        ok: true,
-        userId,
-        sessionId: parsed.sessionId,
-        messageId: parsed.messageId,
-        planAdjustment,
-      });
+      const result = await handleSendCoachMessage(db, userId, parsed);
+      writeJsonResponse(response, 200, result);
     } catch (error) {
       writeHttpHandlerError(response, error, "send_coach_message_failed");
     }
+  },
+);
+
+// onCall twin of sendOnboardingAnswerHttp — same OnboardingAnswerRequest
+// schema, same processOnboardingAnswer core, same response shape. The
+// parity audit found no callable existed for this endpoint.
+export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
+  return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
+});
+
+// onCall twin of acceptProgramProposalHttp — same schema, same core, same
+// response shape. The parity audit found no callable existed for this
+// endpoint.
+export const acceptProgramProposal = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = parseCallablePayload(AcceptProgramProposalRequest, request.data, "acceptProgramProposal");
+  return acceptProgramProposalCore(db, userId, parsed);
+});
+
+// onCall twin of acceptPlanAdjustmentProposalHttp — same schema (including
+// the scope + clientDate fields the iOS proposal card sends), same core,
+// same response shape. The parity audit found no callable existed for this
+// endpoint.
+export const acceptPlanAdjustmentProposal = onCall(
+  CALLABLE_OPTS,
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    const parsed = parseCallablePayload(AcceptPlanAdjustmentProposalRequest, request.data, "acceptPlanAdjustmentProposal");
+    return acceptPlanAdjustmentProposalCore(db, userId, parsed);
   },
 );
 
@@ -1085,7 +972,7 @@ export const acceptProgramProposalHttp = onRequest(
 
     try {
       const parsed = AcceptProgramProposalRequest.parse(request.body?.data ?? request.body);
-      const result = await acceptProgramProposal(db, userId, parsed);
+      const result = await acceptProgramProposalCore(db, userId, parsed);
       writeJsonResponse(response, 200, result);
     } catch (error) {
       writeHttpHandlerError(response, error, "accept_program_proposal_failed");
@@ -1117,7 +1004,7 @@ export const acceptPlanAdjustmentProposalHttp = onRequest(
       const parsed = AcceptPlanAdjustmentProposalRequest.parse(
         request.body?.data ?? request.body,
       );
-      const result = await acceptPlanAdjustmentProposal(db, userId, parsed);
+      const result = await acceptPlanAdjustmentProposalCore(db, userId, parsed);
       writeJsonResponse(response, 200, result);
     } catch (error) {
       writeHttpHandlerError(response, error, "accept_plan_adjustment_failed");
@@ -1152,31 +1039,8 @@ export const upsertProfileHttp = onRequest(
     if (!userId) return;
 
     try {
-      // createdAt/updatedAt are required by the schema but server-owned — the
-      // client never sends them. Inject here: preserve the original createdAt
-      // on updates, stamp updatedAt now. (Without this, every save failed
-      // schema validation, masked until now behind the App Check rejection.)
-      const now = new Date().toISOString();
-      const existing = await db.doc(profilePath(userId)).get();
-      const createdAt =
-        existing.exists && typeof existing.data()?.createdAt === "string"
-          ? (existing.data()!.createdAt as string)
-          : now;
-      const parsed = UserHealthProfile.parse({
-        ...stripUserId(request.body?.data ?? request.body, userId),
-        createdAt,
-        updatedAt: now,
-      });
-
-      await db.doc(profilePath(userId)).set(
-        {
-          ...parsed,
-          serverUpdatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
-
-      writeJsonResponse(response, 200, { ok: true, userId });
+      const result = await handleUpsertProfile(userId, request.body?.data ?? request.body);
+      writeJsonResponse(response, 200, result);
     } catch (error) {
       writeHttpHandlerError(response, error, "upsert_profile_failed");
     }
@@ -1207,42 +1071,13 @@ export const regenerateWorkoutPlanHttp = onRequest(
     if (!userId) return;
 
     try {
-      const profileSnap = await db.doc(profilePath(userId)).get();
-      if (!profileSnap.exists) {
+      const result = await handleRegenerateWorkoutPlan(userId);
+      writeJsonResponse(response, 200, result);
+    } catch (error) {
+      if (error instanceof HttpsError && error.code === "failed-precondition") {
         writeJsonResponse(response, 400, { ok: false, error: "profile_not_found" });
         return;
       }
-      const profileData = profileSnap.data() ?? {};
-      const profile = {
-        schedule: {
-          daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
-            ? profileData.schedule.daysPerWeek
-            : 3,
-          preferredDays: Array.isArray(profileData.schedule?.preferredDays)
-            ? (profileData.schedule.preferredDays as string[])
-            : [],
-        },
-      };
-
-      const now = new Date().toISOString();
-      const plan = buildWorkoutPlanFromProfile(
-        userId,
-        profile,
-        seed.DEFAULT_PLAN,
-        now,
-      );
-
-      await writeRegeneratedPlanAndProgram(db, userId, plan.days, now);
-
-      await recordAuditEventBestEffort(db, {
-        userId,
-        eventType: "memory_fact_written",
-        actor: "user",
-        payload: { source: "regenerate_plan", daysPerWeek: profile.schedule.daysPerWeek },
-      });
-
-      writeJsonResponse(response, 200, { ok: true, daysPerWeek: profile.schedule.daysPerWeek });
-    } catch (error) {
       writeHttpHandlerError(response, error, "regenerate_workout_plan_failed");
     }
   },
