@@ -241,7 +241,11 @@ private struct ProgressSection: View {
                 Text("Showing up")
                     .myoStyle(.title)
                     .foregroundStyle(MyoColor.Text.primary.color)
-                Text("\(summary.adherence.completedSessions) of \(summary.adherence.plannedSessions) planned sessions")
+                Text(
+                    summary.adherence.plannedSessions > 0
+                        ? "\(summary.adherence.completedSessions) of \(summary.adherence.plannedSessions) planned sessions"
+                        : "\(summary.adherence.completedSessions) sessions logged"
+                )
                     .myoStyle(.numeric)
                     .foregroundStyle(MyoColor.Text.secondary.color)
                 if summary.adherence.streakWeeks > 0 {
@@ -309,10 +313,10 @@ private struct ProgressSection: View {
                 if let trend = summary.body.trendPctPerWeek {
                     Text(weightTrendLabel(trend))
                         .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(summary.body.withinSafeBand ? MyoColor.Text.tertiary.color : MyoColor.State.danger.color)
+                        .foregroundStyle(showsSafetyCaution ? MyoColor.State.danger.color : MyoColor.Text.tertiary.color)
                 }
 
-                if !summary.body.withinSafeBand {
+                if showsSafetyCaution {
                     Label("Faster than a safe pace — worth a chat with Coach", systemImage: "exclamationmark.shield")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(MyoColor.State.danger.color)
@@ -328,6 +332,14 @@ private struct ProgressSection: View {
         }
         .padding(MyoTheme.Spacing.md)
         .myoCard()
+    }
+
+    // Defense-in-depth against stale persisted docs: the caution needs BOTH
+    // the server flag AND an actually-dangerous rate (< -1%/wk), mirroring
+    // the pairing the coach prompt uses. A doc written under older
+    // semantics can't scare a plateaued user.
+    private var showsSafetyCaution: Bool {
+        !summary.body.withinSafeBand && (summary.body.trendPctPerWeek ?? 0) < -1
     }
 
     private func trendLabel(_ pct: Double) -> String {

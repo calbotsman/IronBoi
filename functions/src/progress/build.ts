@@ -25,8 +25,6 @@ const VOLUME_TREND_THRESHOLD = 0.05;
 // Safety: losing faster than 1% of body weight per week is a caution under
 // EVERY goal (rapid-weight-loss coaching is already a blocked topic).
 const MAX_SAFE_LOSS_PCT_PER_WEEK = 1.0;
-// For a fat-loss goal, the on-band rate of loss is 0.25–1%/wk.
-const MIN_ON_BAND_LOSS_PCT_PER_WEEK = 0.25;
 
 type Loose = Record<string, unknown>;
 
