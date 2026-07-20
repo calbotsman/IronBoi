@@ -1,0 +1,46 @@
+# Nightly live E2E smoke against the REAL ironboi-staging backend.
+#
+# This exercises the deployed Gemini coach tool loop end-to-end as a
+# throwaway anonymous user (sign-up -> plan bootstrap -> chat -> injury
+# triage arc -> chat-accept -> account deletion). It spends real Gemini
+# tokens, so it deliberately does NOT run on pushes or pull requests —
+# schedule + manual dispatch only.
+#
+# Scheduled workflows run from the default branch. 09:00 UTC ~= 4-5am ET.
+
+name: nightly-e2e
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+# Never let two live runs overlap (each creates + deletes a real staging
+# user and spends real model tokens). Don't cancel an in-flight run either.
+concurrency:
+  group: nightly-e2e-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No install: the harness is plain Node with zero dependencies.
+      # tee the markdown report (stdout) into the job summary; progress
+      # logs go to stderr. pipefail keeps the script's exit code through
+      # the pipe.
+      - name: Run live staging E2E smoke
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/e2e-staging-smoke.mjs | tee "$GITHUB_STEP_SUMMARY"
