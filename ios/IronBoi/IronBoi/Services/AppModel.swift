@@ -82,12 +82,12 @@ final class AppModel: NSObject, ObservableObject {
     // The *Http endpoints stay deployed until a retirement PR after the
     // callable migration has soaked.
     // Transport switch for the callable migration. DEFAULT FALSE until the
-    // invoker-IAM drift found by the live E2E run (PR #13: a subset of
-    // callable Cloud Run services return platform-level 401) is fixed and
-    // verified — flipping early would break reset/regenerate/delete flows.
-    // Flip to true + rebuild once `gh`/console confirms all callable
-    // services accept invocations.
-    private let useCallableFunctions = false
+    // 2026-07-20: the invoker-IAM drift is fixed and verified live — all
+    // five drifted callable services (createCoachSession, deleteAccount,
+    // regenerateWorkoutPlan, confirmMemoryFact, ingestHealthSamples) got
+    // their allUsers run.invoker binding restored, and the staging E2E's
+    // deleteAccount callable check passes.
+    private let useCallableFunctions = true
     // Same region + construction as deleteAccount always used.
     private lazy var callableFunctions = Functions.functions(region: "us-central1")
 
