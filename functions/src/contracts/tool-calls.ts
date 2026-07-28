@@ -98,6 +98,11 @@ export const AdaptPlanRequest = ToolCallBase.extend({
     "equipment_unavailable",
     "schedule_change",
     "missed_session",
+    // A LAYOFF, not a single miss: the user has been away long enough that
+    // resuming at full load is the wrong answer ("I fell off", "haven't
+    // trained in three weeks"). Routes to the re-entry ramp rather than the
+    // single-day skip patch that missed_session produces.
+    "returning_from_layoff",
   ]),
   userNote: z.string().optional(),
   // Mirrors PlanAdjustmentProposal.appliesTo — dayKey defaults to today when
@@ -157,6 +162,24 @@ export const AdaptPlanRequest = ToolCallBase.extend({
   // Suggested recovery window (days) before the coach checks back in.
   // Clamped server-side to 3–14; defaults to 5 when omitted.
   recoveryDays: z.number().int().min(1).max(30).optional(),
+  // Re-entry ramp shape — the graded return for reason=returning_from_layoff.
+  // Index 0 is the user's CURRENT week (today through Sunday), 1 the next
+  // calendar week, and so on. The model authors only the PERCENTAGES and the
+  // one-line reason for each; the server derives every session by scaling the
+  // user's own baseline template, so a ramp can never introduce an exercise
+  // the user didn't already program. Must end at 100 (see the server-side
+  // validation in workouts/planAdjustments.ts) — a ramp with no return to
+  // normal is just a permanent downgrade wearing a temporary label.
+  rampWeeks: z
+    .array(
+      z.object({
+        intensityPct: z.number().int().min(40).max(100),
+        note: z.string().min(1).max(120),
+      }).strict(),
+    )
+    .min(2)
+    .max(6)
+    .optional(),
 });
 
 export const AdaptPlanResult = ToolResultBase.extend({

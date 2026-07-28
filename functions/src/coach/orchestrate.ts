@@ -20,7 +20,7 @@ import {
   type SafetyVerdict,
 } from "./safety.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
-import { findLatestPendingProposal } from "../workouts/planAdjustments.js";
+import { findLatestPendingProposal, publishDraftProposals } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
@@ -47,6 +47,7 @@ type OrchestrateCoachTurnArgs = {
   // message, if any — used to key today-scope overrides to the user's day.
   clientDate?: string;
   geminiApiKey?: string;
+  openRouterApiKey?: string;
 };
 
 // Phase 1 Task 1.4 — abort the in-flight model call 5s before the function's
@@ -76,6 +77,7 @@ export async function orchestrateCoachTurn({
   userContent,
   clientDate,
   geminiApiKey,
+  openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
   const assistantMessageId = `${messageId}_coach`;
   const assistantRef = db.doc(
@@ -127,6 +129,11 @@ export async function orchestrateCoachTurn({
   // otherwise the Train tab changes with no explanation, or worse, a
   // refusal message implies it didn't.
   let appliedPlanChange = false;
+  // Declared outside the try so the finally can publish them even when the
+  // turn throws — a proposal worked out before the reply failed is still a
+  // real proposal, and stranding it makes the user re-ask for a change that
+  // was already settled.
+  const ownDraftProposalIds: string[] = [];
 
   try {
     const usageCap = await checkDailyUsageCap(db, userId);
@@ -185,7 +192,7 @@ export async function orchestrateCoachTurn({
       userContent,
       { toolsEnabled: toolLoopEnabled },
     );
-    const provider = selectCoachModelProvider({ geminiApiKey });
+    const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });
 
     if (!provider) {
       const fallback =
@@ -237,6 +244,13 @@ export async function orchestrateCoachTurn({
             const record = toolResult as Record<string, unknown>;
             if (toolName === "accept_plan_adjustment" && record.ok === true) {
               appliedPlanChange = true;
+            }
+            // Every draft THIS turn created, in creation order. The publish
+            // at the end of the turn only touches these — never a draft left
+            // behind by a dead turn, and never one belonging to a turn
+            // running concurrently with this one.
+            if (typeof record.proposalId === "string") {
+              ownDraftProposalIds.push(record.proposalId);
             }
             return record;
           } catch (error) {
@@ -373,5 +387,37 @@ export async function orchestrateCoachTurn({
       },
       { merge: true },
     );
+  } finally {
+    // The turn is over — whatever proposal it settled on becomes the single
+    // visible card, atomically. In `finally` rather than the success path
+    // because a proposal the model created before the reply failed is still
+    // a real, reviewable proposal; the catch block above already tells the
+    // user their message was saved, and stranding the card would make them
+    // re-ask for a change that was already worked out.
+    try {
+      const { published, superseded } = await publishDraftProposals(db, userId, ownDraftProposalIds);
+      if (published) {
+        safeLogger.info("Plan adjustment draft published", {
+          event: "plan_adjustment_draft_published",
+          userId,
+          sessionId,
+          turnId,
+          proposalId: published,
+          outcome: `superseded_${superseded}`,
+        });
+      }
+    } catch (publishError) {
+      // Never let publishing mask the turn's own outcome. The draft stays a
+      // draft; the stale-draft sweep retires it so it can't surface later
+      // attached to a conversation the user has moved on from.
+      safeLogger.error("Plan adjustment draft publish failed", {
+        event: "plan_adjustment_draft_publish_failed",
+        userId,
+        sessionId,
+        turnId,
+        errorDetail:
+          publishError instanceof Error ? publishError.message.slice(0, 200) : "unknown_error",
+      });
+    }
   }
 }

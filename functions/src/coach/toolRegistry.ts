@@ -40,7 +40,10 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
             "equipment_unavailable",
             "schedule_change",
             "missed_session",
+            "returning_from_layoff",
           ],
+          description:
+            "missed_session = ONE session missed. returning_from_layoff = the user has been away long enough that resuming at full load is wrong ('I fell off', 'haven't trained in a few weeks', 'was travelling for a month') — pair it with rampWeeks. NOT for a layoff they are still unwell or in pain from; see the ramp guidance.",
         },
         userNote: {
           type: "string",
@@ -54,9 +57,37 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
         exerciseName: { type: "string" },
         scope: {
           type: "string",
-          enum: ["today", "rest_of_week", "going_forward"],
+          enum: ["today", "rest_of_week", "going_forward", "reentry_ramp"],
           description:
-            "Only set once the user has told you which they want. rest_of_week = the adjusted days apply this week only, then the plan reverts automatically.",
+            "Only set once the user has told you which they want. rest_of_week = the adjusted days apply this week only, then the plan reverts automatically. reentry_ramp is implied by rampWeeks — don't set it yourself, and never ask 'today or going forward?' about a ramp.",
+        },
+        rampWeeks: {
+          type: "array",
+          // Bounds mirrored from AdaptPlanRequest.rampWeeks. Without them the
+          // model can't see the limits and its call is rejected by Zod before
+          // the self-correcting hints ever run.
+          minItems: 2,
+          maxItems: 6,
+          description:
+            "A GRADED RETURN over several weeks — the right answer for returning_from_layoff. Index 0 is the rest of the user's current week, 1 the next calendar week, and so on. You author only the percentages and a short reason per week; the server builds every session by scaling the user's OWN plan, so don't send exercises. Must step up (never down) and the LAST week must be 100 so the plan actually returns to normal. 2–6 weeks. Typical: 3 weeks off → [60, 80, 100].",
+          items: {
+            type: "object",
+            properties: {
+              intensityPct: {
+                type: "integer",
+                minimum: 40,
+                maximum: 100,
+                description: "40–100. Percentage of the user's normal sets and load for that week.",
+              },
+              note: {
+                type: "string",
+                minLength: 1,
+                maxLength: 120,
+                description: "One short line the user will read on the card, e.g. 'Rebuild the movement pattern, leave reps in reserve.'",
+              },
+            },
+            required: ["intensityPct", "note"],
+          },
         },
         dayPatches: {
           type: "array",
@@ -258,6 +289,17 @@ export function buildCoachToolRegistry(
             hint: "If you haven't asked the red-flag questions yet, ask them first and call adapt_plan WITHOUT painTriage; attest redFlagsAsked:true only after actually asking.",
           };
         }
+        // Zod runs BEFORE validateReentryRamp, so a ramp that violates the
+        // schema bounds (wrong week count, out-of-range percentage, overlong
+        // note) never reaches the RAMP_HINTS table below. Without this the
+        // model gets a bare "invalid_adapt_plan_args" and retries identically.
+        if (parsed.error.issues.some((issue) => issue.path[0] === "rampWeeks")) {
+          return {
+            ok: false,
+            error: "invalid_adapt_plan_args",
+            hint: "rampWeeks must be 2–6 entries, each { intensityPct: 40–100 (integer), note: ≤120 chars }. It must step up, never down, and the last entry must be 100.",
+          };
+        }
         return { ok: false, error: "invalid_adapt_plan_args" };
       }
       const result = await createPlanAdjustmentProposalFromTool({
@@ -271,6 +313,7 @@ export function buildCoachToolRegistry(
         dayPatches: parsed.data.dayPatches,
         painTriage: parsed.data.painTriage,
         recoveryDays: parsed.data.recoveryDays,
+        rampWeeks: parsed.data.rampWeeks,
         rawUserText: context.rawUserText,
         clientDate: context.clientDate,
       });
@@ -286,8 +329,42 @@ export function buildCoachToolRegistry(
         scope: parsed.data.scope ?? null,
         dayPatchCount: parsed.data.dayPatches?.length ?? 0,
         hasPainTriage: Boolean(parsed.data.painTriage),
+        rampWeekCount: parsed.data.rampWeeks?.length ?? 0,
+        // Percentages only — the per-week `note` is model-authored text and
+        // stays off the wire.
+        rampShape: parsed.data.rampWeeks?.map((week) => week.intensityPct).join("-") ?? null,
         proposalId: "proposalId" in result ? result.proposalId : null,
       });
+
+      // Self-correcting loop for ramps, same principle as the pain branch
+      // below: a rejected ramp shape is a fixable authoring mistake, so tell
+      // the model exactly what to change instead of returning a bare error
+      // it will retry identically.
+      const RAMP_HINTS: Record<string, string> = {
+        ramp_must_end_at_full_intensity:
+          "The LAST rampWeeks entry must be intensityPct: 100 — otherwise the user never actually returns to their normal plan. Re-send with a final 100% week.",
+        ramp_intensity_must_not_decrease:
+          "rampWeeks must step UP (or hold), never down. Re-send with non-decreasing intensityPct values.",
+        ramp_needs_at_least_two_weeks:
+          "A ramp needs at least 2 weeks (a reduced week, then a return). For a single reduced week use scope: rest_of_week instead.",
+        ramp_first_week_must_be_reduced:
+          "The FIRST rampWeeks entry must be below 100 — a ramp starting at full intensity changes nothing.",
+        ramp_weeks_missing:
+          "reason: returning_from_layoff needs rampWeeks. Re-send with 2–6 weeks of {intensityPct, note}, e.g. [{intensityPct:60,...},{intensityPct:80,...},{intensityPct:100,...}].",
+        ramp_not_valid_while_unwell:
+          "The user is still symptomatic from an illness. Do NOT propose a ramp — say plainly that returning to training while still unwell should be cleared with their clinician first, and keep the reply brief.",
+        ramp_not_valid_for_this_category:
+          "This user's own words describe pain or a pregnancy/postpartum context, so a ramp is the wrong tool — it scales their existing plan down but cannot work AROUND anything. Follow the pain triage instead: ask the red-flag questions, then call adapt_plan with dayPatches containing substitute exercises.",
+        ramp_requires_reentry_ramp_scope:
+          "Don't set `scope` when sending rampWeeks — the ramp implies its own scope. Re-send without the scope field.",
+        reentry_ramp_scope_requires_ramp_weeks:
+          "scope: reentry_ramp is only valid together with rampWeeks. Either send rampWeeks, or pick a different scope.",
+        ramp_has_no_training_days_to_scale:
+          "The user's plan has no training days left inside the ramp's reduced weeks, so there is nothing to scale down. Check the plan before proposing a ramp.",
+      };
+      if ("error" in result && result.error && RAMP_HINTS[result.error]) {
+        return { ok: false, error: result.error, hint: RAMP_HINTS[result.error] };
+      }
       // Self-correcting loop: a pain proposal that lands locked tells the
       // model WHY in the tool result, so it can re-call adapt_plan with the
       // missing fields in the SAME turn instead of presenting a dead-end

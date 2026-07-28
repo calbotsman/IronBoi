@@ -114,7 +114,14 @@ export async function maybeCreatePlanAdjustmentProposal(input: {
 // fills in) maps onto the same PlanAdjustmentCategory taxonomy so both
 // paths share summaries, rationale, and safety notes.
 const ADAPT_PLAN_REASON_TO_CATEGORY: Record<
-  "too_hard" | "too_easy" | "pain_or_discomfort" | "time_constraint" | "equipment_unavailable" | "schedule_change" | "missed_session",
+  | "too_hard"
+  | "too_easy"
+  | "pain_or_discomfort"
+  | "time_constraint"
+  | "equipment_unavailable"
+  | "schedule_change"
+  | "missed_session"
+  | "returning_from_layoff",
   AdjustmentCategory
 > = {
   too_hard: "other",
@@ -124,6 +131,12 @@ const ADAPT_PLAN_REASON_TO_CATEGORY: Record<
   equipment_unavailable: "equipment_limit",
   schedule_change: "skip_or_reschedule",
   missed_session: "skip_or_reschedule",
+  // Deliberately NOT skip_or_reschedule: that category resolves to a single
+  // target day (resolveAppliesToDayKey) and patches it to "Rest · Skipped",
+  // which is the right answer for one missed session and the wrong answer
+  // for a layoff. readiness_low carries the "reduce, don't cancel" meaning
+  // a graded return needs.
+  returning_from_layoff: "readiness_low",
 };
 
 export type ToolDayPatch = {
@@ -137,6 +150,37 @@ export type PainTriage = {
   userReportsSevere: boolean;
   description: string;
 };
+
+export type ReentryRampWeekInput = { intensityPct: number; note: string };
+
+// A re-entry ramp is only safe-by-construction if it actually ramps: every
+// week at or below the user's own baseline, never stepping DOWN as it goes,
+// and finishing at 100% so the plan genuinely returns to normal. A ramp that
+// ends at 70% is a permanent downgrade wearing a temporary label — and
+// because accept writes dated overrides that simply stop, the user would
+// silently snap back to full load on an arbitrary date instead of arriving
+// there. Rejected here rather than clamped: the model should re-author the
+// ramp, not have the server invent the missing final week.
+export function validateReentryRamp(
+  rampWeeks: ReentryRampWeekInput[] | undefined,
+): { ok: true } | { ok: false; error: string } {
+  if (!rampWeeks?.length) return { ok: false, error: "ramp_weeks_missing" };
+  if (rampWeeks.length < 2) return { ok: false, error: "ramp_needs_at_least_two_weeks" };
+  const last = rampWeeks[rampWeeks.length - 1];
+  if (last.intensityPct !== 100) return { ok: false, error: "ramp_must_end_at_full_intensity" };
+  for (let index = 1; index < rampWeeks.length; index += 1) {
+    if (rampWeeks[index].intensityPct < rampWeeks[index - 1].intensityPct) {
+      return { ok: false, error: "ramp_intensity_must_not_decrease" };
+    }
+  }
+  // A ramp whose first week is already 100% writes nothing at all — an
+  // accept that changes nothing while reporting success is the exact
+  // failure mode computePatchedDay guards against for empty diff patches.
+  if (rampWeeks[0].intensityPct === 100) {
+    return { ok: false, error: "ramp_first_week_must_be_reduced" };
+  }
+  return { ok: true };
+}
 
 const INJURY_SAFETY_NOTES = [
   "Stop immediately if pain sharpens, radiates, or changes character.",
@@ -154,6 +198,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   dayPatches?: ToolDayPatch[];
   painTriage?: PainTriage;
   recoveryDays?: number;
+  rampWeeks?: ReentryRampWeekInput[];
   // The RAW user turn that triggered this call, straight from the message
   // doc — never model-authored. The severe screen and category coercion run
   // over this text so a model paraphrase ("leg discomfort" for "shooting
@@ -166,10 +211,19 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // the severe screen), the proposal IS an injury proposal no matter what
   // reason the model picked — schedule_change can't smuggle a pain request
   // past the triage gate.
-  const rawSaysInjury =
-    rawText.length > 0 &&
-    (classifyPlanAdjustment(rawText, false) === "injury_pain" || hasSevereMarkers(rawText));
-  const category = rawSaysInjury ? "injury_pain" : ADAPT_PLAN_REASON_TO_CATEGORY[input.reason];
+  // Coerce to whatever HIGH-RISK category the user's own words describe, not
+  // just injury. classifyPlanAdjustment checks pregnancy BEFORE injury, so an
+  // injury-only coercion let "I'm 6 weeks postpartum, ease me back in" keep
+  // the model's benign reason and skip the high-risk hold entirely. Driving
+  // the test off riskForCategory means a category added later can't quietly
+  // fall through this gate the same way.
+  const rawCategory = rawText.length > 0 ? classifyPlanAdjustment(rawText, false) : null;
+  const rawSaysHighRisk = rawCategory !== null && riskForCategory(rawCategory, "") === "high";
+  const category = rawSaysHighRisk
+    ? rawCategory
+    : rawText.length > 0 && hasSevereMarkers(rawText)
+      ? "injury_pain"
+      : ADAPT_PLAN_REASON_TO_CATEGORY[input.reason];
   const originalUserText = input.userNote?.trim() || `User requested a plan change (${input.reason}) via chat.`;
 
   // Risk resolution. For pain: the deterministic severe screen runs over
@@ -196,6 +250,110 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     triageCleared = true;
   }
 
+  // Re-entry ramp routing. A valid ramp only ever scales the user's OWN
+  // baseline down and restores itself to 100% on a date they can see before
+  // approving — so the medium-risk default that readiness_low carries (which
+  // exists to catch "I feel run down") would block the single safest
+  // adjustment the coach can make.
+  //
+  // Two hard limits on that downgrade, both learned the hard way:
+  //   - it never applies to an inherently high-risk CATEGORY (injury,
+  //     pregnancy/postpartum). riskForCategory is the authority, so this
+  //     can't drift as categories are added.
+  //   - the severe screen stays absolute. Real red flags hold the proposal
+  //     at high risk for human review no matter how gentle the ramp looks.
+  const isReentryRamp = (input.rampWeeks?.length ?? 0) > 0;
+  let rampWeeks: ReentryRampWeekInput[] | undefined;
+  if (input.reason === "returning_from_layoff" && !isReentryRamp) {
+    // Otherwise this falls through to the generic readiness_low path and
+    // persists a medium-risk card the user can't apply and the model isn't
+    // told how to fix — a dead end with no error and no hint.
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: undefined,
+      needsScopeConfirmation: false,
+      error: "ramp_weeks_missing",
+    };
+  }
+  if (isReentryRamp) {
+    // Still acutely unwell. Returning to training while symptomatic from a
+    // febrile illness is a genuine clinical caution, not a programming
+    // question — and the ramp is the one adjustment that skips human review,
+    // so this has to be a SERVER gate. The prompt says the same thing, but
+    // this codebase's own history records prompt-level nudges failing twice
+    // on live E2E; the gate is what actually holds.
+    if (hasActiveIllnessMarkers(severeText)) {
+      return {
+        proposalId: null,
+        category,
+        riskLevel,
+        requiresFollowUp,
+        dayKey: undefined,
+        needsScopeConfirmation: false,
+        error: "ramp_not_valid_while_unwell",
+      };
+    }
+    // A ramp scales the existing plan; it cannot route AROUND a movement.
+    // Proposing one for pain would put the user's own aggravating exercise
+    // back on the bar at 60% under a card that never mentions the pain —
+    // and it would skip the injury safety notes and the recovery re-check
+    // that the dayPatches path attaches.
+    //
+    // Driven off riskForCategory rather than a hardcoded pair so a high-risk
+    // category added later can't slip through here and land as a persisted
+    // card with no error and no hint — the dead end this guard exists to
+    // prevent.
+    if (riskForCategory(category, "") === "high") {
+      return {
+        proposalId: null,
+        category,
+        riskLevel,
+        requiresFollowUp,
+        dayKey: undefined,
+        needsScopeConfirmation: false,
+        error: "ramp_not_valid_for_this_category",
+      };
+    }
+    const rampCheck = validateReentryRamp(input.rampWeeks);
+    if (!rampCheck.ok) {
+      return {
+        proposalId: null,
+        category,
+        riskLevel,
+        requiresFollowUp,
+        dayKey: undefined,
+        needsScopeConfirmation: false,
+        error: rampCheck.error,
+      };
+    }
+    rampWeeks = input.rampWeeks;
+    if (riskForCategory(category, "") !== "high" && !hasSevereMarkers(severeText)) {
+      riskLevel = "low";
+      requiresFollowUp = false;
+    }
+  }
+  // A ramp spans whole weeks, so a single target day is meaningless — and a
+  // stray dayKey would mislabel the memory fact and the card. Explicitly
+  // dropped rather than left to resolveAppliesToDayKey, which defaults
+  // readiness_low to today.
+  const rampScopeMismatch =
+    (isReentryRamp && input.scope !== undefined && input.scope !== "reentry_ramp") ||
+    (!isReentryRamp && input.scope === "reentry_ramp");
+  if (rampScopeMismatch) {
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: undefined,
+      needsScopeConfirmation: false,
+      error: isReentryRamp ? "ramp_requires_reentry_ramp_scope" : "reentry_ramp_scope_requires_ramp_weeks",
+    };
+  }
+
   // P1-3a: "today" can only ever mean ONE day. A multi-day patch with
   // scope=today would silently behave like rest_of_week while the card's
   // one-tap button says "that day only" — bounce it back as a scope
@@ -214,7 +372,11 @@ export async function createPlanAdjustmentProposalFromTool(input: {
 
   const appliesTo = {
     planId: "current",
-    ...resolveAppliesToDayKey(category, input.dayKey ?? input.dayPatches?.[0]?.dayKey),
+    // A ramp spans whole weeks; a target day would be a lie on the card and
+    // in the plan-change memory fact, so it is never resolved for one.
+    ...(isReentryRamp
+      ? {}
+      : resolveAppliesToDayKey(category, input.dayKey ?? input.dayPatches?.[0]?.dayKey)),
     ...(input.exerciseName ? { exerciseName: input.exerciseName } : {}),
     ...(input.scope ? { scope: input.scope } : {}),
   };
@@ -227,12 +389,93 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     }
   }
 
+  const referenceDate = input.clientDate ?? currentDateISO();
+
+  // Re-entry ramp: the proposal stores the SHAPE (percentages + notes), and
+  // accept re-derives the sessions from whatever the baseline plan says at
+  // that moment. The preview lines below are generated here from the same
+  // helper the accept uses, so the card shows real dates and real training
+  // days rather than an abstract promise — but if the plan changes between
+  // propose and accept, the applied ramp tracks the NEW baseline, which is
+  // the answer the user would want either way.
+  if (rampWeeks) {
+    const planSnapForPreview = await input.db.doc(workoutPlanPath(input.userId, "current")).get();
+    const previewDays = isRecord(planSnapForPreview.data()?.days)
+      ? (planSnapForPreview.data()!.days as Record<string, unknown>)
+      : {};
+    const previewExistingOverrides = isRecord(planSnapForPreview.data()?.dailyOverrides)
+      ? (planSnapForPreview.data()!.dailyOverrides as Record<string, unknown>)
+      : {};
+    const previewOverrides = materializeRampOverrides(previewDays, rampWeeks, referenceDate);
+    if (Object.keys(previewOverrides).length === 0) {
+      // Nothing to reduce — an empty plan, an all-rest template, or a ramp
+      // whose reduced weeks have already elapsed. Applying this would report
+      // success while changing nothing.
+      return {
+        proposalId: null,
+        category,
+        riskLevel,
+        requiresFollowUp,
+        dayKey: undefined,
+        needsScopeConfirmation: false,
+        error: "ramp_has_no_training_days_to_scale",
+      };
+    }
+    const persistedRamp = await persistPlanAdjustmentProposal({
+      db: input.db,
+      userId: input.userId,
+      draft: true,
+      source: "coach_chat",
+      category,
+      riskLevel,
+      requiresFollowUp,
+      originalUserText,
+      // Scope is pinned, not asked. The "just today or going forward?"
+      // question exists because those two writes are genuinely different
+      // and the user's words don't disambiguate them. A ramp has no such
+      // fork: the card lists the exact weeks and the exact return date, so
+      // approving the card IS the scope decision.
+      appliesTo: { ...appliesTo, scope: "reentry_ramp" as const },
+      targetDay: undefined,
+      patchOverride: {
+        type: "reentry_ramp" as const,
+        // "Starts when you approve" is load-bearing, not padding. Accept
+        // re-anchors the ramp to the day the user says yes, so a card
+        // approved three days later shifts every date below. Naming the
+        // anchor keeps the preview honest instead of promising a calendar
+        // the accept won't necessarily write.
+        title: `Easing back in over ${rampWeeks.length} weeks — starts when you approve`,
+        changes: [
+          ...describeRampWeeks(previewDays, rampWeeks, referenceDate),
+          ...describeRampRemovals(previewExistingOverrides, rampWeeks, previewDays, referenceDate),
+        ],
+        rampWeeks,
+        // Every session the accept will write, so the card can render the
+        // real exercises rather than a percentage the user can't unpack.
+        rampDays: Object.entries(previewOverrides)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([date, day]) => ({ date, day })),
+      },
+      summaryOverride: `Work back up to your normal plan over ${rampWeeks.length} weeks (${rampWeeks
+        .map((week) => `${week.intensityPct}%`)
+        .join(" → ")}).`,
+    });
+    return {
+      ...persistedRamp,
+      supersededCount: await countProposalsAwaitingReview(
+        input.db,
+        input.userId,
+        persistedRamp.proposalId,
+      ),
+      needsScopeConfirmation: false,
+    };
+  }
+
   // Model-authored multi-day patch: build the proposal content directly
   // from the (Zod-validated, bounded) replacement days.
   // rest_of_week means THROUGH SUNDAY of the user's current week. Patches
   // whose next occurrence would wrap into next week (Mon/Tue patched on a
   // Wednesday) are dropped — showing them as "this week" would be false.
-  const referenceDate = input.clientDate ?? currentDateISO();
   const keptDayPatches =
     input.scope === "rest_of_week" && input.dayPatches?.length
       ? input.dayPatches.filter(
@@ -307,6 +550,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   const persisted = await persistPlanAdjustmentProposal({
     db: input.db,
     userId: input.userId,
+    draft: true,
     source: "coach_chat",
     category,
     riskLevel,
@@ -320,21 +564,17 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     recoveryDays,
   });
 
-  // Revise flow: the new proposal replaces whatever pending one the user
-  // was looking at ("actually make Friday lighter instead") — cards swap
-  // instead of stacking, and stale pendings can't be accepted later.
-  // Runs AFTER persist so a persist failure can't destroy the old card
-  // with nothing to replace it. The count goes back to the model so it can
-  // acknowledge the swap ("this replaces the earlier suggestion").
-  const supersededProposalIds = await supersedePendingProposals(
-    input.db,
-    input.userId,
-    persisted.proposalId,
-  );
-
+  // Revise flow ("actually make Friday lighter instead"): cards swap instead
+  // of stacking. The swap itself now happens at publish time, atomically —
+  // superseding here would strand the user with no card at all if the turn
+  // died before this draft could be published.
   return {
     ...persisted,
-    supersededCount: supersededProposalIds.length,
+    supersededCount: await countProposalsAwaitingReview(
+      input.db,
+      input.userId,
+      persisted.proposalId,
+    ),
     needsScopeConfirmation: false,
   };
 }
@@ -351,6 +591,7 @@ export async function createClearOverridesProposalFromTool(input: {
   const persisted = await persistPlanAdjustmentProposal({
     db: input.db,
     userId: input.userId,
+    draft: true,
     source: "coach_chat",
     category: "other",
     riskLevel: "low",
@@ -366,12 +607,14 @@ export async function createClearOverridesProposalFromTool(input: {
     },
     summaryOverride: "Restore the regular plan by clearing temporary day adjustments.",
   });
-  const supersededProposalIds = await supersedePendingProposals(
-    input.db,
-    input.userId,
-    persisted.proposalId,
-  );
-  return { ...persisted, supersededCount: supersededProposalIds.length };
+  return {
+    ...persisted,
+    supersededCount: await countProposalsAwaitingReview(
+      input.db,
+      input.userId,
+      persisted.proposalId,
+    ),
+  };
 }
 
 // The single most recent pending proposal — what the iOS card shows and
@@ -399,32 +642,108 @@ export async function findLatestPendingProposal(db: Firestore, userId: string) {
   return result;
 }
 
-// Transactional so a concurrent card-tap accept can't be overwritten:
-// the accept transaction re-reads decision=="pending", and this transaction
-// only flips docs that are still pending at its own read time — whichever
-// commits second sees the other's write and behaves correctly.
-async function supersedePendingProposals(
+// End-of-turn publish. A coach turn may have written several drafts (the
+// self-correcting loop re-calls adapt_plan to fix a locked proposal); only
+// the newest is real. In ONE transaction: the newest draft becomes
+// `pending`, every older draft and every previously-pending proposal becomes
+// `superseded`.
+//
+// Doing this atomically at the END of the turn is what fixes the two-tap
+// bug. Before, each adapt_plan published its own card immediately and then
+// superseded the previous one, so a user reading card A could tap it in the
+// window where the turn had already replaced it with B — the accept found a
+// superseded doc and failed, and only the second tap (now on B) worked.
+// Nothing is tappable mid-turn now, and what does appear is final.
+//
+// Safe to call when there are no drafts: it returns without writing.
+// How many proposals this new one will replace once the turn publishes.
+// Counted rather than written: the actual supersede happens atomically in
+// publishDraftProposals, so nothing is destroyed if the turn dies partway.
+// Fed back to the model so it can say "this replaces the earlier suggestion".
+async function countProposalsAwaitingReview(db: Firestore, userId: string, excludeProposalId: string) {
+  const collection = db.collection(planAdjustmentProposalsCollectionPath(userId));
+  const [draftSnap, pendingSnap] = await Promise.all([
+    collection.where("decision", "==", "draft").get(),
+    collection.where("decision", "==", "pending").get(),
+  ]);
+  return [...draftSnap.docs, ...pendingSnap.docs].filter((doc) => doc.id !== excludeProposalId).length;
+}
+
+// `ownDraftIds` scopes this to the CALLING TURN's own proposals, and that
+// scoping is load-bearing. Publishing every draft the user has would mean:
+//   - a draft orphaned by a turn that died before its publish gets
+//     resurrected by some unrelated later turn, killing whatever card the
+//     user is actually looking at and replacing it with a proposal from a
+//     conversation they never finished;
+//   - two turns running concurrently (the user sends a second message while
+//     the first is still thinking) publish each other's in-flight drafts —
+//     which is exactly the mid-turn card this whole mechanism exists to
+//     prevent, reintroduced by the fix for it.
+// The ids come straight from this turn's tool results, so no schema field
+// and no composite index is needed. An empty list means the turn proposed
+// nothing and this is a no-op.
+export async function publishDraftProposals(
   db: Firestore,
   userId: string,
-  excludeProposalId?: string,
-): Promise<string[]> {
-  const query = db
-    .collection(planAdjustmentProposalsCollectionPath(userId))
-    .where("decision", "==", "pending");
+  ownDraftIds: string[],
+) {
+  if (ownDraftIds.length === 0) {
+    return { published: null as string | null, superseded: 0 };
+  }
+  const collection = db.collection(planAdjustmentProposalsCollectionPath(userId));
+  const ownIds = new Set(ownDraftIds);
   const now = new Date().toISOString();
   return db.runTransaction(async (transaction) => {
-    const snap = await transaction.get(query);
-    const superseded: string[] = [];
-    for (const doc of snap.docs) {
-      if (doc.id === excludeProposalId) continue;
+    const [allDraftSnap, pendingSnap] = await Promise.all([
+      transaction.get(collection.where("decision", "==", "draft")),
+      transaction.get(collection.where("decision", "==", "pending")),
+    ]);
+    // Other turns' drafts come back from the query (Firestore can't filter on
+    // a client-side id set) and are deliberately never touched.
+    const ownDrafts = allDraftSnap.docs.filter((doc) => ownIds.has(doc.id));
+    if (ownDrafts.length === 0) {
+      return { published: null as string | null, superseded: 0 };
+    }
+    // Same ordering rule as findLatestPendingProposal: ISO-8601 UTC strings
+    // sort lexicographically, and sorting in memory keeps this off a
+    // composite index. Ties fall back to creation ORDER within the turn —
+    // ownDraftIds is append-ordered, so the last tool call wins.
+    const drafts = ownDrafts
+      .filter((doc) => typeof doc.data().createdAt === "string")
+      .sort((a, b) => {
+        const byTime = String(b.data().createdAt).localeCompare(String(a.data().createdAt));
+        return byTime !== 0 ? byTime : ownDraftIds.indexOf(b.id) - ownDraftIds.indexOf(a.id);
+      });
+    const winner = drafts[0];
+    if (!winner) {
+      // Every draft is malformed (no createdAt) — retire them rather than
+      // leaving invisible docs to accumulate forever.
+      for (const doc of ownDrafts) {
+        transaction.set(
+          doc.ref,
+          { decision: "superseded", decidedAt: now, serverDecidedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+      }
+      return { published: null as string | null, superseded: ownDrafts.length };
+    }
+
+    let superseded = 0;
+    for (const doc of [...ownDrafts, ...pendingSnap.docs]) {
+      if (doc.id === winner.id) continue;
       transaction.set(
         doc.ref,
         { decision: "superseded", decidedAt: now, serverDecidedAt: FieldValue.serverTimestamp() },
         { merge: true },
       );
-      superseded.push(doc.id);
+      superseded += 1;
     }
-    return superseded;
+    transaction.set(
+      winner.ref,
+      { decision: "pending", serverPublishedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+    return { published: winner.id, superseded };
   });
 }
 
@@ -438,28 +757,51 @@ async function supersedePendingProposals(
 // sweeps. Requires the (decision ASC, createdAt ASC) COLLECTION_GROUP
 // composite index in firestore.indexes.json.
 const PENDING_PROPOSAL_TTL_MS = 7 * 86_400_000;
+// A draft belongs to ONE coach turn, and a turn is capped at 60s (the
+// Firestore trigger's timeoutSeconds). A draft still unpublished an hour
+// later means its turn died between writing the draft and reaching the
+// publish step — it is orphaned, not in flight. Retiring it keeps an
+// invisible proposal from surfacing days later attached to a conversation
+// the user has long moved past.
+const DRAFT_PROPOSAL_TTL_MS = 3_600_000;
 const EXPIRY_SCAN_LIMIT = 200;
 
 export async function expireStalePendingProposals(db: Firestore, nowISO?: string) {
   const now = nowISO ?? new Date().toISOString();
   const cutoff = new Date(Date.parse(now) - PENDING_PROPOSAL_TTL_MS).toISOString();
-  const stale = await db
-    .collectionGroup("planAdjustmentProposals")
-    .where("decision", "==", "pending")
-    .where("createdAt", "<", cutoff)
-    .limit(EXPIRY_SCAN_LIMIT)
-    .get();
+  const draftCutoff = new Date(Date.parse(now) - DRAFT_PROPOSAL_TTL_MS).toISOString();
+  const [pendingStale, draftStale] = await Promise.all([
+    db
+      .collectionGroup("planAdjustmentProposals")
+      .where("decision", "==", "pending")
+      .where("createdAt", "<", cutoff)
+      .limit(EXPIRY_SCAN_LIMIT)
+      .get(),
+    db
+      .collectionGroup("planAdjustmentProposals")
+      .where("decision", "==", "draft")
+      .where("createdAt", "<", draftCutoff)
+      .limit(EXPIRY_SCAN_LIMIT)
+      .get(),
+  ]);
+  const stale = {
+    docs: [...pendingStale.docs, ...draftStale.docs],
+    size: pendingStale.size + draftStale.size,
+  };
 
   let expired = 0;
   let failed = 0;
   for (const doc of stale.docs) {
     try {
-      // Transactional per-doc flip: only a doc STILL pending at the
-      // transaction's own read time gets expired — a concurrent card-tap
-      // accept that commits first wins, same discipline as supersede/reject.
+      // Transactional per-doc flip: only a doc STILL pending (or still an
+      // orphaned draft) at the transaction's own read time gets expired — a
+      // concurrent card-tap accept, or a slow turn that publishes just now,
+      // commits first and wins. Same discipline as supersede/reject.
       const flipped = await db.runTransaction(async (transaction) => {
         const snap = await transaction.get(doc.ref);
-        if (!snap.exists || snap.get("decision") !== "pending") return false;
+        if (!snap.exists) return false;
+        const decision = snap.get("decision");
+        if (decision !== "pending" && decision !== "draft") return false;
         transaction.set(
           doc.ref,
           { decision: "expired", decidedAt: now, serverDecidedAt: FieldValue.serverTimestamp() },
@@ -479,7 +821,7 @@ export async function expireStalePendingProposals(db: Firestore, nowISO?: string
     }
   }
 
-  safeLogger.info("Stale pending plan adjustment proposals expired", {
+  safeLogger.info("Stale pending and orphaned draft proposals expired", {
     event: "plan_adjustment_proposals_expired",
     outcome: `expired_${expired}_failed_${failed}_of_${stale.size}`,
   });
@@ -498,6 +840,7 @@ const KNOWN_ACCEPT_ERRORS = new Set([
   "plan_adjustment_patch_not_supported",
   "plan_adjustment_patch_removed_all_exercises",
   "plan_adjustment_target_day_not_found",
+  "plan_adjustment_ramp_produced_no_days",
   "training_program_not_loaded_for_cascade",
 ]);
 
@@ -608,6 +951,11 @@ export async function rejectLatestPlanAdjustmentFromChat(db: Firestore, userId: 
 async function persistPlanAdjustmentProposal(input: {
   db: Firestore;
   userId: string;
+  // Tool-loop callers write drafts (invisible until the turn ends); the
+  // deterministic classifier and the workout-detail sheet write pending
+  // directly, because those paths create exactly one proposal per request
+  // with no chance of superseding it a moment later.
+  draft?: boolean;
   source: "coach_chat" | "workout_detail" | "system";
   category: AdjustmentCategory;
   riskLevel: AdjustmentRiskLevel;
@@ -637,7 +985,7 @@ async function persistPlanAdjustmentProposal(input: {
     userId: input.userId,
     proposalId,
     source: input.source,
-    decision: "pending",
+    decision: input.draft ? "draft" : "pending",
     category: input.category,
     riskLevel: input.riskLevel,
     originalUserText: input.originalUserText,
@@ -1003,6 +1351,47 @@ function planPatchForAcceptedProposal(
     };
   }
 
+  // Re-entry ramp: dated overrides across the whole ramp window, derived
+  // from the LIVE baseline template. Same expiry mechanism as rest_of_week —
+  // the overrides simply run out, week by week, and the last ramp week is
+  // 100% (validated at proposal time) so the plan lands back on its own
+  // programming rather than snapping back from an arbitrary reduction.
+  if (proposal.proposedPlanPatch.type === "reentry_ramp") {
+    const rampWeeks = proposal.proposedPlanPatch.rampWeeks;
+    if (!rampWeeks?.length) {
+      throw new Error("plan_adjustment_patch_not_supported");
+    }
+    const overrides = materializeRampOverrides(days, rampWeeks, today);
+    if (Object.keys(overrides).length === 0) {
+      // The ramp's reduced weeks have elapsed (a proposal accepted days
+      // later) or the plan has no training days left to scale. Fail loudly
+      // rather than writing nothing and reporting success — same rule as
+      // computePatchedDay's empty-diff guard.
+      throw new Error("plan_adjustment_ramp_produced_no_days");
+    }
+    // Past-dated keys are dead weight, as on every other path. Inside the
+    // ramp WINDOW the window is also cleared — otherwise an override left
+    // from an earlier adjustment sits on a date the ramp deliberately does
+    // not write (a rest day, a 100% "back to normal" week) and keeps
+    // overriding it, so the card's promised return to normal never happens.
+    //
+    // Clearing content the user approved earlier is only legitimate because
+    // rampRemovalDates feeds those same dates onto the approval card, spelled
+    // out — see describeRampRemovals. Prune and disclosure are computed from
+    // one helper precisely so they cannot drift apart.
+    const existing = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const removalDates = new Set([
+      ...Object.keys(existing).filter((date) => date < today),
+      ...rampRemovalDates(existing, rampWeeks, days, today),
+    ]);
+    const pruneMarkers = Object.fromEntries(
+      [...removalDates]
+        .filter((date) => !(date in overrides))
+        .map((date) => [date, FieldValue.delete()]),
+    );
+    return { planPatch: { dailyOverrides: { ...pruneMarkers, ...overrides } } };
+  }
+
   // Multi-day (model-authored) patches: one dated override per patched
   // day's next occurrence within the coming 7 days. "today" and
   // "rest_of_week" share this shape — a weekday occurs once per 7-day
@@ -1020,16 +1409,18 @@ function planPatchForAcceptedProposal(
         nextDays = { ...nextDays, [patch.dayKey]: patch.replacementDay };
         weeks = patchProgramWeeks({ ...program, weeks }, patch.dayKey, patch.replacementDay).weeks;
       }
-      // A permanent change must WIN immediately: prune any still-active
-      // temporary override on the patched days, or the Train tab keeps
-      // showing old override content for up to a week after approval.
+      // A permanent change must WIN immediately: prune EVERY still-active
+      // override on the patched weekdays, or the Train tab keeps showing old
+      // override content after approval. Matching on weekday rather than on
+      // each weekday's next occurrence is load-bearing now that a re-entry
+      // ramp can write overrides up to six weeks out — the old
+      // next-occurrence-only prune cleared one date and left the rest of the
+      // ramp shadowing the new permanent plan for weeks.
       const existingOverrides = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
-      const patchedDates = new Set(
-        contractDayPatches.map((patch) => nextOccurrenceOfWeekday(patch.dayKey, today)),
-      );
+      const patchedWeekdays = new Set(contractDayPatches.map((patch) => patch.dayKey));
       const overridePrune = Object.fromEntries(
         Object.keys(existingOverrides)
-          .filter((date) => patchedDates.has(date))
+          .filter((date) => date >= today && patchedWeekdays.has(weekdayOfISODate(date)))
           .map((date) => [date, FieldValue.delete()]),
       );
       return {
@@ -1102,8 +1493,21 @@ function planPatchForAcceptedProposal(
     if (!program) {
       throw new Error("training_program_not_loaded_for_cascade");
     }
+    // Same rule as the multi-day branch above: a permanent change has to
+    // clear the temporary overrides shadowing it. This branch pruned nothing
+    // at all, so a live ramp override on this weekday kept overriding the
+    // new permanent day until it expired.
+    const existingOverrides = isRecord(plan.dailyOverrides) ? plan.dailyOverrides : {};
+    const overridePrune = Object.fromEntries(
+      Object.keys(existingOverrides)
+        .filter((date) => date >= today && weekdayOfISODate(date) === dayKey)
+        .map((date) => [date, FieldValue.delete()]),
+    );
     return {
-      planPatch: { days: { ...days, [dayKey]: patchedDay } },
+      planPatch: {
+        days: { ...days, [dayKey]: patchedDay },
+        ...(Object.keys(overridePrune).length > 0 ? { dailyOverrides: overridePrune } : {}),
+      },
       programPatch: patchProgramWeeks(program, dayKey, patchedDay),
     };
   }
@@ -1112,6 +1516,193 @@ function planPatchForAcceptedProposal(
   // pre-scope behavior byte-for-byte — in-place patch on the template day
   // only, no dailyOverrides, no program write.
   return { planPatch: { days: { ...days, [dayKey]: patchedDay } } };
+}
+
+// Scales one baseline session to a percentage of normal. SETS carry the
+// reduction, load follows, reps are left alone — cutting reps changes what
+// the set trains (a 5-rep bench and a 12-rep bench are different exercises),
+// while cutting sets is the standard deload lever and keeps every movement
+// pattern in the week intact. Both floor at the smallest real dose rather
+// than rounding to zero: a 40% week on a 1-set accessory must still be one
+// set, or the "ramp" silently deletes the exercise.
+export function scaleDayToIntensity(
+  day: PlannedWorkoutDayType,
+  intensityPct: number,
+): PlannedWorkoutDayType {
+  const factor = intensityPct / 100;
+  return {
+    ...day,
+    name: `${day.name} · ${intensityPct}%`,
+    exercises: day.exercises.map((exercise) => ({
+      ...exercise,
+      sets: Math.min(exercise.sets, Math.max(1, Math.round(exercise.sets * factor))),
+      weight: scaleWeight(exercise.weight, factor),
+    })),
+  };
+}
+
+// Rounded to the nearest 5 because that is what plates come in — a "137.5 lb"
+// bench prescription reads as a bug, not a deload — then CLAMPED TO BASELINE.
+// The clamp is the load-bearing part: rounding to the nearest 5 rounds UP
+// whenever the remainder is ≥ 2.5, so a 95% week on an 8 lb dumbbell produced
+// 10 lb, and a small-weight floor turned a 2.5 lb rehab load into 5 lb. That
+// hands someone MORE weight on their easiest week — the opposite of a deload,
+// and it falsifies the "a ramp only ever reduces" invariant that is the whole
+// reason a ramp is allowed to apply without review. Light loads (< 5 lb) keep
+// their exact baseline rather than being floored upward.
+function scaleWeight(baseline: number, factor: number): number {
+  if (baseline <= 0) return 0;
+  const rounded = Math.round((baseline * factor) / 5) * 5;
+  return Math.min(baseline, Math.max(rounded, Math.min(5, baseline)));
+}
+
+// Where the ramp actually begins. Normally that is today, with week 0 running
+// today → Sunday: a ramp proposed on a Thursday must not pretend to have
+// reduced Monday.
+//
+// But when the remainder of this week holds NO training day — a Mon/Wed/Fri
+// split on a Saturday, the single likeliest moment for "I fell off" — anchoring
+// to today burns the gentlest week on an empty stub. A 3-week [50, 75, 100]
+// ramp would deliver its first real session at 75%, and a 2-week [50, 100]
+// ramp would materialize nothing at all and be refused outright. So the ramp
+// SHIFTS to start next Monday instead. Shifting, never truncating: the user
+// approved a number of graded steps, and every one of them gets delivered.
+export function rampAnchorDate(days: Record<string, unknown>, today: string): string {
+  const remainderOfThisWeek = datesBetween(today, endOfWeekSunday(today));
+  const hasTrainingDay = remainderOfThisWeek.some((date) => isTrainingDay(days[weekdayOfISODate(date)]));
+  if (hasTrainingDay) return today;
+  return addDays(endOfWeekSunday(today), 1);
+}
+
+function isTrainingDay(baseline: unknown): boolean {
+  if (!isRecord(baseline)) return false;
+  const day = baseline as PlannedWorkoutDayType;
+  return Array.isArray(day.exercises) && day.exercises.length > 0;
+}
+
+function addDays(isoDate: string, days: number): string {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return isoDate;
+  return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function datesBetween(startISO: string, endISO: string): string[] {
+  const start = Date.parse(`${startISO}T00:00:00Z`);
+  const end = Date.parse(`${endISO}T00:00:00Z`);
+  if (Number.isNaN(start) || Number.isNaN(end)) return [];
+  const dates: string[] = [];
+  for (let ms = start; ms <= end; ms += 86_400_000) {
+    dates.push(new Date(ms).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+// The ISO dates covered by ramp week `weekIndex`, counted from `anchor` (see
+// rampAnchorDate). Week 0 runs anchor → that week's Sunday; every later week
+// is a full Monday–Sunday block after it.
+export function rampWeekDates(weekIndex: number, anchor: string): string[] {
+  const today = anchor;
+  const sundayOfWeekZero = endOfWeekSunday(today);
+  const startMs =
+    weekIndex === 0
+      ? Date.parse(`${today}T00:00:00Z`)
+      : Date.parse(`${sundayOfWeekZero}T00:00:00Z`) + (1 + 7 * (weekIndex - 1)) * 86_400_000;
+  const endMs =
+    weekIndex === 0
+      ? Date.parse(`${sundayOfWeekZero}T00:00:00Z`)
+      : Date.parse(`${sundayOfWeekZero}T00:00:00Z`) + 7 * weekIndex * 86_400_000;
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return [];
+  const dates: string[] = [];
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    dates.push(new Date(ms).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+// Turns a ramp shape + the user's baseline template into the exact
+// date-keyed overrides an accept writes. Shared by the proposal preview and
+// the accept write so the card can never promise sessions the accept won't
+// produce.
+//
+// Two kinds of day are deliberately skipped:
+//   - 100% weeks, because the template ALREADY says that. Writing a
+//     redundant override would just add rows that have to expire.
+//   - rest days (no exercises), because there is nothing to scale and an
+//     override would only rename the user's rest day.
+export function materializeRampOverrides(
+  days: Record<string, unknown>,
+  rampWeeks: ReentryRampWeekInput[],
+  today: string,
+): Record<string, PlannedWorkoutDayType> {
+  const anchor = rampAnchorDate(days, today);
+  const overrides: Record<string, PlannedWorkoutDayType> = {};
+  rampWeeks.forEach((week, weekIndex) => {
+    if (week.intensityPct >= 100) return;
+    for (const date of rampWeekDates(weekIndex, anchor)) {
+      const baseline = days[weekdayOfISODate(date)];
+      if (!isTrainingDay(baseline)) continue;
+      overrides[date] = scaleDayToIntensity(baseline as PlannedWorkoutDayType, week.intensityPct);
+    }
+  });
+  return overrides;
+}
+
+// Existing future-dated overrides that fall inside the ramp window on dates
+// the ramp does NOT itself rewrite. Accepting the ramp clears them, so they
+// have to be named on the card: they are content the user approved earlier
+// (very often an injury accommodation), and a ramp that silently deleted them
+// would put the aggravating movement back on a date nobody re-reviewed.
+function rampRemovalDates(
+  existingOverrides: Record<string, unknown>,
+  rampWeeks: ReentryRampWeekInput[],
+  days: Record<string, unknown>,
+  today: string,
+): string[] {
+  const anchor = rampAnchorDate(days, today);
+  const windowEnd = rampWeekDates(rampWeeks.length - 1, anchor).at(-1);
+  if (!windowEnd) return [];
+  const written = materializeRampOverrides(days, rampWeeks, today);
+  return Object.keys(existingOverrides)
+    .filter((date) => date >= today && date <= windowEnd && !(date in written))
+    .sort();
+}
+
+function describeRampRemovals(
+  existingOverrides: Record<string, unknown>,
+  rampWeeks: ReentryRampWeekInput[],
+  days: Record<string, unknown>,
+  today: string,
+): string[] {
+  const dates = rampRemovalDates(existingOverrides, rampWeeks, days, today);
+  if (dates.length === 0) return [];
+  return [
+    `Also clears ${dates.length} earlier day adjustment${dates.length === 1 ? "" : "s"} inside this window (${dates.join(", ")}) so the plan can return to normal.`,
+  ];
+}
+
+// Human-readable, SERVER-GENERATED preview lines for the approval card —
+// one per ramp week, naming the real dates and the real sessions. The model
+// contributes only the `note`; every number here comes from the user's own
+// plan, so the card can show what will actually happen without trusting
+// model-authored text.
+function describeRampWeeks(
+  days: Record<string, unknown>,
+  rampWeeks: ReentryRampWeekInput[],
+  today: string,
+): string[] {
+  const anchor = rampAnchorDate(days, today);
+  return rampWeeks.map((week, weekIndex) => {
+    const dates = rampWeekDates(weekIndex, anchor);
+    const span = dates.length > 0 ? `${dates[0]} → ${dates[dates.length - 1]}` : "—";
+    if (week.intensityPct >= 100) {
+      return `${span}: back to your normal plan — ${week.note}`;
+    }
+    const sessions = dates
+      .filter((date) => isTrainingDay(days[weekdayOfISODate(date)]))
+      .map((date) => weekdayOfISODate(date));
+    const sessionLabel = sessions.length > 0 ? sessions.join(", ") : "no training days";
+    return `${span}: ${week.intensityPct}% of normal (${sessionLabel}) — ${week.note}`;
+  });
 }
 
 function resolveAppliesToDayKey(category: AdjustmentCategory, dayKey: string | undefined) {
@@ -1171,6 +1762,7 @@ const SCOPE_LABEL: Record<AdjustmentScope, string> = {
   today: "for that day only",
   rest_of_week: "for the rest of this week",
   going_forward: "going forward",
+  reentry_ramp: "as a graded return, stepping back up to normal week by week",
 };
 
 // Server-generated text only — deliberately excludes originalUserText,
@@ -1213,20 +1805,29 @@ function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): Ad
   if (matchesAny(text, ["pregnant", "pregnancy", "postpartum", "trimester"])) {
     return "pregnancy_postpartum";
   }
-  if (matchesAny(text, [
-    "hurt",
-    "pain",
-    "injury",
-    "injured",
-    "ankle",
-    "knee",
-    "shoulder",
-    "back",
-    "wrist",
-    "hip",
-    "swollen",
-    "sprain",
-  ])) {
+  if (
+    matchesAny(text, [
+      "hurt",
+      "pain",
+      "injury",
+      "injured",
+      "ankle",
+      "knee",
+      "shoulder",
+      "wrist",
+      "hip",
+      "swollen",
+      "sprain",
+      // Common injury verbs the list was missing entirely — without them
+      // "I strained my back in the gym" had no backstop once the "back"
+      // needle was made conditional.
+      "strain",
+      "tweak",
+      "twinge",
+      "pulled",
+    ]) ||
+    mentionsBackAsBodyPart(text)
+  ) {
     return "injury_pain";
   }
   if (matchesAny(text, ["hungover", "hangover", "sick", "tired", "fatigue", "exhausted", "sore", "sleep"])) {
@@ -1255,6 +1856,51 @@ function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): Ad
   }
 
   return null;
+}
+
+// "back" is both a body part and the most natural word for RETURNING to
+// training — "get back into it", "easing back into lifting". As a bare
+// substring needle it classified every layoff-return message as an injury,
+// which locks the proposal at high risk and sends the coach off interrogating
+// a pain-free user with red-flag questions.
+//
+// The disambiguation is deliberately NARROW: only an explicit return VERB
+// immediately before "back" counts as the return sense. An earlier attempt
+// excused any "back <preposition>" and that silently broke the gate it was
+// meant to protect — "I tweaked my back on Monday" and "strained my back in
+// the gym" stopped classifying as injuries at all, which would have let a
+// genuine back injury through to an auto-appliable ramp.
+//
+// The asymmetry is the whole point. A false positive costs the user some
+// unnecessary triage questions; a false negative puts an injured user's own
+// aggravating movement back on the bar. So anything ambiguous stays an
+// injury.
+// The optional object pronoun is load-bearing. English puts one between the
+// verb and "back" constantly — "ease ME back into my routine", "get YOU back
+// to lifting" — and without it the phrase that motivated this whole feature
+// ("can you ease me back into my normal routine") classified as a BACK INJURY
+// and the server refused a perfectly good ramp the model had authored. Caught
+// on live staging, not by the unit tests, which only covered the adjacent
+// forms. Closed-class list: no real injury report reads "<verb> me back".
+const RETURN_IDIOM =
+  /\b(?:get|getting|got|ease|easing|work|working|come|coming|jump|jumping|dive|diving|ramp|ramping)\s+(?:me|you|him|her|them|us|myself|yourself|himself|herself|themselves)?\s*back\b/g;
+
+// Markers of an illness the user is still IN, as opposed to one they have
+// recovered from and are returning after. Past-tense framings ("I was sick
+// last month", "after the flu") are the normal, appliable case — this only
+// catches the ongoing ones.
+const ACTIVE_ILLNESS =
+  /\b(?:still\s+(?:sick|ill|coughing|congested|feverish|recovering)|have\s+(?:a\s+)?fever|running\s+a\s+fever|got\s+(?:a\s+)?fever|fever\b|covid|pneumonia|bronchitis|chest\s+infection|short\s+of\s+breath|can'?t\s+catch\s+my\s+breath)\b/i;
+
+function hasActiveIllnessMarkers(text: string): boolean {
+  return ACTIVE_ILLNESS.test(text);
+}
+
+function mentionsBackAsBodyPart(text: string): boolean {
+  // Strip the return idioms, then ask the plain question of what's left. So
+  // "want to get back into it but my back hurts" still reads as an injury on
+  // its second "back".
+  return /\bback\b/.test(text.replace(RETURN_IDIOM, " "));
 }
 
 function matchesAny(text: string, needles: string[]) {

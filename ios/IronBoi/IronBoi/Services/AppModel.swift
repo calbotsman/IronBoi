@@ -361,9 +361,45 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
-    // scope: "today" | "rest_of_week" | "going_forward", or nil to use
-    // whatever scope the proposal already carries (e.g. legacy proposals
-    // with a single implicit target day).
+    // Backend accept failures arrive as fixed, server-chosen codes (see
+    // ACCEPT_ERROR_STATUS in functions/src/index.ts). Before this mapping
+    // every one of them surfaced as the literal string "INTERNAL", so a
+    // proposal that had simply been replaced by a newer one was
+    // indistinguishable from a crash — and the only way to find out was to
+    // tap again.
+    private static func planAdjustmentErrorMessage(from error: Error) -> String {
+        // A callable HttpsError's `message` is what lands in
+        // localizedDescription — for the *Http fallback path it's the
+        // handler's named error string. Both carry the same codes.
+        switch error.localizedDescription {
+        case let code where code.contains("proposal_no_longer_pending"):
+            return "Coach already replaced this suggestion with a newer one. Check the latest card."
+        case let code where code.contains("proposal_not_found"):
+            return "That suggestion is no longer available."
+        case let code where code.contains("proposal_requires_review"):
+            return "This change needs one more detail from you before it can be applied."
+        case let code where code.contains("ramp_no_longer_applies"):
+            return "This ease-back plan has passed its start date. Ask Coach for a fresh one."
+        case let code where code.contains("workout_plan_not_found"),
+             let code where code.contains("program_not_ready"):
+            return "Your plan isn't ready yet. Try again in a moment."
+        case let code where code.contains("proposal_not_yours"):
+            return "That suggestion belongs to a different account."
+        case let code where code.contains("target_day_not_found"),
+             let code where code.contains("patch_not_supported"),
+             let code where code.contains("patch_empties_day"):
+            // Permanent failures — "try again in a moment" would be a lie
+            // that sends the user tapping a button that can never work.
+            return "Coach can't apply this suggestion to your current plan. Ask for a fresh one."
+        default:
+            return "Couldn't apply that change. Try again in a moment."
+        }
+    }
+
+    // scope: "today" | "rest_of_week" | "going_forward" | "reentry_ramp", or
+    // nil to use whatever scope the proposal already carries (e.g. legacy
+    // proposals with a single implicit target day, and every ramp — a ramp
+    // pins its own scope server-side).
     func acceptPendingPlanAdjustmentProposal(scope: String? = nil) async {
         guard !isSending, let pendingPlanAdjustmentProposal else { return }
 
@@ -384,7 +420,7 @@ final class AppModel: NSObject, ObservableObject {
             try await callBackend(httpName: "acceptPlanAdjustmentProposalHttp", callableName: "acceptPlanAdjustmentProposal", data: data)
             try await refreshCurrentWorkoutPlan()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = Self.planAdjustmentErrorMessage(from: error)
         }
     }
 
@@ -1075,6 +1111,29 @@ final class AppModel: NSObject, ObservableObject {
             return ProposalDayPatchDetail(dayKey: dayKey, name: name, exerciseLines: exercises)
         }
 
+        // A re-entry ramp carries its materialized sessions as `rampDays`
+        // (date-keyed, spanning weeks) rather than `dayPatches` (weekday-keyed,
+        // one week). Folded into the same detail list so the card renders every
+        // exercise for a ramp too — "60% of normal" is not reviewable content
+        // on its own, and the same "approve only what you can see" rule that
+        // governs a substitution week governs this.
+        let rampDayDetails: [ProposalDayPatchDetail] = (proposedPlanPatch["rampDays"] as? [[String: Any]] ?? []).compactMap { raw in
+            guard
+                let date = raw["date"] as? String,
+                let day = raw["day"] as? [String: Any],
+                let name = day["name"] as? String
+            else { return nil }
+            let exercises = (day["exercises"] as? [[String: Any]] ?? []).compactMap { exercise -> String? in
+                guard let exerciseName = exercise["name"] as? String else { return nil }
+                let sets = exercise["sets"] as? Int ?? 0
+                let reps = exercise["reps"] as? Int ?? 0
+                let weight = Self.makeDouble(from: exercise["weight"]) ?? 0
+                let load = weight > 0 ? " @ \(Int(weight)) lb" : ""
+                return "\(exerciseName) · \(sets)×\(reps)\(load)"
+            }
+            return ProposalDayPatchDetail(dayKey: date, name: name, exerciseLines: exercises)
+        }
+
         return PlanAdjustmentProposalSummary(
             id: document.documentID,
             proposalId: proposalId,
@@ -1086,7 +1145,7 @@ final class AppModel: NSObject, ObservableObject {
             patchTitle: patchTitle,
             patchType: proposedPlanPatch["type"] as? String ?? "review_only",
             changes: proposedPlanPatch["changes"] as? [String] ?? [],
-            dayPatchDetails: dayPatchDetails,
+            dayPatchDetails: dayPatchDetails + rampDayDetails,
             safetyNotes: data["safetyNotes"] as? [String] ?? [],
             sourceCorpusEntryIds: data["sourceCorpusEntryIds"] as? [String] ?? [],
             requiresFollowUp: data["requiresFollowUp"] as? Bool ?? false,
