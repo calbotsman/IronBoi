@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Live end-to-end smoke harness against the REAL deployed ironboi-staging
-// backend (real Gemini tool loop, IRONBOI_COACH_TOOL_LOOP_ENABLED=true).
+// backend (real tool loop, IRONBOI_COACH_TOOL_LOOP_ENABLED=true). The vendor
+// is whatever IRONBOI_COACH_PROVIDER is pinned to — the report prints the
+// provider/model that actually served the turn, so a silent vendor switch
+// shows up here rather than in a billing statement.
 //
 // What it does, as a throwaway ANONYMOUS user:
 //   A. bootstrap  — anon sign-up, minimal profile, regenerate plan
@@ -8,13 +11,18 @@
 //   C. injury arc — triage question -> low-risk proposal w/ dayPatches ->
 //                   chat-accept -> plan mutated (dailyOverrides)
 //   D. recovery   — coachFollowUps doc scheduled after the injury accept
+//   F. ramp       — "I fell off" -> multi-week re-entry ramp -> accept ->
+//                   dated overrides spanning MORE than one week, template
+//                   untouched. Regression cover for the 2026-07-26 bug where
+//                   a layoff adjusted Monday and nothing after it.
 //   E. cleanup    — deleteAccount callable wipes the user; reads 404/403
 //
 // Assertions are STATE-BASED (Firestore docs via REST), never exact model
-// text — Gemini is nondeterministic. HARD failures fail the run (exit 1);
-// SOFT warnings are reported but don't.
+// text — models are nondeterministic. HARD failures fail the run (exit 1);
+// SOFT warnings are reported but don't. Whether the model CHOOSES a given
+// tool is SOFT; what our code does once it has is HARD.
 //
-// Budget: <= 12 coach messages, 90s per turn, 15 min wall clock.
+// Budget: <= 16 coach messages, 90s per turn, 15 min wall clock.
 //
 // Zero dependencies. Node >= 20 (global fetch). Run: node scripts/e2e-staging-smoke.mjs
 //
@@ -36,7 +44,7 @@ const IDENTITY_SIGNUP = "https://identitytoolkit.googleapis.com/v1/accounts:sign
 
 const TURN_TIMEOUT_MS = 90_000;
 const POLL_INTERVAL_MS = 3_000;
-const MAX_MESSAGES = 12;
+const MAX_MESSAGES = 16;
 const WALL_CLOCK_CAP_MS = 15 * 60_000;
 const SESSION_ID = "general";
 
@@ -316,6 +324,22 @@ function proposalDayPatches(proposal) {
   return Array.isArray(patches) ? patches : [];
 }
 
+/**
+ * Stable stringify with recursively sorted object keys. Firestore hands back
+ * map fields in arbitrary order, so comparing two reads of the SAME unchanged
+ * document with JSON.stringify reports a spurious difference.
+ */
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
 function looksLikeQuestion(text) {
   return typeof text === "string" && text.includes("?");
 }
@@ -546,6 +570,131 @@ async function scenarioInjuryArc() {
   return { proposalId: proposal.__docId, accepted };
 }
 
+// The bug this scenario exists for: "I fell off. I need you to adjust my
+// workout" adjusted MONDAY ONLY and nothing after it. The mechanism assertions
+// are HARD (they test our code); whether the model reaches for a ramp at all
+// is SOFT, because that is prompt-dependent and nondeterministic — a red
+// nightly should mean the ramp machinery broke, not that the model phrased
+// itself differently.
+async function scenarioReentryRamp() {
+  beginScenario("F. Re-entry ramp (returning from a layoff)");
+
+  const planBefore = (await fsGetDoc(`users/${state.uid}/workoutPlans/current`)).doc;
+
+  await sendCoachTurnWithRetry(
+    "layoff-open",
+    "I fell off and haven't trained in about a month. Can you ease me back into my normal routine over the next few weeks?",
+  );
+
+  let proposal = await pollUntil(async () => {
+    const pending = await listPendingProposals();
+    return pending.find((doc) => doc.proposedPlanPatch?.type === "reentry_ramp") ?? null;
+  }, 20_000);
+
+  // The prompt tells the coach to ASK how long they were out when it doesn't
+  // know. One nudge, same allowance the injury arc makes.
+  if (!proposal) {
+    info("no ramp proposal on the first turn — sending one nudge");
+    await sendCoachTurnWithRetry("layoff-nudge", "About four weeks off. Please set up the ease-back plan.");
+    proposal = await pollUntil(async () => {
+      const pending = await listPendingProposals();
+      return pending.find((doc) => doc.proposedPlanPatch?.type === "reentry_ramp") ?? null;
+    }, 20_000);
+  }
+
+  if (!check("SOFT", Boolean(proposal), proposal
+    ? `ramp proposal created: ${proposal.proposalId}`
+    : "coach never proposed a re-entry ramp (prompt/model behaviour — machinery untested this run)")) {
+    // Diagnostic: "no ramp" and "a single-day proposal instead" are very
+    // different failures, and the second one IS the original bug. Say which.
+    const pending = await listPendingProposals();
+    if (pending.length === 0) {
+      info("no pending proposal of ANY type — the adapt_plan call was refused server-side");
+    } else {
+      for (const doc of pending) {
+        info(
+          `instead got: type=${doc.proposedPlanPatch?.type} category=${doc.category} ` +
+            `scope=${doc.appliesTo?.scope ?? "none"} dayKey=${doc.appliesTo?.dayKey ?? "none"} ` +
+            `dayPatches=${proposalDayPatches(doc).length}`,
+        );
+      }
+    }
+    endScenario();
+    return { proposalId: null, accepted: false };
+  }
+
+  const rampWeeks = Array.isArray(proposal.proposedPlanPatch?.rampWeeks)
+    ? proposal.proposedPlanPatch.rampWeeks
+    : [];
+  const pcts = rampWeeks.map((week) => week.intensityPct);
+  info(`ramp shape: ${pcts.join(" → ")}%`);
+
+  check("HARD", rampWeeks.length >= 2, `ramp has ${rampWeeks.length} weeks (>= 2)`);
+  check("HARD", pcts.at(-1) === 100,
+    `ramp ends at full intensity (last week = ${pcts.at(-1)}%)`);
+  check("HARD", pcts.every((pct, i) => i === 0 || pct >= pcts[i - 1]),
+    "ramp intensity never steps down");
+  check("HARD", proposal.appliesTo?.scope === "reentry_ramp",
+    `scope pinned to reentry_ramp (got ${proposal.appliesTo?.scope})`);
+  check("HARD", proposal.riskLevel === "low" && proposal.requiresFollowUp === false,
+    `ramp is appliable without review (risk=${proposal.riskLevel}, requiresFollowUp=${proposal.requiresFollowUp})`);
+
+  // The consent fix: the card must carry real sessions, not just percentages.
+  const rampDays = Array.isArray(proposal.proposedPlanPatch?.rampDays)
+    ? proposal.proposedPlanPatch.rampDays
+    : [];
+  check("HARD", rampDays.length > 0,
+    `proposal carries ${rampDays.length} concrete session(s) for the card`);
+  const firstSession = rampDays[0]?.day;
+  check("HARD", Array.isArray(firstSession?.exercises) && firstSession.exercises.length > 0,
+    firstSession
+      ? `first session has real exercises (${firstSession.name}: ${firstSession.exercises.length})`
+      : "ramp sessions carry no exercises");
+
+  await sendCoachTurnWithRetry("layoff-accept", "yes, do it");
+
+  const accepted = await pollUntil(async () => {
+    const { doc } = await fsGetDoc(
+      `users/${state.uid}/planAdjustmentProposals/${proposal.proposalId}`,
+    );
+    return doc && doc.decision === "accepted" ? doc : null;
+  }, 20_000);
+  if (!check("HARD", Boolean(accepted), accepted
+    ? "ramp proposal accepted"
+    : "ramp proposal was never accepted")) {
+    endScenario();
+    return { proposalId: proposal.proposalId, accepted: false };
+  }
+
+  const planAfter = (await fsGetDoc(`users/${state.uid}/workoutPlans/current`)).doc;
+  const overrideDates = Object.keys(planAfter?.dailyOverrides ?? {}).sort();
+  info(`dailyOverrides: ${overrideDates.length} date(s) ${overrideDates[0]} → ${overrideDates.at(-1)}`);
+
+  // THE regression assertion. The original bug wrote a single day; a ramp must
+  // reach past the current week.
+  const spanDays =
+    overrideDates.length >= 2
+      ? Math.round(
+          (Date.parse(`${overrideDates.at(-1)}T00:00:00Z`) -
+            Date.parse(`${overrideDates[0]}T00:00:00Z`)) / 86_400_000,
+        )
+      : 0;
+  check("HARD", overrideDates.length > 1,
+    `ramp wrote ${overrideDates.length} dated sessions, not just one`);
+  check("HARD", spanDays > 7,
+    `ramp reaches beyond a single week (${spanDays} days from first to last)`);
+
+  // And it must be TEMPORARY — the repeating template is what it returns to.
+  // Compared canonically: Firestore returns map keys in arbitrary order, so a
+  // plain JSON.stringify diff reports a false change on every run.
+  check("HARD",
+    canonicalJson(planAfter?.days ?? {}) === canonicalJson(planBefore?.days ?? {}),
+    "baseline template untouched (ramp is dated overrides only, so it expires on its own)");
+
+  endScenario();
+  return { proposalId: proposal.proposalId, accepted: true };
+}
+
 async function scenarioRecoveryFollowUp(injuryResult) {
   beginScenario("D. Recovery follow-up doc");
   if (!injuryResult.accepted) {
@@ -679,6 +828,7 @@ async function main() {
       await scenarioPlainChat();
       injuryResult = await scenarioInjuryArc();
       await scenarioRecoveryFollowUp(injuryResult);
+      await scenarioReentryRamp();
     }
   } catch (error) {
     if (error instanceof BudgetExceededError) {

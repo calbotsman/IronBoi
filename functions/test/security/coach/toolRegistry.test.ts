@@ -26,6 +26,13 @@ describe("coach tool registry", () => {
     await Promise.all(getApps().map((activeApp) => deleteApp(activeApp)));
   });
 
+  // A Wednesday. Without a pinned date these tests read the wall clock, and
+  // rest_of_week drops any dayPatch whose next occurrence falls past Sunday —
+  // so every Friday-patch assertion below failed when the suite happened to
+  // run on a Saturday or Sunday. Pin the date; never let the calendar decide
+  // whether CI is green.
+  const TEST_CLIENT_DATE = "2026-07-15";
+
   it("adapt_plan without scope analyzes but does NOT persist — needsScopeConfirmation instead", async () => {
     await db.doc(workoutPlanPath(USER_ID, "current")).set({
       userId: USER_ID,
@@ -44,7 +51,7 @@ describe("coach tool registry", () => {
       },
     });
 
-    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null, clientDate: TEST_CLIENT_DATE });
     const result = (await executeTool(
       registry,
       "adapt_plan",
@@ -77,7 +84,7 @@ describe("coach tool registry", () => {
       days: { Mon: { name: "Rest day", muscles: [], exercises: [] } },
     });
 
-    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null, clientDate: TEST_CLIENT_DATE });
     const result = (await executeTool(
       registry,
       "adapt_plan",
@@ -92,7 +99,7 @@ describe("coach tool registry", () => {
   });
 
   it("adapt_plan rejects a model call carrying an identity-shaped field", async () => {
-    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null, clientDate: TEST_CLIENT_DATE });
     await expect(
       executeTool(
         registry,
@@ -104,7 +111,7 @@ describe("coach tool registry", () => {
   });
 
   it("adapt_plan returns a validation error instead of throwing on malformed args", async () => {
-    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null, clientDate: TEST_CLIENT_DATE });
     const result = (await executeTool(
       registry,
       "adapt_plan",
@@ -118,6 +125,7 @@ describe("coach tool registry", () => {
   it("locked pain proposal tells the model which fields were missing (self-correcting loop)", async () => {
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
       rawUserText: "my back hurts, can we update this weeks workouts",
     });
     // Pain adapt_plan WITHOUT painTriage or dayPatches — the live E2E
@@ -144,6 +152,7 @@ describe("coach tool registry", () => {
   it("locked pain proposal with severe raw text says do-not-retry instead", async () => {
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
       rawUserText: "sharp pain shooting down my leg",
     });
     const result = (await executeTool(
@@ -177,6 +186,7 @@ describe("coach tool registry", () => {
   it("userReportsSevere=true fires do-not-retry even with all fields present", async () => {
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
       rawUserText: "my back hurts",
     });
     const result = (await executeTool(
@@ -211,6 +221,7 @@ describe("coach tool registry", () => {
     // lockReason must not promise one just because fields were missing.
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
       rawUserText: "sharp pain shooting down my leg",
     });
     const result = (await executeTool(
@@ -228,6 +239,7 @@ describe("coach tool registry", () => {
   it("redFlagsAsked:false gets a guided hint instead of a dead-end validation error", async () => {
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
       rawUserText: "my back hurts",
     });
     const result = (await executeTool(
@@ -253,6 +265,7 @@ describe("coach tool registry", () => {
   it("triage-cleared pain proposal carries no lock fields", async () => {
     const registry = buildCoachToolRegistry(db, {
       latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
       rawUserText: "no sharp pain, no numbness, nothing radiating, just a dull ache",
       clientDate: "2026-07-15",
     });
@@ -285,7 +298,7 @@ describe("coach tool registry", () => {
   });
 
   it("ask_follow_up_question returns the rendered question", async () => {
-    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null });
+    const registry = buildCoachToolRegistry(db, { latestPendingProposalId: null, clientDate: TEST_CLIENT_DATE });
     const result = await executeTool(
       registry,
       "ask_follow_up_question",

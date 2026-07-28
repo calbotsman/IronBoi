@@ -5,6 +5,7 @@ import {
   acceptLatestPlanAdjustmentFromChat,
   createPlanAdjustmentProposalFromTool,
   findLatestPendingProposal,
+  publishDraftProposals,
   rejectLatestPlanAdjustmentFromChat,
 } from "../../../src/workouts/planAdjustments.js";
 import {
@@ -67,8 +68,22 @@ describe("chat-driven plan adjustment decisions", () => {
     return (await findLatestPendingProposal(db, USER_ID))?.docId ?? null;
   }
 
+  // adapt_plan writes a DRAFT; the card only appears when the coach turn ends
+  // and publishes it. Tests that need a pending proposal must model both
+  // halves, or they are testing a state production never reaches.
+  // Stands in for the orchestrator's end-of-turn publish. Production passes
+  // the ids its OWN tool calls returned; these tests only ever have one turn
+  // in flight, so every outstanding draft belongs to it.
+  async function endTurn() {
+    const drafts = await db
+      .collection(planAdjustmentProposalsCollectionPath(USER_ID))
+      .where("decision", "==", "draft")
+      .get();
+    return publishDraftProposals(db, USER_ID, drafts.docs.map((doc) => doc.id));
+  }
+
   async function createPendingViaTool(scope?: "today" | "going_forward") {
-    return createPlanAdjustmentProposalFromTool({
+    const created = await createPlanAdjustmentProposalFromTool({
       db,
       userId: USER_ID,
       reason: "time_constraint",
@@ -76,6 +91,8 @@ describe("chat-driven plan adjustment decisions", () => {
       dayKey: "Mon",
       scope,
     });
+    await endTurn();
+    return created;
   }
 
   it("chat accept applies the latest pending proposal through the same gate as the card", async () => {
@@ -159,6 +176,7 @@ describe("chat-driven plan adjustment decisions", () => {
       dayKey: "Mon",
       scope: "today",
     });
+    await endTurn();
     expect(created.proposalId).toBeTruthy();
 
     const result = await acceptLatestPlanAdjustmentFromChat(
@@ -223,6 +241,7 @@ describe("chat-driven plan adjustment decisions", () => {
       dayKey: "Tue",
       scope: "today",
     });
+    await endTurn();
 
     // Client's local date is 2026-07-21, a Tuesday — the override must land
     // exactly there, regardless of the server's timezone.
@@ -240,6 +259,10 @@ describe("chat-driven plan adjustment decisions", () => {
   });
 
   it("a revised proposal supersedes the previous pending one", async () => {
+    // Two turns: the user sees the first card, then says "actually, do this
+    // instead". The supersede happens when the SECOND turn publishes, not
+    // when its draft is written — so a turn that dies mid-revision leaves the
+    // original card intact rather than wiping it with nothing to replace it.
     const first = await createPendingViaTool("today");
     const second = await createPlanAdjustmentProposalFromTool({
       db,
@@ -249,6 +272,13 @@ describe("chat-driven plan adjustment decisions", () => {
       dayKey: "Tue",
       scope: "today",
     });
+
+    const firstBeforePublish = await db
+      .doc(planAdjustmentProposalPath(USER_ID, first.proposalId!))
+      .get();
+    expect(firstBeforePublish.data()?.decision).toBe("pending");
+
+    await endTurn();
 
     const firstSnap = await db.doc(planAdjustmentProposalPath(USER_ID, first.proposalId!)).get();
     expect(firstSnap.data()?.decision).toBe("superseded");

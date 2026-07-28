@@ -6,6 +6,7 @@ import {
   createClearOverridesProposalFromTool,
   createPlanAdjustmentProposalFromTool,
   findLatestPendingProposal,
+  publishDraftProposals,
 } from "../../../src/workouts/planAdjustments.js";
 import { sweepCoachFollowUps } from "../../../src/followups/sweep.js";
 import {
@@ -95,6 +96,21 @@ describe("injury triage → week rebuilder → recovery arc", () => {
     await Promise.all(getApps().map((activeApp) => deleteApp(activeApp)));
   });
 
+  // adapt_plan writes a DRAFT — the card is not tappable until the coach turn
+  // ends and publishes it (orchestrate.ts's finally block). These tests act as
+  // the USER, which by definition happens after the turn, so they end the turn
+  // first and then read the pending id exactly as production does.
+  // Production passes the ids the turn's own tool calls returned; these tests
+  // only ever have one turn in flight, so every outstanding draft is its own.
+  async function pendingIdAfterTurn(): Promise<string | null> {
+    const drafts = await db
+      .collection(`users/${USER_ID}/planAdjustmentProposals`)
+      .where("decision", "==", "draft")
+      .get();
+    await publishDraftProposals(db, USER_ID, drafts.docs.map((doc) => doc.id));
+    return (await findLatestPendingProposal(db, USER_ID))?.docId ?? null;
+  }
+
   it("triage-cleared injury proposal with dayPatches is low-risk and appliable", async () => {
     const created = await createPlanAdjustmentProposalFromTool({
       db,
@@ -140,7 +156,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       db,
       USER_ID,
       "rest_of_week",
-      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      await pendingIdAfterTurn(),
       "2026-07-15",
     );
     expect(accept).toMatchObject({ ok: false, error: "plan_adjustment_requires_review" });
@@ -242,7 +258,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       db,
       USER_ID,
       undefined,
-      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      await pendingIdAfterTurn(),
       "2026-07-15",
     );
     expect(accept).toMatchObject({ ok: true, appliedScope: "rest_of_week" });
@@ -359,7 +375,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       db,
       USER_ID,
       undefined,
-      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      await pendingIdAfterTurn(),
       "2026-07-15",
     );
     expect(accept).toMatchObject({ ok: true });
@@ -391,7 +407,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       db,
       USER_ID,
       undefined,
-      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      await pendingIdAfterTurn(),
       "2026-07-15",
     );
     expect(accept).toMatchObject({ ok: true });
@@ -438,7 +454,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       db,
       USER_ID,
       undefined,
-      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      await pendingIdAfterTurn(),
       TEST_TODAY,
     );
     expect(accept).toMatchObject({ ok: true });
@@ -485,7 +501,7 @@ describe("injury triage → week rebuilder → recovery arc", () => {
       db,
       USER_ID,
       undefined,
-      (await findLatestPendingProposal(db, USER_ID))?.docId ?? null,
+      await pendingIdAfterTurn(),
       TEST_TODAY,
     );
     expect(accept).toMatchObject({ ok: true });

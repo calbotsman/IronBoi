@@ -45,13 +45,14 @@ export type GenerateCoachReplyResult = {
 };
 
 export type CoachModelProvider = {
-  provider: "gemini";
+  provider: "gemini" | "openrouter";
   model: string;
   generateCoachReply(args: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult>;
 };
 
 type SelectCoachModelProviderArgs = {
   geminiApiKey?: string;
+  openRouterApiKey?: string;
 };
 
 function estimateTokens(text: string) {
@@ -313,12 +314,302 @@ export class GeminiCoachProvider implements CoachModelProvider {
   }
 }
 
-// Gemini-only as of 2026-05-21. The selector signature stays in place so a
-// second provider (OpenRouter, Claude, etc.) can slot in without touching
-// callers — just add a new provider class and another branch here.
+// OpenRouter speaks the OpenAI /chat/completions dialect, so the whole
+// provider is a translation layer over the same tool loop. Three differences
+// from Gemini are load-bearing and each has bitten someone before:
+//
+//   1. `function.arguments` arrives as a JSON *STRING*, not a parsed object
+//      like Gemini's `functionCall.args`. A truncated or malformed tool call
+//      therefore fails at JSON.parse rather than at validation — handled as a
+//      tool error the model can correct, never a thrown turn.
+//   2. Zero-arg tools INVERT. Gemini 400s on an OBJECT with empty
+//      `properties`, so the declarations omit `parameters` entirely; OpenAI's
+//      dialect wants the explicit empty object. Same declaration, opposite
+//      encoding.
+//   3. Every tool_call in an assistant message MUST get a matching tool
+//      result or the next request 400s. This loop is sequential-only by
+//      policy (one call per round), so the assistant message is rewritten to
+//      carry ONLY the call actually executed.
+//
+// Safety note: `safetySettings` has no OpenRouter equivalent and is dropped.
+// That is not a safety regression — the real gates are server-side and
+// provider-independent: the pre/postflight classifier (coach/safety.ts), the
+// deterministic severe screen, and the pain-triage gate.
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+type OpenRouterToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+type OpenRouterMessage =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string | null; tool_calls?: OpenRouterToolCall[] }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+type OpenRouterResponsePayload = {
+  choices?: Array<{
+    message?: { content?: string | null; tool_calls?: OpenRouterToolCall[] };
+    finish_reason?: string;
+  }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  // OpenRouter can report upstream failures in a 200 body rather than an
+  // HTTP status — a 200 with no choices and an `error` is a real failure and
+  // must not be mistaken for an empty reply.
+  error?: { code?: number | string; message?: string };
+};
+
+export class OpenRouterCoachProvider implements CoachModelProvider {
+  provider = "openrouter" as const;
+  // Deliberately a SEPARATE env var from IRONBOI_COACH_MODEL. Model ids are
+  // namespaced here ("google/gemini-2.5-flash"), and a bare Gemini name left
+  // over in the shared var would 400 every single turn.
+  model = process.env.IRONBOI_OPENROUTER_MODEL || "google/gemini-2.5-flash";
+
+  constructor(private readonly apiKey: string) {}
+
+  private callOpenRouter(
+    messages: OpenRouterMessage[],
+    tools: CoachToolDeclaration[] | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<Response> {
+    return fetch(OPENROUTER_URL, {
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
+        // Optional attribution headers — they identify the app on
+        // OpenRouter's dashboard so this traffic is distinguishable from the
+        // studio's when reading spend.
+        "HTTP-Referer": "https://ironboi.app",
+        "X-Title": "MYO Coach",
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages,
+        ...(tools && tools.length > 0
+          ? {
+              tools: tools.map((tool) => ({
+                type: "function" as const,
+                function: {
+                  name: tool.name,
+                  description: tool.description,
+                  // The inverse of the Gemini encoding — see (2) above.
+                  parameters: tool.parameters ?? { type: "object", properties: {} },
+                },
+              })),
+            }
+          : {}),
+        // Same reasoning as the Gemini provider: a multi-day dayPatches or a
+        // 6-week rampWeeks call is far larger than prose, and truncated tool
+        // JSON surfaces as a malformed call rather than an obvious error.
+        max_tokens: tools && tools.length > 0 ? 2048 : 900,
+        temperature: 0.4,
+      }),
+    });
+  }
+
+  private async callOpenRouterWithRetry(
+    messages: OpenRouterMessage[],
+    tools: CoachToolDeclaration[] | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<OpenRouterResponsePayload> {
+    const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 524]);
+    const MAX_ATTEMPTS = 5;
+    let response!: Response;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      response = await this.callOpenRouter(messages, tools, signal);
+      if (response.ok || !TRANSIENT_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
+        break;
+      }
+      const retryAfterHeader = Number(response.headers.get("retry-after"));
+      const retryAfterMs =
+        Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? Math.min(retryAfterHeader * 1000, 8000)
+          : attempt * 1200 + Math.floor(Math.random() * 600);
+      safeLogger.warn("OpenRouter transient failure, retrying", {
+        event: "openrouter_transient_retry",
+        outcome: `http_${response.status}_attempt_${attempt}`,
+      });
+      await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+    }
+
+    if (!response.ok) {
+      let bodySnippet = "";
+      try {
+        bodySnippet = (await response.text()).slice(0, 200);
+      } catch {
+        bodySnippet = "unreadable";
+      }
+      safeLogger.error("OpenRouter request failed after retries", {
+        event: "openrouter_request_failed",
+        outcome: `http_${response.status}`,
+        errorDetail: bodySnippet,
+      });
+      throw new Error(`OpenRouter request failed with HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json()) as OpenRouterResponsePayload;
+    if (payload.error && !payload.choices?.length) {
+      safeLogger.error("OpenRouter returned an error body", {
+        event: "openrouter_error_body",
+        outcome: `code_${payload.error.code ?? "unknown"}`,
+        errorDetail: String(payload.error.message ?? "").slice(0, 200),
+      });
+      throw new Error("OpenRouter returned an error response");
+    }
+    return payload;
+  }
+
+  async generateCoachReply({
+    system,
+    userContent,
+    tools,
+    executeTool,
+    maxToolCalls = DEFAULT_MAX_TOOL_CALLS,
+    onText,
+    signal,
+  }: GenerateCoachReplyArgs): Promise<GenerateCoachReplyResult> {
+    const messages: OpenRouterMessage[] = [
+      { role: "system", content: system },
+      { role: "user", content: userContent },
+    ];
+    const toolCallsMade: Array<{ name: string; args: Record<string, unknown> }> = [];
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    const canUseTools = Boolean(tools && tools.length > 0 && executeTool);
+
+    for (let round = 0; round <= maxToolCalls; round += 1) {
+      const offerTools = canUseTools && round < maxToolCalls;
+      // Forced finish, same discipline as the Gemini provider: the last round
+      // drops the declarations AND says so in the SYSTEM message, never as a
+      // user-role message (that would contradict the prompt's own data
+      // boundary — user-role content is data, not instruction).
+      messages[0] = {
+        role: "system",
+        content:
+          canUseTools && !offerTools
+            ? `${system}\n\nTool budget for this turn is exhausted. Finish now with your best text reply; no further tool calls are available.`
+            : system,
+      };
+
+      const payload = await this.callOpenRouterWithRetry(
+        messages,
+        offerTools ? tools : undefined,
+        signal,
+      );
+
+      inputTokens +=
+        payload.usage?.prompt_tokens ?? estimateTokens(`${system}\n${userContent}`);
+      const message = payload.choices?.[0]?.message;
+      const text = (message?.content ?? "").trim();
+      outputTokens += payload.usage?.completion_tokens ?? estimateTokens(text);
+
+      const call = message?.tool_calls?.[0];
+      if (!call || !offerTools) {
+        if (!text) {
+          throw new Error("OpenRouter returned an empty coach response");
+        }
+        await onText?.(text);
+        return { content: text, usage: { inputTokens, outputTokens }, toolCalls: toolCallsMade };
+      }
+
+      // Sequential only (orchestration spec §5.5). The assistant message is
+      // rewritten to carry ONLY this call — replaying all of them while
+      // answering one leaves unmatched tool_call_ids and the next request
+      // 400s.
+      messages.push({ role: "assistant", content: message?.content ?? null, tool_calls: [call] });
+
+      let args: Record<string, unknown> = {};
+      let argsValid = true;
+      try {
+        const parsed = JSON.parse(call.function.arguments || "{}");
+        // A non-object (array, string, number) would sail past validation as
+        // an empty arg set and silently produce a wrong proposal.
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          args = parsed as Record<string, unknown>;
+        } else {
+          argsValid = false;
+        }
+      } catch {
+        argsValid = false;
+      }
+
+      if (!argsValid) {
+        // Hand it back as a tool RESULT rather than throwing: the loop is
+        // self-correcting by design, and a truncated tool call on a heavy
+        // rampWeeks/dayPatches turn is exactly the case worth recovering
+        // from instead of failing the whole turn.
+        safeLogger.warn("OpenRouter tool call had unparseable arguments", {
+          event: "openrouter_tool_args_unparseable",
+          tool: call.function.name,
+        });
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: JSON.stringify({
+            ok: false,
+            error: "invalid_tool_arguments_json",
+            hint: "Your tool arguments were not valid JSON — likely truncated. Re-send the call with compact, complete JSON.",
+          }),
+        });
+        continue;
+      }
+
+      toolCallsMade.push({ name: call.function.name, args });
+      const toolResponse = await executeTool!(call.function.name, args);
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify(toolResponse),
+      });
+    }
+
+    throw new Error("OpenRouter tool loop exited without a final reply");
+  }
+}
+
+// Provider selection is EXPLICIT and fails loudly. The 2026-05-11 audit found
+// the opposite pattern here — a pinned provider whose key was missing would
+// silently fall through to whichever key happened to be configured, with no
+// log line saying so. A misconfigured pin now returns null (the orchestrator
+// tells the user to try again) instead of quietly billing a different vendor.
 export function selectCoachModelProvider({
   geminiApiKey,
+  openRouterApiKey,
 }: SelectCoachModelProviderArgs): CoachModelProvider | null {
+  const pinned = process.env.IRONBOI_COACH_PROVIDER?.trim().toLowerCase();
+
+  if (pinned === "openrouter" || pinned === "gemini") {
+    const key = pinned === "openrouter" ? openRouterApiKey : geminiApiKey;
+    if (!key) {
+      safeLogger.error("Pinned coach provider has no API key configured", {
+        event: "coach_provider_key_missing",
+        modelProvider: pinned,
+      });
+      return null;
+    }
+    return pinned === "openrouter"
+      ? new OpenRouterCoachProvider(key)
+      : new GeminiCoachProvider(key);
+  }
+
+  if (pinned) {
+    safeLogger.error("Unknown IRONBOI_COACH_PROVIDER value", {
+      event: "coach_provider_unknown",
+      modelProvider: pinned,
+    });
+    return null;
+  }
+
+  // Unpinned: prefer OpenRouter when it's configured. One balance across
+  // every model beats a per-project Google quota, which is what sent us here.
+  if (openRouterApiKey) {
+    return new OpenRouterCoachProvider(openRouterApiKey);
+  }
   if (geminiApiKey) {
     return new GeminiCoachProvider(geminiApiKey);
   }

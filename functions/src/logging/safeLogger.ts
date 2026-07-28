@@ -38,6 +38,18 @@ export const allowedLogKeys = new Set([
   "memoryKind",
   "agentName",
   "trigger",
+  // adapt_plan_shape (coach/toolRegistry.ts) — enums, booleans, and counts
+  // only, never user or model text. These were missing from the allowlist,
+  // so the structured log PR #16 added to diagnose live tool-loop failures
+  // was emitting "[REDACTED]" for every field that mattered.
+  "category",
+  "riskLevel",
+  "requiresFollowUp",
+  "scope",
+  "dayPatchCount",
+  "hasPainTriage",
+  "rampWeekCount",
+  "rampShape",
 ]);
 
 const suspiciousKeyPattern =

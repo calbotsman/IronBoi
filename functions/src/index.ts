@@ -123,6 +123,7 @@ const require = createRequire(import.meta.url);
 const coach = require("./coach/ironboi-coach.v0.json") as CoachConfig;
 const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
+const openRouterApiKey = defineSecret("OPENROUTER_API_KEY");
 
 // Callable-surface twin of writeHttpHandlerError's ZodError branch: a
 // malformed payload must surface as invalid-argument (not opaque INTERNAL)
@@ -916,9 +917,59 @@ export const acceptPlanAdjustmentProposal = onCall(
   async (request) => {
     const userId = requireUserId(request.auth);
     const parsed = parseCallablePayload(AcceptPlanAdjustmentProposalRequest, request.data, "acceptPlanAdjustmentProposal");
-    return acceptPlanAdjustmentProposalCore(db, userId, parsed);
+    try {
+      return await acceptPlanAdjustmentProposalCore(db, userId, parsed);
+    } catch (error) {
+      throw acceptPlanAdjustmentHttpsError(error, userId, parsed.proposalId);
+    }
   },
 );
+
+// The accept core signals every outcome with a plain `new Error(code)`.
+// firebase-functions turns any non-HttpsError throw into a bare 500
+// "INTERNAL", and the iOS SDK surfaces that verbatim — so a proposal that
+// was simply superseded by a newer one read to the user as an app crash,
+// identical to a real infrastructure failure. (The *Http twin never had this
+// problem; it returned named codes. The callable migration flattened them.)
+// Mapping them here restores a distinguishable, actionable error per case
+// without leaking anything user-specific: every message below is a fixed
+// string chosen by us, never model or user text.
+const ACCEPT_ERROR_STATUS: Record<string, { code: "not-found" | "failed-precondition" | "permission-denied"; message: string }> = {
+  plan_adjustment_proposal_not_found: { code: "not-found", message: "proposal_not_found" },
+  workout_plan_not_found: { code: "not-found", message: "workout_plan_not_found" },
+  plan_adjustment_user_mismatch: { code: "permission-denied", message: "proposal_not_yours" },
+  plan_adjustment_not_pending: { code: "failed-precondition", message: "proposal_no_longer_pending" },
+  plan_adjustment_requires_review: { code: "failed-precondition", message: "proposal_requires_review" },
+  plan_adjustment_target_day_not_found: { code: "failed-precondition", message: "target_day_not_found" },
+  plan_adjustment_patch_not_supported: { code: "failed-precondition", message: "patch_not_supported" },
+  plan_adjustment_patch_removed_all_exercises: { code: "failed-precondition", message: "patch_empties_day" },
+  plan_adjustment_ramp_produced_no_days: { code: "failed-precondition", message: "ramp_no_longer_applies" },
+  training_program_not_loaded_for_cascade: { code: "failed-precondition", message: "program_not_ready" },
+};
+
+function acceptPlanAdjustmentHttpsError(error: unknown, userId: string, proposalId: string) {
+  const raw = error instanceof Error ? error.message : "";
+  const mapped = ACCEPT_ERROR_STATUS[raw];
+  if (mapped) {
+    safeLogger.info("Plan adjustment accept rejected", {
+      event: "plan_adjustment_accept_rejected",
+      userId,
+      proposalId,
+      errorCode: mapped.message,
+    });
+    return new HttpsError(mapped.code, mapped.message);
+  }
+  // Genuinely unexpected (Firestore ABORTED, ZodError on a stored doc, a
+  // bug): keep it opaque to the client but make it findable in logs.
+  safeLogger.error("Plan adjustment accept failed", {
+    event: "plan_adjustment_accept_error",
+    userId,
+    proposalId,
+    errorCode: "accept_failed",
+    errorDetail: raw.slice(0, 200),
+  });
+  return new HttpsError("internal", "accept_failed");
+}
 
 export const sendOnboardingAnswerHttp = onRequest(
   { region: "us-central1", invoker: "public" },
@@ -1007,6 +1058,19 @@ export const acceptPlanAdjustmentProposalHttp = onRequest(
       const result = await acceptPlanAdjustmentProposalCore(db, userId, parsed);
       writeJsonResponse(response, 200, result);
     } catch (error) {
+      // Keep the named codes rather than collapsing everything to one string,
+      // so this fallback path reports the same outcomes as the callable and
+      // the iOS error mapping works identically on both. writeHttpHandlerError
+      // drops the thrown code, which is what made every failure here read as a
+      // generic "couldn't apply that change".
+      const raw = error instanceof Error ? error.message : "";
+      const mapped = ACCEPT_ERROR_STATUS[raw];
+      if (mapped) {
+        const status =
+          mapped.code === "not-found" ? 404 : mapped.code === "permission-denied" ? 403 : 409;
+        writeJsonResponse(response, status, { ok: false, error: mapped.message });
+        return;
+      }
       writeHttpHandlerError(response, error, "accept_plan_adjustment_failed");
     }
   },
@@ -1113,7 +1177,7 @@ export const onUserCoachMessageCreated = onDocumentCreated(
   {
     region: "us-central1",
     document: "users/{userId}/coachSessions/{sessionId}/messages/{messageId}",
-    secrets: [geminiApiKey],
+    secrets: [geminiApiKey, openRouterApiKey],
     // Bill protection + sanity. A chat turn should never need more than 60s.
     // maxInstances caps a runaway client at ~20 concurrent coach turns.
     // retry:false because we never want a coach turn to silently re-run
@@ -1142,6 +1206,7 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       userContent: data.content,
       clientDate: typeof data.clientDate === "string" ? data.clientDate : undefined,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });
   },
 );

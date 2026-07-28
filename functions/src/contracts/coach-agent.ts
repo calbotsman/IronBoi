@@ -86,6 +86,14 @@ export const PlanAdjustmentCategory = z.enum([
   "other",
 ]);
 export const PlanAdjustmentDecision = z.enum([
+  // Created mid-turn by a tool call, not yet shown to anyone. A coach turn
+  // can call adapt_plan several times (the self-correcting loop explicitly
+  // asks it to), so a proposal written straight to `pending` renders a card
+  // the user can tap while the SAME turn is still running — and a later
+  // adapt_plan in that turn then supersedes the card under their finger.
+  // Drafts are invisible to the iOS listener and to findLatestPendingProposal;
+  // publishDraftProposals flips exactly one to `pending` when the turn ends.
+  "draft",
   "pending",
   "accepted",
   "rejected",
@@ -111,11 +119,29 @@ export const PlanAdjustmentDecision = z.enum([
 //                    template automatically — no week-rollover machinery.
 //   going_forward  — the target day in the template and every materialized
 //                    week of the program from the active week onward.
+//   reentry_ramp   — a GRADED return spanning several weeks. Each ramp week
+//                    scales the user's own baseline template to a percentage
+//                    of normal, written as date-keyed dailyOverrides across
+//                    the whole ramp window. Like rest_of_week it expires by
+//                    date and never touches the template, so the plan returns
+//                    to 100% on its own — the difference is that it reaches
+//                    past Sunday and steps back up week over week.
 export const PlanAdjustmentScope = z.enum([
   "today",
   "rest_of_week",
   "going_forward",
+  "reentry_ramp",
 ]);
+
+// One week of a re-entry ramp. `intensityPct` scales the baseline day's sets
+// and load; 100 means "your normal week" and materializes NO override at all
+// (the template already says that). Bounded 40–100: below 40 the session
+// stops resembling the user's program, and a ramp that goes UP past baseline
+// would be the coach inventing load nobody approved.
+export const ReentryRampWeek = z.object({
+  intensityPct: z.number().int().min(40).max(100),
+  note: z.string().min(1).max(120),
+}).strict();
 
 export const CoachAgentContract = z.object({
   id: z.literal("myo_coach"),
@@ -733,6 +759,7 @@ export const PlanAdjustmentProposal = z.object({
       "reschedule_day",
       "replace_day_focus",
       "clear_overrides",
+      "reentry_ramp",
     ]),
     title: z.string().min(1),
     changes: z.array(z.string().min(1)).default([]),
@@ -758,6 +785,25 @@ export const PlanAdjustmentProposal = z.object({
     // clear_overrides patches carry no day content — accept deletes all
     // future-dated dailyOverrides so the template shows through again.
     clearOverrides: z.boolean().optional(),
+    // Re-entry ramp: week 0 is the user's CURRENT week (today through
+    // Sunday), week 1 the next calendar week, and so on. Accept materializes
+    // each week by scaling the baseline template — the model authors the
+    // shape of the return, never the exercises, so a ramp can't smuggle in
+    // movements the user never programmed. Bounded at 6 weeks; beyond that
+    // it stops being a return and becomes a new program.
+    rampWeeks: z.array(ReentryRampWeek).min(1).max(6).optional(),
+    // The materialized ramp, computed at PROPOSE time from the live template,
+    // so the approval card can show every session — real exercises, sets, and
+    // loads — instead of only "60% of normal". A percentage is not reviewable
+    // content: no user can derive "Back Squat 3×5 @ 135" from it, and the
+    // scaling rounds. Accept re-derives from the template rather than reading
+    // this back, so it is a PREVIEW, not the source of truth; the dates shift
+    // if the user approves on a later day (the card says so).
+    // 6 weeks × 7 days is the ceiling implied by rampWeeks' own bound.
+    rampDays: z
+      .array(z.object({ date: z.string().min(1), day: PlannedWorkoutDay }).strict())
+      .max(42)
+      .optional(),
   }).strict(),
   sourceCorpusEntryIds: z.array(z.string()).default([]),
   safetyNotes: z.array(z.string()).default([]),

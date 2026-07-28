@@ -426,13 +426,19 @@ struct PlanAdjustmentProposalCard: View {
                 Text(proposal.patchTitle)
                     .font(.subheadline.weight(.semibold))
 
-                if proposal.dayPatchDetails.isEmpty {
+                // A ramp needs BOTH: the week-by-week shape (which weeks, what
+                // percentage, when it returns to normal) and the concrete
+                // sessions underneath it. Every other patch type shows one or
+                // the other.
+                if proposal.dayPatchDetails.isEmpty || proposal.patchType == "reentry_ramp" {
                     ForEach(proposal.changes, id: \.self) { change in
                         Label(change, systemImage: "checkmark.circle")
                             .font(.caption)
                             .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
                     }
-                } else {
+                }
+
+                if !proposal.dayPatchDetails.isEmpty {
                     // The user is approving THIS content — show every
                     // exercise, never just a day name and a count.
                     ForEach(proposal.dayPatchDetails) { day in
@@ -595,6 +601,11 @@ struct PlanAdjustmentProposalCard: View {
             return "Apply — this week only"
         case "going_forward":
             return "Apply to \(target) — going forward"
+        case "reentry_ramp":
+            // The reach that matters for a ramp is that it ENDS. The card
+            // lists each week's dates above, so the button names the shape
+            // and the fact that it undoes itself.
+            return "Start easing back in — reverts on its own"
         default:
             return proposal.dayKey.map { "Apply to \($0)" } ?? "Apply to plan"
         }
