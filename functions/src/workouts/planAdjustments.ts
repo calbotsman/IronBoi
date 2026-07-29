@@ -235,7 +235,11 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // in a denial must not mask a severe phrase at the start of the raw turn.
   const severeText = [originalUserText, input.painTriage?.description ?? "", rawText].join(". ");
   let riskLevel = riskForCategory(category, severeText);
-  let requiresFollowUp = needsFollowUp(category, riskLevel);
+  let requiresFollowUp = needsFollowUp(
+    category,
+    riskLevel,
+    (input.dayPatches?.length ?? 0) > 0,
+  );
   let triageCleared = false;
   if (
     category === "injury_pain" &&
@@ -1805,29 +1809,7 @@ function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): Ad
   if (matchesAny(text, ["pregnant", "pregnancy", "postpartum", "trimester"])) {
     return "pregnancy_postpartum";
   }
-  if (
-    matchesAny(text, [
-      "hurt",
-      "pain",
-      "injury",
-      "injured",
-      "ankle",
-      "knee",
-      "shoulder",
-      "wrist",
-      "hip",
-      "swollen",
-      "sprain",
-      // Common injury verbs the list was missing entirely — without them
-      // "I strained my back in the gym" had no backstop once the "back"
-      // needle was made conditional.
-      "strain",
-      "tweak",
-      "twinge",
-      "pulled",
-    ]) ||
-    mentionsBackAsBodyPart(text)
-  ) {
+  if (matchesAny(text, INJURY_SYMPTOM_MARKERS)) {
     return "injury_pain";
   }
   if (matchesAny(text, ["hungover", "hangover", "sick", "tired", "fatigue", "exhausted", "sore", "sleep"])) {
@@ -1858,33 +1840,6 @@ function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): Ad
   return null;
 }
 
-// "back" is both a body part and the most natural word for RETURNING to
-// training — "get back into it", "easing back into lifting". As a bare
-// substring needle it classified every layoff-return message as an injury,
-// which locks the proposal at high risk and sends the coach off interrogating
-// a pain-free user with red-flag questions.
-//
-// The disambiguation is deliberately NARROW: only an explicit return VERB
-// immediately before "back" counts as the return sense. An earlier attempt
-// excused any "back <preposition>" and that silently broke the gate it was
-// meant to protect — "I tweaked my back on Monday" and "strained my back in
-// the gym" stopped classifying as injuries at all, which would have let a
-// genuine back injury through to an auto-appliable ramp.
-//
-// The asymmetry is the whole point. A false positive costs the user some
-// unnecessary triage questions; a false negative puts an injured user's own
-// aggravating movement back on the bar. So anything ambiguous stays an
-// injury.
-// The optional object pronoun is load-bearing. English puts one between the
-// verb and "back" constantly — "ease ME back into my routine", "get YOU back
-// to lifting" — and without it the phrase that motivated this whole feature
-// ("can you ease me back into my normal routine") classified as a BACK INJURY
-// and the server refused a perfectly good ramp the model had authored. Caught
-// on live staging, not by the unit tests, which only covered the adjacent
-// forms. Closed-class list: no real injury report reads "<verb> me back".
-const RETURN_IDIOM =
-  /\b(?:get|getting|got|ease|easing|work|working|come|coming|jump|jumping|dive|diving|ramp|ramping)\s+(?:me|you|him|her|them|us|myself|yourself|himself|herself|themselves)?\s*back\b/g;
-
 // Markers of an illness the user is still IN, as opposed to one they have
 // recovered from and are returning after. Past-tense framings ("I was sick
 // last month", "after the flu") are the normal, appliable case — this only
@@ -1896,12 +1851,69 @@ function hasActiveIllnessMarkers(text: string): boolean {
   return ACTIVE_ILLNESS.test(text);
 }
 
-function mentionsBackAsBodyPart(text: string): boolean {
-  // Strip the return idioms, then ask the plain question of what's left. So
-  // "want to get back into it but my back hurts" still reads as an injury on
-  // its second "back".
-  return /\bback\b/.test(text.replace(RETURN_IDIOM, " "));
-}
+// A BODY PART IS NOT A SYMPTOM.
+//
+// This list used to contain "shoulder", "knee", "hip", "wrist", "ankle" and
+// "back" as bare needles — and every one of them is also the name of a lift:
+// shoulder press, hip thrust, back squat, knee raise, wrist curl. Six of nine
+// ordinary equipment sentences classified as injuries. "Swap my shoulder
+// press, the ceiling is too low" went high-risk, and the coach answered a
+// question about ceiling height by asking whether the pain radiated.
+//
+// Three separate patches tried to rescue those needles: a return-idiom strip
+// for "get back into it", a pronoun allowance for "ease ME back", an
+// exercise-noun strip for "shoulder press". Each was correct, and each only
+// moved the boundary, because the premise underneath was wrong. Naming a body
+// part says WHERE, never WHETHER. Only a symptom says whether.
+//
+// So the needles are symptoms and complaint idioms only, and every piece of
+// disambiguation machinery is deleted along with the ambiguity it existed to
+// manage. "my shoulder press hurts" fires on "hurt". "swap my shoulder press"
+// does not fire at all — correctly, because nothing is wrong.
+//
+// This is a BACKSTOP, not the router. The model picks `reason` by reading the
+// whole message; this exists so a mislabeled reason cannot walk a pain report
+// past the triage gate. hasSevereMarkers stays separate and absolute.
+//
+// Phrases rather than bare stems wherever the stem is ambiguous: "pulled my" /
+// "pulled a" (never "I pulled 315"), "tweaked my" / "tweaked a" (never "tweak
+// my program").
+const INJURY_SYMPTOM_MARKERS = [
+  "hurt",
+  "pain",
+  "sore",
+  "injury",
+  "injured",
+  "swollen",
+  "sprain",
+  "strain",
+  "twinge",
+  "aching",
+  "ache",
+  "stiff",
+  "numb",
+  "tingl",
+  "throb",
+  "inflamed",
+  "tender",
+  // PAST TENSE is the signal: "tweaked" reports something that happened to
+  // you, "tweak my program" is a request. Same for "pulled my/a/something"
+  // versus "I pulled 315 today".
+  "tweaked",
+  "pulled my",
+  "pulled a",
+  "pulled something",
+  // Complaint idioms carrying no clinical word that still plainly report a
+  // problem. Without these, "my lower back has been bothering me" reads clean.
+  "bothering",
+  "bugging me",
+  "acting up",
+  "flared",
+  "feels off",
+  "feeling off",
+  "not right",
+  "banged up",
+];
 
 function matchesAny(text: string, needles: string[]) {
   return needles.some((needle) => text.includes(needle));
@@ -2019,8 +2031,33 @@ function riskForCategory(category: AdjustmentCategory, content: string): Adjustm
   return "low";
 }
 
-function needsFollowUp(category: AdjustmentCategory, riskLevel: AdjustmentRiskLevel) {
-  return riskLevel !== "low" || category === "equipment_limit" || category === "other";
+// `hasConcretePatch` means the caller supplied model-authored replacement days
+// the user can read in full on the card.
+//
+// equipment_limit and "other" (which is where too_hard / too_easy land) used to
+// require follow-up UNCONDITIONALLY, and that made them dead ends: the card
+// always said "Coach needs one more detail" and accept always threw
+// plan_adjustment_requires_review. No phrasing could get past it. "I don't have
+// the ceiling height for overhead press" was understood fine and refused
+// anyway.
+//
+// The rule was correct for the deterministic keyword classifier, which cannot
+// invent exercise names (see the comment in maybeCreatePlanAdjustmentProposal).
+// It was never revisited when the tool loop arrived. The model CAN author
+// concrete substitutions, and a proposal the user reads in full before
+// approving is reviewable by definition — which is exactly why the injury path
+// and the re-entry ramp are allowed to apply. These two categories just never
+// got the same treatment.
+//
+// Risk is untouched: anything not already low still requires review.
+function needsFollowUp(
+  category: AdjustmentCategory,
+  riskLevel: AdjustmentRiskLevel,
+  hasConcretePatch = false,
+) {
+  if (riskLevel !== "low") return true;
+  if (category === "equipment_limit" || category === "other") return !hasConcretePatch;
+  return false;
 }
 
 function summaryForCategory(category: AdjustmentCategory, exerciseName?: string) {

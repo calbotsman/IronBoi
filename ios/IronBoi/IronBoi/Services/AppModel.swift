@@ -459,10 +459,59 @@ final class AppModel: NSObject, ObservableObject {
         else { return }
 
         workout.exercises[exerciseIndex].completedSets[setIndex].completed.toggle()
+
+        // Stamp what was lifted at the moment the set is marked done. Without
+        // this the set carries no weight or reps, finishWorkoutSession writes
+        // `loadKg: undefined`, and progress/build.ts skips the set entirely —
+        // which is why tonnage and the e1RM chart have always been empty.
+        // Falling back to the prescription is the honest default: it is what
+        // the user was told to lift, and it is what they lifted unless they
+        // said otherwise via the weight control.
+        if workout.exercises[exerciseIndex].completedSets[setIndex].completed {
+            let exercise = workout.exercises[exerciseIndex]
+            if workout.exercises[exerciseIndex].completedSets[setIndex].weight == nil {
+                workout.exercises[exerciseIndex].completedSets[setIndex].weight = exercise.targetWeight
+            }
+            if workout.exercises[exerciseIndex].completedSets[setIndex].reps == nil {
+                workout.exercises[exerciseIndex].completedSets[setIndex].reps = exercise.targetReps
+            }
+        }
+
         let allSetsDone = workout.exercises[exerciseIndex].completedSets.allSatisfy(\.completed)
         workout.exercises[exerciseIndex].exerciseDone = allSetsDone
         workout.updatedAt = Self.isoString(from: Date())
         activeWorkout = workout
+    }
+
+    /// The weight the user is actually working at for this exercise.
+    ///
+    /// Applies to every set not already logged; sets already marked done keep
+    /// what they were completed at, because changing them would rewrite
+    /// history the user didn't ask to change. Clamped to a sane range —
+    /// PlannedExercise/WorkoutLog reject negatives, and a fat-fingered 4000 is
+    /// worse than useless in an e1RM series.
+    func setWorkoutExerciseWeight(exerciseIndex: Int, weight: Double) {
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex)
+        else { return }
+
+        let clamped = min(max(weight, 0), 2000)
+        workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
+            guard !set.completed else { return set }
+            var next = set
+            next.weight = clamped
+            return next
+        }
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// Weight currently staged for the next set of this exercise — what the
+    /// stepper shows. Falls back to the prescription before any edit.
+    func workingWeight(for exercise: ActiveWorkoutExercise) -> Double {
+        exercise.completedSets.first(where: { !$0.completed })?.weight
+            ?? exercise.completedSets.last(where: { $0.completed })?.weight
+            ?? exercise.targetWeight
     }
 
     func toggleExerciseDone(exerciseIndex: Int) {

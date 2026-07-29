@@ -461,16 +461,22 @@ private struct PlannedExerciseDetailSheet: View {
     private var askCoachSection: some View {
         DetailSection(title: "Ask Coach") {
             VStack(alignment: .leading, spacing: 12) {
-                TextField("Ask for a swap, weight change, or better demo", text: $coachRequest, axis: .vertical)
+                TextField("Ask for a swap, an easier variation, or a better demo", text: $coachRequest, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(2...4)
 
+                // "Change weight" used to live here. It sent the user into a
+                // plan-adjustment flow that could never be applied, and a
+                // number is faster to type than to negotiate — the stepper on
+                // the exercise card owns that now. Chat is for the things a
+                // control can't express ("my basement ceiling is too low").
                 HStack(spacing: 8) {
-                    quickAskButton("Change weight", request: "I need to change this exercise weight.")
+                    quickAskButton("Won't fit my space", request: "This movement doesn't work in my space. Can you swap it for something that trains the same thing?")
                     quickAskButton("Better demo", request: "Can you find me a better picture or demo for this exercise?")
                 }
 
                 FlowLayout(spacing: 8) {
+                    quickAskButton("Too hard", request: "This is too hard for me right now. Can you swap it for an easier variation?")
                     quickAskButton("Less time", request: "I have less time today. Can you shorten this workout?")
                     quickAskButton("Skip today", request: "I have to skip this workout today. Can you adjust my week?")
                     quickAskButton("Pain/injury", request: "Something hurts. Can you help me adjust this workout safely?")
@@ -655,6 +661,21 @@ private struct WorkoutExerciseCard: View {
                         .foregroundStyle(exercise.exerciseDone ? MyoTheme.Colors.ochre : MyoTheme.Colors.ink.opacity(0.45))
                 }
                 .accessibilityLabel(exercise.exerciseDone ? "Mark exercise not done" : "Mark exercise done")
+            }
+
+            // Weight is recorded here or nowhere — the set toggle stamps
+            // whatever this shows. Bodyweight movements (target 0) get no
+            // control; a stepper on push-ups is noise.
+            if exercise.targetWeight > 0 {
+                WorkoutWeightStepper(
+                    weight: appModel.workingWeight(for: exercise),
+                    isPrescribed: appModel.workingWeight(for: exercise) == exercise.targetWeight
+                ) { newWeight in
+                    appModel.setWorkoutExerciseWeight(
+                        exerciseIndex: exercise.exerciseIndex,
+                        weight: newWeight
+                    )
+                }
             }
 
             HStack(spacing: 8) {
@@ -1064,6 +1085,103 @@ private struct MuscleChipGroup: View {
                 }
             }
         }
+    }
+}
+
+/// The weight actually being lifted for an exercise, mid-session.
+///
+/// Deliberately a stepper plus a tap-to-type field rather than chat: asking a
+/// coach to change a number is worse than typing the number, and the old
+/// "Change weight" quick-ask sent the user into a plan-adjustment flow that
+/// could not apply. Steps in 5s because that is what plates come in; the field
+/// accepts anything for dumbbells and machines that don't.
+struct WorkoutWeightStepper: View {
+    let weight: Double
+    let isPrescribed: Bool
+    let onChange: (Double) -> Void
+
+    @State private var isEditing = false
+    @State private var draft = ""
+    @FocusState private var fieldFocused: Bool
+
+    private static let step: Double = 5
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Weight")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+
+            Spacer()
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onChange(max(0, weight - Self.step))
+            } label: {
+                Image(systemName: "minus")
+                    .font(.subheadline.weight(.bold))
+                    .frame(width: 44, height: 40)
+            }
+            .buttonStyle(.bordered)
+            .disabled(weight <= 0)
+            .accessibilityLabel("Decrease weight by 5 pounds")
+
+            if isEditing {
+                TextField("lb", text: $draft)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.center)
+                    .font(.subheadline.monospacedDigit().weight(.bold))
+                    .frame(minWidth: 68)
+                    .focused($fieldFocused)
+                    .onSubmit(commit)
+                    .onChange(of: fieldFocused) { _, focused in
+                        if !focused { commit() }
+                    }
+            } else {
+                Button {
+                    draft = weight == weight.rounded() ? String(Int(weight)) : String(weight)
+                    isEditing = true
+                    fieldFocused = true
+                } label: {
+                    Text("\(Int(weight)) lb")
+                        .font(.subheadline.monospacedDigit().weight(.bold))
+                        .frame(minWidth: 68, minHeight: 40)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Weight \(Int(weight)) pounds. Double tap to type an exact value.")
+            }
+
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                onChange(weight + Self.step)
+            } label: {
+                Image(systemName: "plus")
+                    .font(.subheadline.weight(.bold))
+                    .frame(width: 44, height: 40)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Increase weight by 5 pounds")
+        }
+        .overlay(alignment: .bottomLeading) {
+            // Only shown once the user has moved off the prescription, so the
+            // default state stays quiet.
+            if !isPrescribed {
+                Text("adjusted")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(MyoTheme.Colors.ochre)
+                    .offset(y: 14)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func commit() {
+        isEditing = false
+        // An unparseable entry keeps the previous value rather than zeroing
+        // the set — a silent 0 would be logged as a real lift.
+        guard let parsed = Double(draft.replacingOccurrences(of: ",", with: ".")) else { return }
+        onChange(parsed)
     }
 }
 

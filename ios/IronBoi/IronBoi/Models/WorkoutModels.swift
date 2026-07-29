@@ -112,8 +112,12 @@ struct ActiveWorkoutSet: Codable, Equatable, Identifiable {
 
     let setIndex: Int
     var completed: Bool
-    let reps: Int?
-    let weight: Double?
+    // `var`, not `let`. These carry what was ACTUALLY lifted, and until now
+    // nothing ever wrote them — so finishWorkoutSession recorded
+    // `loadKg: undefined` on every set of every workout, and the whole
+    // progress layer (tonnage, Epley e1RM) silently had no data to read.
+    var reps: Int?
+    var weight: Double?
 }
 
 struct StartWorkoutResponse: Decodable {

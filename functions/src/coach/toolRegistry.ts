@@ -92,7 +92,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
         dayPatches: {
           type: "array",
           description:
-            "Concrete replacement content for each day you're adjusting — real exercises with sets/reps/weight, not placeholders. Use for substitutions (e.g. a back-safe week). Max 7 days.",
+            "Concrete replacement content for each day you're adjusting — real exercises with sets/reps/weight, not placeholders. Use for substitutions (e.g. a back-safe week, or a swap when the user's space or kit won't allow a movement). REQUIRED to make an equipment_unavailable / too_hard / too_easy proposal approvable: without it the card has nothing for the user to review and cannot be applied. Max 7 days.",
           items: {
             type: "object",
             properties: {
