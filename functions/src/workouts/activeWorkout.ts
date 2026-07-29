@@ -127,16 +127,26 @@ export async function finishWorkoutSession(
     source: "manual",
     exercises: completedExercises.map((exercise) => ({
       name: exercise.name,
+      // Keys are OMITTED rather than set to undefined. The admin SDK is
+      // initialized without ignoreUndefinedProperties (functions/src/firebase.ts),
+      // so Firestore REJECTS an undefined value outright — meaning a bodyweight
+      // set (no loadKg) or an exercise with no notes made the whole
+      // finishWorkoutSession write throw, and the user could not finish their
+      // workout at all. Zod keeps optional keys whose value is explicitly
+      // undefined, so the object handed to .set() has to be built without them.
       sets: exercise.completedSets
         .filter((set) => set.completed)
-        .map((set) => ({
-          reps: set.reps ?? exercise.targetReps,
-          loadKg:
+        .map((set) => {
+          const loadKg =
             set.weight && set.weight > 0
               ? Math.round(set.weight * POUNDS_TO_KG * 10) / 10
-              : undefined,
-          notes: exercise.notes,
-        })),
+              : undefined;
+          return {
+            reps: set.reps ?? exercise.targetReps,
+            ...(loadKg !== undefined ? { loadKg } : {}),
+            ...(exercise.notes !== undefined ? { notes: exercise.notes } : {}),
+          };
+        }),
     })),
     durationSec: request.durationSec,
     perceivedEffort: request.perceivedEffort,

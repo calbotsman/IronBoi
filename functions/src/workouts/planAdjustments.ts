@@ -235,7 +235,11 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // in a denial must not mask a severe phrase at the start of the raw turn.
   const severeText = [originalUserText, input.painTriage?.description ?? "", rawText].join(". ");
   let riskLevel = riskForCategory(category, severeText);
-  let requiresFollowUp = needsFollowUp(category, riskLevel);
+  let requiresFollowUp = needsFollowUp(
+    category,
+    riskLevel,
+    (input.dayPatches?.length ?? 0) > 0,
+  );
   let triageCleared = false;
   if (
     category === "injury_pain" &&
@@ -2019,8 +2023,33 @@ function riskForCategory(category: AdjustmentCategory, content: string): Adjustm
   return "low";
 }
 
-function needsFollowUp(category: AdjustmentCategory, riskLevel: AdjustmentRiskLevel) {
-  return riskLevel !== "low" || category === "equipment_limit" || category === "other";
+// `hasConcretePatch` means the caller supplied model-authored replacement days
+// the user can read in full on the card.
+//
+// equipment_limit and "other" (which is where too_hard / too_easy land) used to
+// require follow-up UNCONDITIONALLY, and that made them dead ends: the card
+// always said "Coach needs one more detail" and accept always threw
+// plan_adjustment_requires_review. No phrasing could get past it. "I don't have
+// the ceiling height for overhead press" was understood fine and refused
+// anyway.
+//
+// The rule was correct for the deterministic keyword classifier, which cannot
+// invent exercise names (see the comment in maybeCreatePlanAdjustmentProposal).
+// It was never revisited when the tool loop arrived. The model CAN author
+// concrete substitutions, and a proposal the user reads in full before
+// approving is reviewable by definition — which is exactly why the injury path
+// and the re-entry ramp are allowed to apply. These two categories just never
+// got the same treatment.
+//
+// Risk is untouched: anything not already low still requires review.
+function needsFollowUp(
+  category: AdjustmentCategory,
+  riskLevel: AdjustmentRiskLevel,
+  hasConcretePatch = false,
+) {
+  if (riskLevel !== "low") return true;
+  if (category === "equipment_limit" || category === "other") return !hasConcretePatch;
+  return false;
 }
 
 function summaryForCategory(category: AdjustmentCategory, exerciseName?: string) {
