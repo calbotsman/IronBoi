@@ -1804,39 +1804,12 @@ function normalizeExerciseName(value: unknown) {
 }
 
 function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): AdjustmentCategory | null {
-  const raw = content.toLowerCase();
-  // Body-part-as-exercise-name pairs are removed for the INJURY test only —
-  // see stripExerciseNames. Every other category still reads the raw text, so
-  // "no room for hip thrusts in my garage" can still match equipment needles.
-  const text = raw;
-  const injuryText = stripExerciseNames(raw);
+  const text = content.toLowerCase();
 
   if (matchesAny(text, ["pregnant", "pregnancy", "postpartum", "trimester"])) {
     return "pregnancy_postpartum";
   }
-  if (
-    matchesAny(injuryText, [
-      "hurt",
-      "pain",
-      "injury",
-      "injured",
-      "ankle",
-      "knee",
-      "shoulder",
-      "wrist",
-      "hip",
-      "swollen",
-      "sprain",
-      // Common injury verbs the list was missing entirely — without them
-      // "I strained my back in the gym" had no backstop once the "back"
-      // needle was made conditional.
-      "strain",
-      "tweak",
-      "twinge",
-      "pulled",
-    ]) ||
-    mentionsBackAsBodyPart(injuryText)
-  ) {
+  if (matchesAny(text, INJURY_SYMPTOM_MARKERS)) {
     return "injury_pain";
   }
   if (matchesAny(text, ["hungover", "hangover", "sick", "tired", "fatigue", "exhausted", "sore", "sleep"])) {
@@ -1867,33 +1840,6 @@ function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): Ad
   return null;
 }
 
-// "back" is both a body part and the most natural word for RETURNING to
-// training — "get back into it", "easing back into lifting". As a bare
-// substring needle it classified every layoff-return message as an injury,
-// which locks the proposal at high risk and sends the coach off interrogating
-// a pain-free user with red-flag questions.
-//
-// The disambiguation is deliberately NARROW: only an explicit return VERB
-// immediately before "back" counts as the return sense. An earlier attempt
-// excused any "back <preposition>" and that silently broke the gate it was
-// meant to protect — "I tweaked my back on Monday" and "strained my back in
-// the gym" stopped classifying as injuries at all, which would have let a
-// genuine back injury through to an auto-appliable ramp.
-//
-// The asymmetry is the whole point. A false positive costs the user some
-// unnecessary triage questions; a false negative puts an injured user's own
-// aggravating movement back on the bar. So anything ambiguous stays an
-// injury.
-// The optional object pronoun is load-bearing. English puts one between the
-// verb and "back" constantly — "ease ME back into my routine", "get YOU back
-// to lifting" — and without it the phrase that motivated this whole feature
-// ("can you ease me back into my normal routine") classified as a BACK INJURY
-// and the server refused a perfectly good ramp the model had authored. Caught
-// on live staging, not by the unit tests, which only covered the adjacent
-// forms. Closed-class list: no real injury report reads "<verb> me back".
-const RETURN_IDIOM =
-  /\b(?:get|getting|got|ease|easing|work|working|come|coming|jump|jumping|dive|diving|ramp|ramping)\s+(?:me|you|him|her|them|us|myself|yourself|himself|herself|themselves)?\s*back\b/g;
-
 // Markers of an illness the user is still IN, as opposed to one they have
 // recovered from and are returning after. Past-tense framings ("I was sick
 // last month", "after the flu") are the normal, appliable case — this only
@@ -1905,38 +1851,69 @@ function hasActiveIllnessMarkers(text: string): boolean {
   return ACTIVE_ILLNESS.test(text);
 }
 
-// Body-part words are ALSO exercise names, and the gym uses them constantly:
-// shoulder press, hip thrust, back squat, knee raise, wrist curl, leg
-// extension. Matched as bare needles they turned six of nine ordinary
-// equipment sentences into injury reports — "swap my shoulder press, the
-// ceiling is too low" became a high-risk pain proposal, and the coach answered
-// a logistics question by asking whether the pain radiated.
+// A BODY PART IS NOT A SYMPTOM.
 //
-// So a body part IMMEDIATELY followed by a movement noun is naming a lift, and
-// that pairing is removed before the needle test runs.
+// This list used to contain "shoulder", "knee", "hip", "wrist", "ankle" and
+// "back" as bare needles — and every one of them is also the name of a lift:
+// shoulder press, hip thrust, back squat, knee raise, wrist curl. Six of nine
+// ordinary equipment sentences classified as injuries. "Swap my shoulder
+// press, the ceiling is too low" went high-risk, and the coach answered a
+// question about ceiling height by asking whether the pain radiated.
 //
-// The safety property that makes this sound: only the ambiguous BODY-PART
-// token is removed, never the symptom vocabulary. "my shoulder press hurts"
-// still fires on "hurt"; "hip thrust hurts my hip" still fires on the second
-// "hip". A real report has to carry a symptom word, and every one of those
-// survives untouched.
-const EXERCISE_NOUN =
-  "press|presses|squat|squats|curl|curls|raise|raises|thrust|thrusts|extension|extensions|row|rows|fly|flyes|flies|pulldown|pulldowns|pull-?ups?|push-?ups?|dips?|lunges?|deadlifts?|bridges?|carries|carry|sled|machine|day|workout|session|routine|split";
-const BODY_PART_AS_EXERCISE = new RegExp(
-  `\\b(?:ankle|knee|shoulder|wrist|hip|back|chest|leg|calf|glute|tricep|bicep|hamstring|quad)s?\\s+(?:${EXERCISE_NOUN})\\b`,
-  "g",
-);
-
-function stripExerciseNames(text: string): string {
-  return text.replace(BODY_PART_AS_EXERCISE, " ");
-}
-
-function mentionsBackAsBodyPart(text: string): boolean {
-  // Strip the return idioms, then ask the plain question of what's left. So
-  // "want to get back into it but my back hurts" still reads as an injury on
-  // its second "back".
-  return /\bback\b/.test(text.replace(RETURN_IDIOM, " "));
-}
+// Three separate patches tried to rescue those needles: a return-idiom strip
+// for "get back into it", a pronoun allowance for "ease ME back", an
+// exercise-noun strip for "shoulder press". Each was correct, and each only
+// moved the boundary, because the premise underneath was wrong. Naming a body
+// part says WHERE, never WHETHER. Only a symptom says whether.
+//
+// So the needles are symptoms and complaint idioms only, and every piece of
+// disambiguation machinery is deleted along with the ambiguity it existed to
+// manage. "my shoulder press hurts" fires on "hurt". "swap my shoulder press"
+// does not fire at all — correctly, because nothing is wrong.
+//
+// This is a BACKSTOP, not the router. The model picks `reason` by reading the
+// whole message; this exists so a mislabeled reason cannot walk a pain report
+// past the triage gate. hasSevereMarkers stays separate and absolute.
+//
+// Phrases rather than bare stems wherever the stem is ambiguous: "pulled my" /
+// "pulled a" (never "I pulled 315"), "tweaked my" / "tweaked a" (never "tweak
+// my program").
+const INJURY_SYMPTOM_MARKERS = [
+  "hurt",
+  "pain",
+  "sore",
+  "injury",
+  "injured",
+  "swollen",
+  "sprain",
+  "strain",
+  "twinge",
+  "aching",
+  "ache",
+  "stiff",
+  "numb",
+  "tingl",
+  "throb",
+  "inflamed",
+  "tender",
+  // PAST TENSE is the signal: "tweaked" reports something that happened to
+  // you, "tweak my program" is a request. Same for "pulled my/a/something"
+  // versus "I pulled 315 today".
+  "tweaked",
+  "pulled my",
+  "pulled a",
+  "pulled something",
+  // Complaint idioms carrying no clinical word that still plainly report a
+  // problem. Without these, "my lower back has been bothering me" reads clean.
+  "bothering",
+  "bugging me",
+  "acting up",
+  "flared",
+  "feels off",
+  "feeling off",
+  "not right",
+  "banged up",
+];
 
 function matchesAny(text: string, needles: string[]) {
   return needles.some((needle) => text.includes(needle));
