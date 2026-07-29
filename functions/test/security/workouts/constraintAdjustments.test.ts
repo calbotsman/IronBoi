@@ -146,6 +146,53 @@ describe("space + difficulty adjustments are appliable, not dead ends", () => {
     },
   );
 
+  // Body-part words are also exercise names, and the gym says them constantly.
+  // Matched as bare needles, six of nine ordinary equipment sentences became
+  // injury reports — "swap my shoulder press, the ceiling is too low" went
+  // high-risk and the coach answered a logistics question by asking whether
+  // the pain radiated.
+  it.each([
+    "can you swap my shoulder press, the ceiling is too low",
+    "no room for hip thrusts in my garage",
+    "swap back squats, no rack at home",
+    "change the knee raises, I have no bar to hang from",
+    "wrist curls are boring, swap them for something else",
+    "this shoulder day is too easy",
+    "my basement ceiling is too low for overhead press",
+  ])("treats %j as logistics, not an injury", async (rawUserText) => {
+    const result = await proposeAndPublish("equipment_unavailable", SUBSTITUTE_PATCH, rawUserText);
+    expect(result.category).not.toBe("injury_pain");
+    expect(result).toMatchObject({ riskLevel: "low", requiresFollowUp: false });
+  });
+
+  // The other direction, and the one that matters more. Stripping removes only
+  // the ambiguous BODY-PART token, never symptom vocabulary — so any real
+  // report still fires, including one that names the lift it happened on.
+  it.each([
+    "my shoulder press hurts",
+    "hip thrust hurts my hip",
+    "sharp pain during back squats",
+    "I tweaked something doing knee raises",
+    "my shoulder has been sore since the press",
+    "wrist curls hurt my wrist",
+  ])("still reads %j as an injury", async (rawUserText) => {
+    const result = await createPlanAdjustmentProposalFromTool({
+      db,
+      userId: USER_ID,
+      reason: "equipment_unavailable",
+      userNote: "swap request",
+      scope: "today",
+      dayPatches: SUBSTITUTE_PATCH,
+      rawUserText,
+      clientDate: WEDNESDAY,
+    });
+    expect(result).toMatchObject({
+      category: "injury_pain",
+      riskLevel: "high",
+      requiresFollowUp: true,
+    });
+  });
+
   it("does not let concrete content lower a HIGH-risk proposal", async () => {
     // The escape hatch is about reviewability, not risk. A pain report still
     // has to go through triage no matter how concrete the substitution is.

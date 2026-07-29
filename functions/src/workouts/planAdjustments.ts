@@ -1804,13 +1804,18 @@ function normalizeExerciseName(value: unknown) {
 }
 
 function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): AdjustmentCategory | null {
-  const text = content.toLowerCase();
+  const raw = content.toLowerCase();
+  // Body-part-as-exercise-name pairs are removed for the INJURY test only —
+  // see stripExerciseNames. Every other category still reads the raw text, so
+  // "no room for hip thrusts in my garage" can still match equipment needles.
+  const text = raw;
+  const injuryText = stripExerciseNames(raw);
 
   if (matchesAny(text, ["pregnant", "pregnancy", "postpartum", "trimester"])) {
     return "pregnancy_postpartum";
   }
   if (
-    matchesAny(text, [
+    matchesAny(injuryText, [
       "hurt",
       "pain",
       "injury",
@@ -1830,7 +1835,7 @@ function classifyPlanAdjustment(content: string, hasWorkoutContext: boolean): Ad
       "twinge",
       "pulled",
     ]) ||
-    mentionsBackAsBodyPart(text)
+    mentionsBackAsBodyPart(injuryText)
   ) {
     return "injury_pain";
   }
@@ -1898,6 +1903,32 @@ const ACTIVE_ILLNESS =
 
 function hasActiveIllnessMarkers(text: string): boolean {
   return ACTIVE_ILLNESS.test(text);
+}
+
+// Body-part words are ALSO exercise names, and the gym uses them constantly:
+// shoulder press, hip thrust, back squat, knee raise, wrist curl, leg
+// extension. Matched as bare needles they turned six of nine ordinary
+// equipment sentences into injury reports — "swap my shoulder press, the
+// ceiling is too low" became a high-risk pain proposal, and the coach answered
+// a logistics question by asking whether the pain radiated.
+//
+// So a body part IMMEDIATELY followed by a movement noun is naming a lift, and
+// that pairing is removed before the needle test runs.
+//
+// The safety property that makes this sound: only the ambiguous BODY-PART
+// token is removed, never the symptom vocabulary. "my shoulder press hurts"
+// still fires on "hurt"; "hip thrust hurts my hip" still fires on the second
+// "hip". A real report has to carry a symptom word, and every one of those
+// survives untouched.
+const EXERCISE_NOUN =
+  "press|presses|squat|squats|curl|curls|raise|raises|thrust|thrusts|extension|extensions|row|rows|fly|flyes|flies|pulldown|pulldowns|pull-?ups?|push-?ups?|dips?|lunges?|deadlifts?|bridges?|carries|carry|sled|machine|day|workout|session|routine|split";
+const BODY_PART_AS_EXERCISE = new RegExp(
+  `\\b(?:ankle|knee|shoulder|wrist|hip|back|chest|leg|calf|glute|tricep|bicep|hamstring|quad)s?\\s+(?:${EXERCISE_NOUN})\\b`,
+  "g",
+);
+
+function stripExerciseNames(text: string): string {
+  return text.replace(BODY_PART_AS_EXERCISE, " ");
 }
 
 function mentionsBackAsBodyPart(text: string): boolean {
