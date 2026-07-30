@@ -282,7 +282,14 @@ const RESEARCH_CORPUS = [
     sourceName: "MYO internal reviewed coaching note",
     sourceType: "expert_reviewed_note",
     reviewedAt: "2026-05-11T00:00:00.000Z",
-    tags: ["pain", "injury", "ankle", "knee", "shoulder", "back", "safety"],
+    // Body parts are NOT tags here, for the same reason they are not injury
+    // needles (see INJURY_SYMPTOM_MARKERS in workouts/planAdjustments.ts):
+    // "back squat", "shoulder press" and "knee raise" are lifts. Tagging the
+    // body parts made "no rack at home, can you swap back squats" retrieve
+    // pain-and-injury guidance — so the coach was handed clinical material
+    // about not loading a painful area in answer to a question about a squat
+    // rack. Symptoms and complaints only; the movement names carry no signal.
+    tags: ["pain", "hurts", "injury", "injured", "sore", "swollen", "sprain", "strain", "safety"],
     appliesTo: ["adult", "general_population"],
     summary:
       "Pain or injury reports should trigger safety-first follow-up and plan proposals that avoid loading the painful area until the situation is clearer.",
@@ -293,6 +300,59 @@ const RESEARCH_CORPUS = [
     safetyBoundaries: [
       "Do not diagnose, name a specific injury, prescribe rehab protocols, or promise recovery timelines.",
       "Escalate for severe pain, inability to bear weight, deformity, swelling after trauma, numbness, chest symptoms, neurological symptoms, or worsening symptoms.",
+    ],
+  },
+  {
+    // Added 2026-07-29 after a live report: "I don't have the vertical height
+    // in my basement for overhead press" retrieved nothing but the generic
+    // baseline entry. The prompt then told the model it had no reviewed
+    // guidance and should answer only at a generic level — so the coach read
+    // as stupid about a question it understood perfectly well. Space and kit
+    // are the single most common real-world constraint and had no entry at all.
+    entryId: "myo_equipment_and_space_constraint_v1",
+    title: "Equipment and training-space constraint substitution rule",
+    sourceName: "MYO internal reviewed coaching note",
+    sourceType: "expert_reviewed_note",
+    reviewedAt: "2026-07-29T00:00:00.000Z",
+    tags: [
+      "equipment",
+      "no_equipment",
+      "no_gym",
+      "home_gym",
+      "basement",
+      "garage",
+      "ceiling",
+      "ceiling_height",
+      "vertical_height",
+      "headroom",
+      "clearance",
+      "space",
+      "no_rack",
+      "no_bench",
+      "dumbbells_only",
+      "kettlebell_only",
+      "bands_only",
+      "bodyweight",
+      "machine_unavailable",
+      "hotel",
+      "travel",
+      "substitution",
+      "swap",
+    ],
+    appliesTo: ["adult", "general_population"],
+    summary:
+      "A constraint on the user's space or equipment is a substitution problem, not a reason to skip. Keep the movement pattern and the training stimulus; change the implement, the angle, or the range.",
+    claims: [
+      "Substitute by MOVEMENT PATTERN and primary muscle action, not by exercise name — the goal is to keep the stimulus the plan intended.",
+      "Insufficient overhead clearance rules out all vertical pressing, seated as well as standing; press on an incline, use a landmine or half-kneeling single-arm variation, or shift to horizontal pressing with added shoulder work.",
+      "No rack means the bar has to start from the floor or from within reach: front-loaded and unilateral variations (goblet, split squat, Bulgarian, deadlift, hip hinge) preserve the leg stimulus without an unrack.",
+      "A load ceiling (light dumbbells only) is compensated with reps closer to failure, tempo, pauses, unilateral loading, or shortened rest — not by abandoning the movement.",
+      "Restricted floor space favours unilateral, static-position and vertically-oriented work over anything that travels.",
+    ],
+    safetyBoundaries: [
+      "Read the stated constraint literally and never propose a substitution that violates it — the user knows their room.",
+      "Do not suggest improvised or unstable setups (a barbell on chairs, a bench substituted by furniture) to work around missing equipment.",
+      "Do not recommend skipping the session because of the environment; a constrained session still has training value.",
     ],
   },
   {
@@ -458,11 +518,19 @@ export function retrieveResearchCorpus(input: {
       }
     }
 
+    // Scoped to entries the reason is actually ABOUT. This loop sits inside the
+    // per-entry map but used to ignore `entry` entirely, so every keyword match
+    // added the same score to all 19 entries — which is how "no rack at home,
+    // can you swap back squats" handed the coach pregnancy and diabetes
+    // guidance. Uniform noise also pushed irrelevant entries over the
+    // `score > 0` threshold and filled the top-4, crowding out the one entry
+    // that mattered.
     for (const [term, reason] of KEYWORD_REASONS) {
-      if (matchesTerm(queryText, term)) {
-        score += reason.includes("pregnancy") || reason.includes("injury") ? 5 : 2;
-        matchReasons.push(reason);
-      }
+      if (!matchesTerm(queryText, term)) continue;
+      const reasonTags = REASON_TAGS[reason];
+      if (!reasonTags?.some((tag) => entry.tags.includes(tag))) continue;
+      score += reason.includes("pregnancy") || reason.includes("injury") ? 5 : 2;
+      matchReasons.push(reason);
     }
 
     if (entry.entryId === "pag_adults_strength_aerobic_2018") {
@@ -524,6 +592,54 @@ function profileTerms(profile: Record<string, unknown> | null | undefined) {
   return fields.filter((value): value is string => typeof value === "string").join(" ");
 }
 
+// Which entries a reason is ABOUT. A keyword hit only boosts an entry that
+// carries one of these tags — without this the boost was global and every
+// query dragged the whole corpus along with it.
+const REASON_TAGS: Record<string, string[]> = {
+  pregnancy_or_postpartum: ["pregnancy", "postpartum"],
+  older_adult: ["older_adults"],
+  older_adult_balance: ["balance", "fall_prevention", "older_adults"],
+  chronic_condition: [
+    "chronic_conditions",
+    "diabetes",
+    "prediabetes",
+    "glucose",
+    "arthritis",
+    "hypertension",
+  ],
+  disability: ["disability", "accessibility"],
+  female_context: [
+    "female",
+    "female_athlete",
+    "female_physiology",
+    "women",
+    "menstrual",
+    "menopause",
+    "sims",
+  ],
+  nutrition_protein: ["protein", "nutrition"],
+  injury_or_pain: ["pain", "injury", "safety"],
+  low_readiness: ["low_readiness", "recovery", "soreness", "sleep", "hungover", "huberman"],
+  schedule_or_time_constraint: [
+    "schedule",
+    "skip",
+    "missed_workout",
+    "travel",
+    "less_time",
+  ],
+  style_preference: ["style_preference", "mobility", "yoga"],
+  resistance_training_goal: [
+    "resistance_training",
+    "strength",
+    "hypertrophy",
+    "muscle_gain",
+    "power",
+    "progression",
+    "schoenfeld",
+  ],
+  equipment_or_space: ["equipment", "no_equipment", "no_gym", "space", "substitution", "swap"],
+};
+
 const KEYWORD_REASONS: Array<[string, string]> = [
   ["pregnant", "pregnancy_or_postpartum"],
   ["pregnancy", "pregnancy_or_postpartum"],
@@ -546,13 +662,47 @@ const KEYWORD_REASONS: Array<[string, string]> = [
   ["menopause", "female_context"],
   ["menstrual", "female_context"],
   ["protein", "nutrition_protein"],
-  ["ankle", "injury_or_pain"],
-  ["knee", "injury_or_pain"],
-  ["shoulder", "injury_or_pain"],
-  ["back", "injury_or_pain"],
+  // Body parts are NOT injury terms — third and last place this lived. "back",
+  // "knee", "shoulder" and "ankle" are all lift names ("back squat", "knee
+  // raise", "shoulder press"), and as bare terms they pulled injury guidance
+  // into equipment and layoff questions. Symptoms only; see
+  // INJURY_SYMPTOM_MARKERS in workouts/planAdjustments.ts for the same list.
   ["hurt", "injury_or_pain"],
+  ["hurts", "injury_or_pain"],
   ["pain", "injury_or_pain"],
   ["injury", "injury_or_pain"],
+  ["injured", "injury_or_pain"],
+  ["swollen", "injury_or_pain"],
+  ["sprain", "injury_or_pain"],
+  ["strain", "injury_or_pain"],
+  ["twinge", "injury_or_pain"],
+  ["tender", "injury_or_pain"],
+  // Space and kit — the constraint with no coverage at all until 2026-07-29.
+  ["equipment", "equipment_or_space"],
+  ["no gym", "equipment_or_space"],
+  ["no rack", "equipment_or_space"],
+  ["no bench", "equipment_or_space"],
+  ["rack", "equipment_or_space"],
+  ["dumbbell", "equipment_or_space"],
+  ["dumbbells", "equipment_or_space"],
+  ["kettlebell", "equipment_or_space"],
+  ["kettlebells", "equipment_or_space"],
+  ["barbell", "equipment_or_space"],
+  ["bands", "equipment_or_space"],
+  ["bodyweight", "equipment_or_space"],
+  ["machine", "equipment_or_space"],
+  ["basement", "equipment_or_space"],
+  ["garage", "equipment_or_space"],
+  ["ceiling", "equipment_or_space"],
+  ["headroom", "equipment_or_space"],
+  ["clearance", "equipment_or_space"],
+  ["vertical height", "equipment_or_space"],
+  ["low ceiling", "equipment_or_space"],
+  ["hotel", "equipment_or_space"],
+  ["space", "equipment_or_space"],
+  ["room", "equipment_or_space"],
+  ["swap", "equipment_or_space"],
+  ["substitute", "equipment_or_space"],
   ["hungover", "low_readiness"],
   ["hangover", "low_readiness"],
   ["tired", "low_readiness"],
@@ -563,6 +713,17 @@ const KEYWORD_REASONS: Array<[string, string]> = [
   ["skip", "schedule_or_time_constraint"],
   ["missed", "schedule_or_time_constraint"],
   ["travel", "schedule_or_time_constraint"],
+  // Returning after a layoff — the re-entry ramp's whole use case (#19) had no
+  // retrieval terms, so "I fell off for a month" surfaced nothing topical and
+  // the coach was told it had no reviewed guidance.
+  ["fell off", "schedule_or_time_constraint"],
+  ["layoff", "schedule_or_time_constraint"],
+  ["time off", "schedule_or_time_constraint"],
+  ["haven't trained", "schedule_or_time_constraint"],
+  ["havent trained", "schedule_or_time_constraint"],
+  ["out of the habit", "schedule_or_time_constraint"],
+  ["detrained", "schedule_or_time_constraint"],
+  ["deconditioned", "schedule_or_time_constraint"],
   ["yoga", "style_preference"],
   ["mobility", "style_preference"],
   ["muscle", "resistance_training_goal"],
