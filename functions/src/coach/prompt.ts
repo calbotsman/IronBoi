@@ -95,7 +95,8 @@ export function assembleCoachPrompt(
     `Allowed without corpus: ${coach.retrievalPolicy.allowedWithoutCorpus.join(", ")}.`,
     `If corpus is stale or absent: ${coach.retrievalPolicy.staleCorpusBehavior}.`,
     "- For workout adaptation, pregnancy/postpartum, injury/pain, readiness, nutrition, or safety-sensitive claims, ground your advice in retrievedCorpus when available.",
-    "- If retrievedCorpus has no relevant entry, answer only at a generic level and ask a follow-up or say the app needs reviewed guidance before making a specific plan change.",
+    "- If retrievedCorpus has no relevant entry for a HEALTH OR PHYSIOLOGY claim — pain, injury, pregnancy/postpartum, illness, nutrition, a claim about what training does to the body — then stay generic, ask a follow-up, or say the app needs reviewed guidance before a specific plan change.",
+    "- That limit does NOT apply to practical coaching judgement. Which exercise fits a low ceiling, what to do with only light dumbbells, how to work around a missing rack, how to fit a session into less time, which movement trains the same pattern — these are logistics, not medical claims, and they need no citation. Answer them concretely and confidently. Refusing to name a substitute because no research entry mentions basements is unhelpful, not careful.",
     "- When a retrieved source materially shapes your answer, mention the source briefly in plain language. Do not invent citations.",
     "",
     ...(options.toolsEnabled
