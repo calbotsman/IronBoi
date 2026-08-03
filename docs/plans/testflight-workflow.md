@@ -64,6 +64,18 @@ That's fine for internal TestFlight — your testers (you) talk to staging Fireb
 
 **Do NOT submit to public App Store review until that warning goes away.** Replace `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` with the real download from the `ironboi-prod` Firebase project; the next Release build picks it up automatically and stops warning.
 
+Two things now enforce that, because a warning in a 400-line build log is not a safeguard:
+
+1. **The prebuild script hard-fails from `MARKETING_VERSION` 1.0.0 onward** if the prod plist is still a placeholder. Version is the gate because the build genuinely cannot tell a TestFlight archive from an App Store one — same configuration, same binary, and the destination is picked afterwards in Organizer. While you're on `0.x` nothing changes; the fallback still just warns.
+
+2. **`scripts/preflight-appstore.sh`** — run it before any public submission:
+
+   ```bash
+   scripts/preflight-appstore.sh
+   ```
+
+   It checks the things a build phase can't see: that `ironboi-prod` exists as a Firebase project and that the core callables are actually deployed to it. Exit 0 means safe to submit. You do **not** need it for a TestFlight upload.
+
 ## Common errors and what they mean
 
 | Error | Cause | Fix |

@@ -38,12 +38,37 @@ targets:
           # Safety net: if the Release build would otherwise ship the
           # placeholder prod plist (Firebase init would fail at runtime),
           # fall back to staging. This lets you TestFlight before the
-          # ironboi-prod Firebase project exists. Loud warning so it
-          # doesn't escape to public App Store.
+          # ironboi-prod Firebase project exists.
+          #
+          # This CANNOT tell a TestFlight build from an App Store build:
+          # both use the Release configuration and produce the identical
+          # archive — the destination is chosen afterwards, in Organizer.
+          # So the gate is the MARKETING_VERSION instead. While the app is
+          # 0.x the fallback is a convenience and only warns; the moment
+          # someone bumps to 1.0.0 they have decided this ships to the
+          # public, and shipping real users into a project named "staging"
+          # stops being a convenience and becomes a data problem. From 1.0
+          # on, a placeholder prod plist fails the build.
+          #
+          # A warning nobody reads is not a safeguard. `scripts/preflight-appstore.sh`
+          # is the deliberate pre-submission check; this is the backstop for
+          # when that is skipped.
           if [ "$SUFFIX" = "Prod" ] && grep -q "REPLACE_WITH_PROD" "$SOURCE"; then
+            case "${MARKETING_VERSION:-0}" in
+              0|0.*) PRERELEASE=1 ;;
+              *)     PRERELEASE=0 ;;
+            esac
+
+            if [ "$PRERELEASE" = "0" ]; then
+              echo "error: MARKETING_VERSION is ${MARKETING_VERSION:-unset} (1.0 or later) but GoogleService-Info-Prod.plist is still a REPLACE_WITH_PROD_* placeholder."
+              echo "error: A 1.x build is a public release, and the staging fallback would point real users at the ironboi-staging Firebase project."
+              echo "error: Create the ironboi-prod project, drop in its real GoogleService-Info.plist, and run scripts/preflight-appstore.sh. See ios/IronBoi/IronBoi/Firebase/README.md."
+              exit 1
+            fi
+
             FALLBACK="$PROJECT_DIR/IronBoi/Firebase/GoogleService-Info-Staging.plist"
             if [ -f "$FALLBACK" ]; then
-              echo "warning: GoogleService-Info-Prod.plist still contains REPLACE_WITH_PROD_* sentinels. Falling back to STAGING for this Release build. Replace ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist with the real prod project's file BEFORE submitting to the public App Store. See ios/IronBoi/IronBoi/Firebase/README.md."
+              echo "warning: GoogleService-Info-Prod.plist still contains REPLACE_WITH_PROD_* sentinels. Falling back to STAGING for this Release build. Fine for TestFlight; run scripts/preflight-appstore.sh before any public App Store submission. See ios/IronBoi/IronBoi/Firebase/README.md."
               SOURCE="$FALLBACK"
             else
               echo "error: Prod plist is a placeholder AND staging fallback is missing. See ios/IronBoi/IronBoi/Firebase/README.md."
