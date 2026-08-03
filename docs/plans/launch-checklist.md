@@ -62,7 +62,11 @@ After enabling capabilities you must regenerate the Distribution provisioning pr
 
 The canonical `ios/IronBoi/IronBoi/GoogleService-Info.plist` is `.gitignore`'d and regenerated at the start of every build.
 
-Until you replace `GoogleService-Info-Prod.plist` with the real prod download, **Release builds emit a loud warning** during xcodebuild and Firebase will fail at first API call. See `ios/IronBoi/IronBoi/Firebase/README.md` for the populate steps.
+Until you replace `GoogleService-Info-Prod.plist` with the real prod download, a Release build **falls back to the staging plist** and emits a loud warning. It does NOT fail at first API call — it works, against `ironboi-staging`. That is deliberate, so TestFlight is usable before `ironboi-prod` exists, and it is exactly why the fallback needs a gate: a working build pointed at the wrong project is much easier to ship by accident than a broken one.
+
+**The gate is `MARKETING_VERSION`, not the build configuration.** A build cannot tell a TestFlight archive from an App Store archive — both use Release and produce the identical binary; the destination is chosen afterwards in Organizer. So the prebuild script only warns while the app is `0.x`, and **hard-fails from `1.0.0` onward** if the prod plist is still a placeholder.
+
+That backstop is deliberately crude. The real check is `scripts/preflight-appstore.sh`, which verifies what a build phase cannot: that the prod project exists and has the backend deployed to it.
 
 ### B.3 App Check registration
 
@@ -139,6 +143,7 @@ Before tapping Archive for the first prod build, confirm:
 - ⬜ All ⬜ items above completed
 - ⬜ One end-to-end smoke test: sign in with Apple → see coach → send message → log a workout → verify it lands in Firestore → invoke Delete Account → verify the wipe happened
 - ⬜ Privacy Policy URL reachable on a public domain
+- ⬜ **`scripts/preflight-appstore.sh` exits 0.** Run this immediately before a PUBLIC submission — not before a TestFlight upload, which is fine on staging. It checks the prod plist has no placeholders, the `ironboi-prod` project actually exists, and the core callables are deployed there. A real plist pointing at an empty project is the same outage as no plist at all.
 
 When this list is all checked: archive, upload, invite internal testers.
 
