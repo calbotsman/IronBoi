@@ -764,6 +764,19 @@ export default function FitnessApp() {
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: T.body, paddingBottom: 80 }}>
 
+      {/* ── LEGACY NOTICE ──
+          This PWA predates the iOS app and shares NOTHING with it: no
+          account, no backend, no coach — everything lives in this browser's
+          localStorage, and its swap/plan logic has diverged from the real
+          product (server catalog + MYO coach). It stays deployed as a
+          local-first logbook, but nobody should mistake it for MYO or expect
+          data to sync. Remove the banner only if this app is retired or
+          actually bridged to Firebase (see launch-checklist "PWA fate"). */}
+      <div style={{ margin: "0 0 0", background: "#2a2416", borderBottom: `1px solid ${C.border}`, padding: "10px 24px", fontSize: 12, lineHeight: 1.5, color: C.textMid }}>
+        <b style={{ color: C.accent }}>Legacy app.</b> Iron Lab is the old local-only logbook — data stays in this browser and never syncs.
+        The real MYO coach lives in the iOS app; this page no longer receives features.
+      </div>
+
       {/* ── HEADER ── */}
       <div style={{ padding: "36px 24px 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>

@@ -108,11 +108,17 @@ export function normalizeExerciseKey(name: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
-// The first 43 entries mirror iOS ExerciseKnowledge exactly (same names, same
-// primary/secondary muscles) so a swap can never propose something the app
-// can't render cues for. The remainder are added ALTERNATES: without them a
-// bodyweight-only user asking to swap a Barbell Back Squat has nothing to be
-// offered, which is the exact situation this feature exists for.
+// EVERY entry here must have a matching iOS ExerciseKnowledge entry (same
+// name, same primary/secondary muscles) — a swappable exercise without one
+// renders a hollow detail sheet: "None listed" muscles and generic cues.
+// The audit caught exactly that drift once already (33 alternates were
+// swappable with no iOS entry), so exerciseCatalog.test.ts now parses the
+// Swift file and fails on any mismatch. Add there when you add here.
+//
+// The first block mirrors the original iOS table; the "added alternates"
+// block exists because a bodyweight-only user asking to swap a Barbell Back
+// Squat otherwise has nothing to be offered — the exact situation this
+// feature exists for.
 const ENTRIES: CatalogEntry[] = [
   // --- Push -------------------------------------------------------------
   { name: "Barbell Bench Press", primary: ["Chest"], secondary: ["Triceps", "Front delts"], equipment: ["barbell", "bench"], pattern: "horizontal_push", loadClass: "heavy" },

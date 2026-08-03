@@ -648,6 +648,16 @@ final class AppModel: NSObject, ObservableObject {
                 "clientDate": Self.currentDateISO(),
             ]
             if let sessionId { data["sessionId"] = sessionId }
+            // For a session swap, ship the LIVE session state with the
+            // request. Set toggles and weight edits exist only in this
+            // process until finish — the server's copy always shows zero
+            // completed sets, so a swap computed from it would replace the
+            // whole exercise and the response would erase every set the
+            // user has already done. Same trust model as finishing: the
+            // client's exercises are the record of what happened.
+            if scope == .session, let exercises = activeWorkout?.exercises {
+                data["exercises"] = try Self.jsonObject(from: exercises)
+            }
 
             let response: SwapExerciseResponse = try await callBackend(
                 httpName: "swapExerciseHttp",

@@ -13,7 +13,43 @@ History: `docs/audits/myo-engineering-qa-2026-06-23.md`.
 
 ---
 
-## Read this first — what flipping the flag actually protects (honest scope)
+## Status 2026-08-03 (audit follow-up) — prerequisites advanced, flip still held
+
+What changed today, verified against the live project rather than assumed:
+
+- **The pinned debug token is now REGISTERED.** `project.yml` pins
+  `FIRAAppCheckDebugToken` in the Xcode scheme, and its comment claimed it was
+  registered in console "once" — the App Check Admin API showed **zero** debug
+  tokens. Registered via the API, then **proved** by calling
+  `:exchangeDebugToken` with it: HTTP 200, real 1-hour App Check token. The
+  Debug path survives enforcement (when the factory is installed and the app
+  is launched via the Xcode scheme, which is what sets the env var).
+- **`appAttestConfig` exists** for the iOS app (tokenTtl 3600s). Suggestive,
+  not proof — the API has no "enabled" bit, and `launch-checklist.md` still
+  shows the Apple-side App Attest capability unchecked.
+- **Presence telemetry added** (`logAppCheckPresence` in
+  `functions/src/index.ts`): three high-traffic callables now log
+  `app_check_presence` with outcome present/absent. `request.app` is only
+  populated for a VALID token, so this shows exactly what enforcement would
+  see, at zero risk.
+
+**Why the flag stays off:** the one unverifiable path is the one that matters
+— App Attest on a real device. If the console/Apple-side setup is incomplete,
+flipping bricks the TestFlight build. The flip criterion is now mechanical:
+
+> Run the TestFlight build on a device, then check logs for
+> `event="app_check_presence"`. When Release-build traffic shows
+> `outcome:"present"`, flip the flag per the steps below. If it shows
+> `absent`, finish console setup (B.3 in launch-checklist.md) first.
+
+## Read this first — what flipping the flag actually protects
+
+**STALE SECTION — superseded 2026-07-20.** The audit below predates the
+callable migration. `AppModel.useCallableFunctions` has been `true` since
+commit 19e3cd0: the app now routes **all** its traffic through the onCall
+callables, so flipping the flag protects the real traffic path, not just
+`deleteAccount`. The `*Http` endpoints survive only as the one-line rollback.
+Kept for history:
 
 **The iOS app barely uses the callable surface.** Audit of
 `ios/IronBoi/IronBoi/Services/AppModel.swift` (2026-07-17):

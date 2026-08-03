@@ -155,6 +155,24 @@ function parseCallablePayload<T>(schema: { parse(input: unknown): T }, data: unk
   }
 }
 
+// Pre-enforcement telemetry for the App Check flip
+// (docs/operations/appcheck-enable-runbook.md). With enforcement off, a
+// missing token costs nothing — so nothing tells us whether the app's
+// Release builds are actually minting valid App Attest tokens. This logs
+// what enforcement WOULD have seen on a few high-traffic callables; flip
+// IRONBOI_ENFORCE_APP_CHECK only after real device traffic shows
+// outcome:present here. Deliberately not on every callable — three
+// endpoints the app hits constantly is signal enough, and `request.app`
+// is only populated for VALID tokens, which is exactly the question.
+function logAppCheckPresence(endpoint: string, hasApp: boolean, userId: string) {
+  safeLogger.info("App Check token presence", {
+    event: "app_check_presence",
+    userId,
+    errorCode: endpoint,
+    outcome: hasApp ? "present" : "absent",
+  });
+}
+
 function requireUserId(auth?: { uid?: string }) {
   if (!auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in is required.");
@@ -580,6 +598,7 @@ export const startWorkoutSessionCallable = onCall(
   CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
+    logAppCheckPresence("startWorkoutSession", request.app !== undefined, userId);
     const parsed = StartWorkoutSessionRequest.parse(request.data ?? {});
     const activeWorkout = await startWorkoutSession(db, userId, parsed, seed.DEFAULT_PLAN);
     return { ok: true, activeWorkout };
@@ -590,6 +609,7 @@ export const finishWorkoutSessionCallable = onCall(
   CALLABLE_OPTS,
   async (request) => {
     const userId = requireUserId(request.auth);
+    logAppCheckPresence("finishWorkoutSession", request.app !== undefined, userId);
     const parsed = FinishWorkoutSessionRequest.parse(request.data ?? {});
     const result = await finishWorkoutSession(db, userId, parsed);
     return { ok: true, ...result };
@@ -970,6 +990,7 @@ export const createCoachSession = onCall(
 // IosCoachMessageRequest and call the same handleSendCoachMessage.
 export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
+  logAppCheckPresence("sendCoachMessage", request.app !== undefined, userId);
   const parsed = parseCallablePayload(IosCoachMessageRequest, request.data, "sendCoachMessage");
   return handleSendCoachMessage(db, userId, parsed);
 });

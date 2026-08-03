@@ -239,6 +239,76 @@ describe("exercise swaps", () => {
       expect(plan?.dailyOverrides).toBeUndefined();
     });
 
+    it("preserves sets the SERVER never saw — the real production shape", async () => {
+      // THE regression test for the audit's top finding. In production, set
+      // toggles live only on the device until finish — the server's copy of
+      // the session always shows zero completed sets. The earlier test below
+      // seeds the SERVER doc with completed sets, which is precisely the
+      // state production never has; against that test the lossy behavior
+      // looked correct. Here the server doc is untouched and the completed
+      // sets arrive only on the request, as they do from a real client.
+      const session = await startSession();
+      const clientExercises = session.exercises.map((exercise) =>
+        exercise.name === "Barbell Bench Press"
+          ? {
+              ...exercise,
+              completedSets: exercise.completedSets.map((set, index) => ({
+                ...set,
+                completed: index < 2,
+                weight: 135,
+                reps: 8,
+              })),
+            }
+          : exercise,
+      );
+
+      const result = await swapExercise(db, USER_ID, {
+        dayKey: "Mon",
+        exerciseName: "Barbell Bench Press",
+        replacementName: "Push-ups",
+        scope: "session",
+        sessionId: session.sessionId,
+        planId: "current",
+        clientDate: TODAY,
+        exercises: clientExercises,
+      });
+
+      const swapped = "activeWorkout" in result ? result.activeWorkout : null;
+      const names = swapped?.exercises.map((exercise) => exercise.name);
+      expect(names).toEqual(["Barbell Bench Press", "Push-ups", "Overhead Press", "Plank"]);
+
+      const bench = swapped?.exercises[0];
+      expect(bench?.completedSets).toHaveLength(2);
+      expect(bench?.completedSets.every((set) => set.completed && set.weight === 135)).toBe(true);
+      expect(bench?.exerciseDone).toBe(true);
+      // 3 target sets, 2 done → 1 set of the replacement remains.
+      expect(swapped?.exercises[1].targetSets).toBe(1);
+
+      // The merged state must also LAND server-side — the swap doubles as a
+      // checkpoint of the user's progress so far.
+      const storedActive = (await db.doc(activeWorkoutPath(USER_ID)).get()).data();
+      expect(storedActive?.exercises[0].completedSets).toHaveLength(2);
+      expect(storedActive?.exercises[0].completedSets[0].weight).toBe(135);
+    });
+
+    it("still verifies session identity against the stored doc, not the request", async () => {
+      // The client-supplied exercises must not let a request conjure a
+      // session that isn't the running one.
+      const session = await startSession();
+      await expect(
+        swapExercise(db, USER_ID, {
+          dayKey: "Mon",
+          exerciseName: "Barbell Bench Press",
+          replacementName: "Push-ups",
+          scope: "session",
+          sessionId: "not-the-running-session",
+          planId: "current",
+          clientDate: TODAY,
+          exercises: session.exercises,
+        }),
+      ).rejects.toThrow("active_workout_session_mismatch");
+    });
+
     it("preserves already-completed sets instead of erasing them", async () => {
       const session = await startSession();
       // Two sets of bench actually happened before the swap.
