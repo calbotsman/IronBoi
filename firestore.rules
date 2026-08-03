@@ -88,6 +88,15 @@ service cloud.firestore {
       // Multi-week source of truth cascading plan adjustments write into.
       // Server-only — computed weekIndex/startDate fields mean the client
       // never constructs this doc directly.
+      // Per-exercise working-weight anchors. Server-only: these are the
+      // evidence future prescriptions are derived from, and applyExerciseBaselines
+      // only accepts a weight the user demonstrably completed sets at. A
+      // client write path would let the app claim any anchor it liked.
+      match /exerciseBaselines/{exerciseKey} {
+        allow read: if owns(userId);
+        allow write: if false;
+      }
+
       match /trainingPrograms/{programId} {
         allow read: if owns(userId);
         allow write: if false;

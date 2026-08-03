@@ -33,6 +33,13 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var isOnboardingBusy = false
     @Published private(set) var isWorkoutBusy = false
     @Published private(set) var isSavingProfile = false
+    // Rebaseline proposals from the workout that just finished, plus the
+    // session they came from. Held together because applying them requires
+    // the sessionId — the server uses it to verify the user actually
+    // completed sets at those weights. Cleared when the card is dismissed.
+    @Published var pendingBaselineSuggestions: [BaselineSuggestion] = []
+    @Published private(set) var baselineSuggestionSessionId: String?
+    @Published private(set) var isSwapBusy = false
     @Published var selectedTab: AppTab = .coach
     @Published var errorMessage: String?
 
@@ -548,9 +555,166 @@ final class AppModel: NSObject, ObservableObject {
                 ]
             )
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
+            // Surface the rebaseline card. Nothing has been written yet —
+            // the server only proposes here, and applyBaselineSuggestions is
+            // what commits.
+            let suggestions = response.baselineSuggestions ?? []
+            pendingBaselineSuggestions = suggestions
+            baselineSuggestionSessionId = suggestions.isEmpty ? nil : activeWorkout.sessionId
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Exercise swaps
+
+    /// Substitutes for `exerciseName` that train the same primary muscles.
+    ///
+    /// `availableEquipment` distinguishes "no constraint" (nil) from "I have
+    /// nothing today" (empty array) — the latter is a real answer and filters
+    /// the list to bodyweight movements.
+    func fetchSwapOptions(
+        exerciseName: String,
+        dayKey: String?,
+        sessionId: String?,
+        availableEquipment: [String]?
+    ) async -> SwapOptionsOutcome {
+        #if DEBUG
+        // The preview session's whole contract is that it touches NO network
+        // (see startPreviewSession). Without this the swap sheet fired a real
+        // callable, failed, and rendered "nothing matches that equipment" —
+        // blaming the user's filter for an unreachable backend.
+        if isPreviewSession {
+            return .loaded(
+                Self.previewSwapOptions(for: exerciseName, availableEquipment: availableEquipment)
+            )
+        }
+        #endif
+
+        do {
+            var data: [String: Any] = [
+                "exerciseName": exerciseName,
+                "clientDate": Self.currentDateISO(),
+                "limit": 8,
+            ]
+            if let dayKey { data["dayKey"] = dayKey }
+            if let sessionId { data["sessionId"] = sessionId }
+            if let availableEquipment { data["availableEquipment"] = availableEquipment }
+
+            let response: SwapOptionsResponse = try await callBackend(
+                httpName: "getExerciseSwapOptionsHttp",
+                callableName: "getExerciseSwapOptionsCallable",
+                data: data
+            )
+            return .loaded(response.options)
+        } catch {
+            // Deliberately NOT surfaced through errorMessage: the sheet is
+            // presented above the alert's host view, so the alert would be
+            // invisible and the user would just see an empty list. The sheet
+            // renders the failure itself, with a retry.
+            return .failed
+        }
+    }
+
+    /// Replaces `exerciseName` with `replacementName` at the requested scope.
+    /// Returns true when the swap landed, so the sheet knows to dismiss.
+    /// Returns nil on success, or a message to show inline in the swap sheet.
+    /// A sheet is presented above the alert's host view, so routing this
+    /// through `errorMessage` would show the user nothing at all.
+    @discardableResult
+    func swapExercise(
+        dayKey: String,
+        exerciseName: String,
+        replacementName: String,
+        scope: SwapScope,
+        sessionId: String?
+    ) async -> String? {
+        guard !isSwapBusy else { return nil }
+        isSwapBusy = true
+        defer { isSwapBusy = false }
+
+        #if DEBUG
+        if isPreviewSession {
+            return "Preview mode can't change a plan — sign in to swap for real."
+        }
+        #endif
+
+        do {
+            var data: [String: Any] = [
+                "dayKey": dayKey,
+                "exerciseName": exerciseName,
+                "replacementName": replacementName,
+                "scope": scope.rawValue,
+                "clientDate": Self.currentDateISO(),
+            ]
+            if let sessionId { data["sessionId"] = sessionId }
+
+            let response: SwapExerciseResponse = try await callBackend(
+                httpName: "swapExerciseHttp",
+                callableName: "swapExerciseCallable",
+                data: data
+            )
+
+            if let updated = response.activeWorkout {
+                activeWorkout = updated
+            }
+            // A session-scoped swap deliberately leaves the plan alone, so
+            // only the plan-scoped ones need the Train tab refreshed.
+            if scope != .session {
+                try await refreshCurrentWorkoutPlan()
+            }
+            return nil
+        } catch {
+            return Self.swapErrorMessage(from: error)
+        }
+    }
+
+    /// Commits the rebaseline proposals the user accepted on the finish card.
+    func applyBaselineSuggestions(_ suggestions: [BaselineSuggestion]) async {
+        guard !suggestions.isEmpty, let sessionId = baselineSuggestionSessionId else { return }
+        guard !isWorkoutBusy else { return }
+        isWorkoutBusy = true
+        defer { isWorkoutBusy = false }
+
+        do {
+            try await callBackend(
+                httpName: "applyExerciseBaselinesHttp",
+                callableName: "applyExerciseBaselinesCallable",
+                data: [
+                    "sessionId": sessionId,
+                    "clientDate": Self.currentDateISO(),
+                    "baselines": suggestions.map { suggestion in
+                        ["exerciseName": suggestion.exerciseName, "weightLb": suggestion.toLb]
+                    },
+                ]
+            )
+            try await refreshCurrentWorkoutPlan()
+            dismissBaselineSuggestions()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissBaselineSuggestions() {
+        pendingBaselineSuggestions = []
+        baselineSuggestionSessionId = nil
+    }
+
+    /// The server's swap rejections are contract violations, not user errors —
+    /// translate the two the user could plausibly hit into something readable
+    /// instead of surfacing `exercise_swap_not_equivalent`.
+    private static func swapErrorMessage(from error: Error) -> String {
+        let raw = error.localizedDescription
+        if raw.contains("exercise_swap_not_equivalent") {
+            return "That swap doesn't train the same muscles. Pick one of the suggested options."
+        }
+        if raw.contains("exercise_swap_target_not_in_day") {
+            return "That exercise isn't in this workout anymore. Pull to refresh and try again."
+        }
+        if raw.contains("active_workout_session_mismatch") || raw.contains("active_workout_not_active") {
+            return "This workout is no longer running. Start it again to swap an exercise."
+        }
+        return raw
     }
 
     private func requireFreshFirebaseAuthToken() async throws -> String {
@@ -1556,6 +1720,66 @@ extension AppModel: ASAuthorizationControllerPresentationContextProviding {
 // MARK: - Preview seed data (DEBUG only, never networked)
 
 extension AppModel {
+    /// Swap options for the preview session, which has no backend to ask.
+    ///
+    /// A small hand-seeded mirror of the server catalog covering the preview
+    /// plan's own exercises — enough that the swap sheet demonstrates real
+    /// behaviour (including the equipment filter) rather than showing an
+    /// empty list. The SERVER catalog remains the only authority for a swap
+    /// that actually changes a plan; nothing here can be applied.
+    static func previewSwapOptions(
+        for exerciseName: String,
+        availableEquipment: [String]?
+    ) -> [ExerciseSwapOption] {
+        let all: [String: [ExerciseSwapOption]] = [
+            "back squat": [
+                .init(name: "Bodyweight Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], reason: "Quads + Glutes · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Bulgarian Split Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings"], equipment: ["bench"], reason: "Quads + Glutes · bench", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Dumbbell Goblet Squat", primary: ["Quads", "Glutes"], secondary: ["Core"], equipment: ["dumbbell"], reason: "Quads + Glutes · dumbbell · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Step-ups", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Calves"], equipment: ["bench"], reason: "Quads + Glutes · bench", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Reverse Lunge", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], reason: "Quads + Glutes · no equipment", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Wall Sit", primary: ["Quads"], secondary: ["Glutes", "Core"], equipment: ["none"], reason: "Quads · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+            ],
+            "romanian deadlift": [
+                .init(name: "Single-leg Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Core"], equipment: ["none"], reason: "Hamstrings + Glutes · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Glute Bridge", primary: ["Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], reason: "Glutes · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Dumbbell Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Erectors"], equipment: ["dumbbell"], reason: "Hamstrings + Glutes · dumbbell · same movement", suggestedWeightLb: 65, weightFromBaseline: false),
+                .init(name: "KB Swing", primary: ["Hamstrings", "Glutes"], secondary: ["Core", "Lats"], equipment: ["kettlebell"], reason: "Hamstrings + Glutes · kettlebell · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+            ],
+            "walking lunge": [
+                .init(name: "Reverse Lunge", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], reason: "Quads + Glutes · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Bulgarian Split Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings"], equipment: ["bench"], reason: "Quads + Glutes · bench · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Step-ups", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Calves"], equipment: ["bench"], reason: "Quads + Glutes · bench · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Bodyweight Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings"], equipment: ["none"], reason: "Quads + Glutes · no equipment", suggestedWeightLb: 0, weightFromBaseline: false),
+            ],
+            "bench press": [
+                .init(name: "Push-ups", primary: ["Chest"], secondary: ["Triceps", "Front delts"], equipment: ["none"], reason: "Chest · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Dumbbell Bench Press", primary: ["Chest"], secondary: ["Triceps", "Front delts"], equipment: ["dumbbell", "bench"], reason: "Chest · dumbbell + bench · same movement", suggestedWeightLb: 60, weightFromBaseline: false),
+                .init(name: "Dumbbell Floor Press", primary: ["Chest"], secondary: ["Triceps"], equipment: ["dumbbell"], reason: "Chest · dumbbell · same movement", suggestedWeightLb: 60, weightFromBaseline: false),
+                .init(name: "Incline Push-ups", primary: ["Chest"], secondary: ["Triceps", "Front delts"], equipment: ["none"], reason: "Chest · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+            ],
+            "overhead press": [
+                .init(name: "Pike Push-ups", primary: ["Front delts", "Side delts"], secondary: ["Triceps"], equipment: ["none"], reason: "Front delts + Side delts · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Dumbbell Shoulder Press", primary: ["Front delts", "Side delts"], secondary: ["Triceps"], equipment: ["dumbbell"], reason: "Front delts + Side delts · dumbbell · same movement", suggestedWeightLb: 45, weightFromBaseline: false),
+                .init(name: "Arnold Press", primary: ["Front delts", "Side delts"], secondary: ["Rear delts"], equipment: ["dumbbell"], reason: "Front delts + Side delts · dumbbell · same movement", suggestedWeightLb: 40, weightFromBaseline: false),
+            ],
+            "deadlift": [
+                .init(name: "Single-leg Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Core"], equipment: ["none"], reason: "Hamstrings + Glutes · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "KB Swing", primary: ["Hamstrings", "Glutes"], secondary: ["Core", "Lats"], equipment: ["kettlebell"], reason: "Hamstrings + Glutes · kettlebell · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+                .init(name: "Glute Bridge", primary: ["Glutes"], secondary: ["Hamstrings"], equipment: ["none"], reason: "Glutes · no equipment · same movement", suggestedWeightLb: 0, weightFromBaseline: false),
+            ],
+        ]
+
+        let key = exerciseName.lowercased()
+        let matches = all[key] ?? all.first { key.contains($0.key) || $0.key.contains(key) }?.value ?? []
+
+        guard let availableEquipment else { return matches }
+        let allowed = Set(availableEquipment)
+        return matches.filter { option in
+            option.equipment.allSatisfy { $0 == "none" || allowed.contains($0) }
+        }
+    }
+
     static var previewProfile: UserProfile {
         var p = UserProfile.empty
         p.ageYears = 32

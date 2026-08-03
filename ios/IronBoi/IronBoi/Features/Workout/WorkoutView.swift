@@ -42,6 +42,17 @@ struct WorkoutView: View {
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            // Rebaseline card. Lives at the root of the tab rather than
+            // inside ActiveWorkoutView because finishing tears that view
+            // down — a sheet attached to it would be dismissed with it.
+            .sheet(isPresented: Binding(
+                get: { !appModel.pendingBaselineSuggestions.isEmpty },
+                set: { if !$0 { appModel.dismissBaselineSuggestions() } }
+            )) {
+                BaselineUpdateSheet(suggestions: appModel.pendingBaselineSuggestions)
+                    .presentationDetents([.medium])
+                    .presentationDragIndicator(.visible)
+            }
         }
     }
 
@@ -354,6 +365,7 @@ private struct PlannedExerciseDetailSheet: View {
     let dayKey: String
     let exercise: PlannedExercise
     @State private var coachRequest = ""
+    @State private var isSwapping = false
 
     private var knowledge: ExerciseKnowledge {
         ExerciseKnowledge.lookup(exercise.name)
@@ -372,6 +384,7 @@ private struct PlannedExerciseDetailSheet: View {
                         ExerciseSequencePlayer(sequence: sequence)
                     }
                     statsRow
+                    swapButton
                     musclesSection
                     cuesSection
                     askCoachSection
@@ -389,7 +402,36 @@ private struct PlannedExerciseDetailSheet: View {
                     }
                 }
             }
+            .sheet(isPresented: $isSwapping) {
+                ExerciseSwapSheet(
+                    dayKey: dayKey,
+                    exerciseName: exercise.name,
+                    sessionId: nil,
+                    // No workout is running, so there is no "just this
+                    // workout" — the choice is today's session or the
+                    // repeating plan.
+                    allowedScopes: [.today, .goingForward]
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
+    }
+
+    private var swapButton: some View {
+        Button {
+            isSwapping = true
+        } label: {
+            Label("Swap for something else", systemImage: "arrow.triangle.swap")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.bordered)
+        .tint(MyoTheme.Colors.ink)
+        // The demo card passes a synthetic "Demo" dayKey for an exercise that
+        // isn't in any plan — there is nothing to swap it in.
+        .disabled(dayKey == "Demo")
     }
 
     private var hero: some View {
@@ -564,6 +606,7 @@ private struct ActiveWorkoutView: View {
     @EnvironmentObject private var appModel: AppModel
     let workout: ActiveWorkoutSession
     @State private var selectedExercise: ActiveWorkoutExercise?
+    @State private var swappingExercise: ActiveWorkoutExercise?
 
     var body: some View {
         ScrollView {
@@ -571,9 +614,11 @@ private struct ActiveWorkoutView: View {
                 header
 
                 ForEach(workout.exercises) { exercise in
-                    WorkoutExerciseCard(exercise: exercise) {
-                        selectedExercise = exercise
-                    }
+                    WorkoutExerciseCard(
+                        exercise: exercise,
+                        showDetails: { selectedExercise = exercise },
+                        requestSwap: { swappingExercise = exercise }
+                    )
                 }
 
                 Button {
@@ -595,9 +640,26 @@ private struct ActiveWorkoutView: View {
             .padding()
         }
         .sheet(item: $selectedExercise) { exercise in
-            ExerciseDetailSheet(exercise: exercise)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+            ExerciseDetailSheet(
+                exercise: exercise,
+                dayKey: workout.dayKey,
+                sessionId: workout.sessionId
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $swappingExercise) { exercise in
+            ExerciseSwapSheet(
+                dayKey: workout.dayKey,
+                exerciseName: exercise.name,
+                sessionId: workout.sessionId,
+                // Mid-workout, "just this workout" is the common case and
+                // leads — most swaps here are about today's equipment or
+                // energy, not a standing change to the program.
+                allowedScopes: [.session, .today, .goingForward]
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -633,6 +695,7 @@ private struct WorkoutExerciseCard: View {
     @EnvironmentObject private var appModel: AppModel
     let exercise: ActiveWorkoutExercise
     let showDetails: () -> Void
+    let requestSwap: () -> Void
 
     var body: some View {
         Button(action: showDetails) {
@@ -649,6 +712,17 @@ private struct WorkoutExerciseCard: View {
                 }
 
                 Spacer()
+
+                // Mid-workout swap, one tap from the card. Burying this in
+                // the detail sheet would mean three taps at the exact moment
+                // someone has found the rack occupied.
+                Button(action: requestSwap) {
+                    Image(systemName: "arrow.triangle.swap")
+                        .font(.title3)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.55))
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel("Swap \(exercise.name) for another exercise")
 
                 Button {
                     if !exercise.exerciseDone {
@@ -728,6 +802,9 @@ private struct WorkoutExerciseCard: View {
 private struct ExerciseDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     let exercise: ActiveWorkoutExercise
+    let dayKey: String
+    let sessionId: String
+    @State private var isSwapping = false
 
     private var knowledge: ExerciseKnowledge {
         ExerciseKnowledge.lookup(exercise.name)
@@ -746,6 +823,7 @@ private struct ExerciseDetailSheet: View {
                         ExerciseSequencePlayer(sequence: sequence)
                     }
                     statsRow
+                    swapButton
                     musclesSection
                     cuesSection
                     videoButton
@@ -762,7 +840,30 @@ private struct ExerciseDetailSheet: View {
                     }
                 }
             }
+            .sheet(isPresented: $isSwapping) {
+                ExerciseSwapSheet(
+                    dayKey: dayKey,
+                    exerciseName: exercise.name,
+                    sessionId: sessionId,
+                    allowedScopes: [.session, .today, .goingForward]
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
         }
+    }
+
+    private var swapButton: some View {
+        Button {
+            isSwapping = true
+        } label: {
+            Label("Swap for something else", systemImage: "arrow.triangle.swap")
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.bordered)
+        .tint(MyoTheme.Colors.ink)
     }
 
     private var hero: some View {
@@ -875,6 +976,447 @@ private struct ExerciseDetailSheet: View {
         // Last resort: YouTube homepage. The string is a known-good
         // literal so the trailing `!` cannot crash here.
         return URL(string: "https://www.youtube.com")!
+    }
+}
+
+/// Pick a different movement that trains the same thing.
+///
+/// Options are server-ranked and server-validated — the same catalog gates
+/// `swapExercise`, so the user can only ever apply something from this list.
+/// Reachable both from a planned exercise (before starting) and from an
+/// exercise inside a running workout; `allowedScopes` is what differs.
+struct ExerciseSwapSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appModel: AppModel
+
+    let dayKey: String
+    let exerciseName: String
+    /// Non-nil when a workout is running — enables the "just this workout"
+    /// scope and lets the server read the live session for context.
+    let sessionId: String?
+    let allowedScopes: [SwapScope]
+
+    @State private var options: [ExerciseSwapOption] = []
+    @State private var isLoading = true
+    @State private var loadFailed = false
+    @State private var failureMessage: String?
+    @State private var selectedEquipment: Set<String> = []
+    @State private var bodyweightOnly = false
+    @State private var scope: SwapScope
+    @State private var applyingOption: String?
+
+    // Only the gear the catalog actually filters on. "none" is never a
+    // filter — a movement needing nothing is available to everyone.
+    private static let equipmentFilters: [(id: String, label: String)] = [
+        ("dumbbell", "Dumbbells"),
+        ("barbell", "Barbell"),
+        ("kettlebell", "Kettlebell"),
+        ("bench", "Bench"),
+        ("pullup_bar", "Pull-up bar"),
+        ("band", "Bands"),
+    ]
+
+    init(dayKey: String, exerciseName: String, sessionId: String?, allowedScopes: [SwapScope]) {
+        self.dayKey = dayKey
+        self.exerciseName = exerciseName
+        self.sessionId = sessionId
+        self.allowedScopes = allowedScopes
+        _scope = State(initialValue: allowedScopes.first ?? .today)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    if let failureMessage {
+                        Text(failureMessage)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MyoColor.redPen)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .background(MyoColor.redPen.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
+                    }
+                    equipmentSection
+                    scopeSection
+                    optionsSection
+                }
+                .padding()
+            }
+            .background(MyoTheme.Colors.cream.ignoresSafeArea())
+            .navigationTitle("Swap Exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .task { await reload() }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Replacing")
+                .font(MyoTheme.Typography.monoLabel)
+                .textCase(.uppercase)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+
+            Text(exerciseName)
+                .font(.title2.bold())
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("These all train the same primary muscles.")
+                .font(.subheadline)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+        }
+    }
+
+    private var equipmentSection: some View {
+        DetailSection(title: "What do you have?") {
+            VStack(alignment: .leading, spacing: 10) {
+                FlowLayout(spacing: 8) {
+                    filterChip(
+                        label: "No equipment",
+                        isOn: bodyweightOnly
+                    ) {
+                        bodyweightOnly.toggle()
+                        if bodyweightOnly { selectedEquipment.removeAll() }
+                        Task { await reload() }
+                    }
+
+                    ForEach(Self.equipmentFilters, id: \.id) { filter in
+                        filterChip(
+                            label: filter.label,
+                            isOn: selectedEquipment.contains(filter.id)
+                        ) {
+                            bodyweightOnly = false
+                            if selectedEquipment.contains(filter.id) {
+                                selectedEquipment.remove(filter.id)
+                            } else {
+                                selectedEquipment.insert(filter.id)
+                            }
+                            Task { await reload() }
+                        }
+                    }
+                }
+
+                Text(filterExplanation)
+                    .font(.caption)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+            }
+        }
+    }
+
+    private var filterExplanation: String {
+        if bodyweightOnly { return "Showing movements that need nothing at all." }
+        if selectedEquipment.isEmpty { return "Nothing selected — showing everything." }
+        return "Showing movements you can do with what you picked."
+    }
+
+    private func filterChip(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.bold))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(isOn ? MyoTheme.Colors.ochre : MyoTheme.Colors.ink.opacity(0.06))
+                .foregroundStyle(isOn ? MyoTheme.Colors.cream : MyoTheme.Colors.ink)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+
+    @ViewBuilder
+    private var scopeSection: some View {
+        // A single allowed scope needs no picker — the caller has already
+        // decided, and a one-option control is just noise.
+        if allowedScopes.count > 1 {
+            DetailSection(title: "How long?") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Picker("Scope", selection: $scope) {
+                        ForEach(allowedScopes) { option in
+                            Text(option.label).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(scope.explanation)
+                        .font(.caption)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var optionsSection: some View {
+        if isLoading {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Finding alternatives...")
+                    .font(.subheadline)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 24)
+        } else if loadFailed {
+            // A failed request is NOT "no alternatives". Reporting it as one
+            // sent the user off widening an equipment filter that was never
+            // the problem.
+            ContentUnavailableView {
+                Label("Couldn't load alternatives", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text("Check your connection and try again.")
+            } actions: {
+                Button("Try again") {
+                    Task { await reload() }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(MyoColor.Action.primary.color)
+                .foregroundStyle(MyoColor.Text.primary.color)
+            }
+        } else if options.isEmpty {
+            ContentUnavailableView {
+                Label("No alternatives", systemImage: "arrow.triangle.swap")
+            } description: {
+                Text(
+                    bodyweightOnly || !selectedEquipment.isEmpty
+                        ? "Nothing matches with that equipment. Try widening the filter."
+                        : "MYO has no substitute for this movement yet. Ask your coach in chat."
+                )
+            }
+        } else {
+            VStack(spacing: 10) {
+                ForEach(options) { option in
+                    optionRow(option)
+                }
+            }
+        }
+    }
+
+    private func optionRow(_ option: ExerciseSwapOption) -> some View {
+        Button {
+            Task { await apply(option) }
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(option.name)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(MyoTheme.Colors.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(option.reason)
+                        .font(.caption)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(weightLine(for: option))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                }
+
+                Spacer(minLength: 8)
+
+                if applyingOption == option.name {
+                    ProgressView()
+                } else {
+                    Image(systemName: "arrow.triangle.swap")
+                        .font(.subheadline)
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MyoTheme.Colors.cream)
+            .overlay {
+                RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                    .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(applyingOption != nil)
+    }
+
+    private func weightLine(for option: ExerciseSwapOption) -> String {
+        if option.suggestedWeightLb <= 0 {
+            return "Bodyweight — or set your own weight"
+        }
+        return option.weightFromBaseline
+            ? "\(Int(option.suggestedWeightLb)) lb · your usual"
+            : "Starting at \(Int(option.suggestedWeightLb)) lb"
+    }
+
+    private func reload() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let outcome = await appModel.fetchSwapOptions(
+            exerciseName: exerciseName,
+            dayKey: dayKey,
+            sessionId: sessionId,
+            availableEquipment: requestedEquipment
+        )
+        switch outcome {
+        case .loaded(let loaded):
+            options = loaded
+            loadFailed = false
+        case .failed:
+            options = []
+            loadFailed = true
+        }
+    }
+
+    /// nil means "no constraint". An empty array means "I have nothing" —
+    /// a different, deliberate answer the server treats as bodyweight-only.
+    private var requestedEquipment: [String]? {
+        if bodyweightOnly { return [] }
+        if selectedEquipment.isEmpty { return nil }
+        return Array(selectedEquipment)
+    }
+
+    private func apply(_ option: ExerciseSwapOption) async {
+        applyingOption = option.name
+        failureMessage = nil
+        defer { applyingOption = nil }
+
+        let failure = await appModel.swapExercise(
+            dayKey: dayKey,
+            exerciseName: exerciseName,
+            replacementName: option.name,
+            scope: scope,
+            sessionId: scope == .session ? sessionId : nil
+        )
+        guard failure == nil else {
+            failureMessage = failure
+            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            return
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        dismiss()
+    }
+}
+
+/// Shown after a workout, listing weights the user worked at that differ from
+/// what was prescribed. Nothing is written until Apply — the coach's protocol
+/// then continues from whatever number is confirmed here.
+struct BaselineUpdateSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appModel: AppModel
+
+    let suggestions: [BaselineSuggestion]
+    @State private var accepted: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Update your baselines?")
+                            .font(.title2.bold())
+
+                        Text("You worked at a different weight than planned. Applying this starts you here next time, and any weekly increase carries on from the new number.")
+                            .font(.subheadline)
+                            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    VStack(spacing: 10) {
+                        ForEach(suggestions) { suggestion in
+                            row(suggestion)
+                        }
+                    }
+
+                    actions
+                }
+                .padding()
+            }
+            .background(MyoTheme.Colors.cream.ignoresSafeArea())
+            .navigationTitle("Workout Complete")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            // Every suggestion starts checked: the user already made this
+            // decision once, with the weight in their hands.
+            accepted = Set(suggestions.map(\.exerciseName))
+        }
+    }
+
+    private func row(_ suggestion: BaselineSuggestion) -> some View {
+        Button {
+            if accepted.contains(suggestion.exerciseName) {
+                accepted.remove(suggestion.exerciseName)
+            } else {
+                accepted.insert(suggestion.exerciseName)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: accepted.contains(suggestion.exerciseName) ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(
+                        accepted.contains(suggestion.exerciseName)
+                            ? MyoTheme.Colors.ochre
+                            : MyoTheme.Colors.ink.opacity(0.45)
+                    )
+
+                Text(suggestion.exerciseName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(MyoTheme.Colors.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 8)
+
+                Text("\(Int(suggestion.fromLb)) → \(Int(suggestion.toLb)) lb")
+                    .font(.subheadline.monospacedDigit().weight(.bold))
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.75))
+            }
+            .padding()
+            .background(MyoTheme.Colors.cream)
+            .overlay {
+                RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous)
+                    .stroke(MyoTheme.Colors.hairline, lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: MyoTheme.Radius.card, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            "\(suggestion.exerciseName), \(Int(suggestion.fromLb)) to \(Int(suggestion.toLb)) pounds"
+        )
+        .accessibilityAddTraits(accepted.contains(suggestion.exerciseName) ? [.isSelected] : [])
+    }
+
+    private var actions: some View {
+        VStack(spacing: 10) {
+            Button {
+                let chosen = suggestions.filter { accepted.contains($0.exerciseName) }
+                Task {
+                    await appModel.applyBaselineSuggestions(chosen)
+                    dismiss()
+                }
+            } label: {
+                Label(appModel.isWorkoutBusy ? "Applying..." : "Apply", systemImage: "checkmark")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(MyoColor.Action.primary.color)
+            .foregroundStyle(MyoColor.Text.primary.color)
+            .disabled(accepted.isEmpty || appModel.isWorkoutBusy)
+
+            Button("Not now") {
+                appModel.dismissBaselineSuggestions()
+                dismiss()
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+            .disabled(appModel.isWorkoutBusy)
+        }
     }
 }
 

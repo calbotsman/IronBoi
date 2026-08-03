@@ -102,6 +102,7 @@
     "read_recent_metrics",
     "generate_plan",
     "adapt_plan",
+    "find_exercise_swaps",
     "explain_exercise",
     "flag_risk",
     "summarize_progress",
