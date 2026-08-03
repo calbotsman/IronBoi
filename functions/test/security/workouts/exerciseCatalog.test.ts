@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   allExercises,
@@ -195,6 +197,52 @@ describe("name resolution", () => {
       (option) => option.name,
     );
     expect(shorthand).toEqual(canonical);
+  });
+});
+
+describe("server catalog ↔ iOS ExerciseKnowledge drift", () => {
+  // Same pattern as the firestore.rules drift test: parse the other side's
+  // source as text. Fragile against a Swift rewrite, but it fails LOUDLY —
+  // and the silent alternative was 33 swappable exercises whose detail sheet
+  // showed "None listed" muscles and generic cues (the audit's finding #2).
+  const swiftPath = path.resolve(
+    process.cwd(),
+    "../ios/IronBoi/IronBoi/Models/ExerciseKnowledge.swift",
+  );
+  const swift = fs.readFileSync(swiftPath, "utf8");
+
+  function parseSwiftEntries(): Map<string, { primary: string[]; secondary: string[] }> {
+    const entries = new Map<string, { primary: string[]; secondary: string[] }>();
+    const pattern =
+      /"([^"]+)":\s*\.init\(primary:\s*\[([^\]]*)\],\s*secondary:\s*\[([^\]]*)\]/g;
+    for (const match of swift.matchAll(pattern)) {
+      const list = (raw: string) =>
+        raw
+          .split(",")
+          .map((entry) => entry.trim().replace(/^"|"$/g, ""))
+          .filter((entry) => entry.length > 0);
+      entries.set(match[1], { primary: list(match[2]), secondary: list(match[3]) });
+    }
+    return entries;
+  }
+
+  it("every swappable exercise has iOS cues and muscles", () => {
+    const ios = parseSwiftEntries();
+    expect(ios.size).toBeGreaterThan(40); // parser sanity — a regex miss must not pass vacuously
+    const missing = allExercises()
+      .map((entry) => entry.name)
+      .filter((name) => !ios.has(name));
+    expect(missing, "add these to ios ExerciseKnowledge.swift").toEqual([]);
+  });
+
+  it("muscle lists agree between the catalog and iOS", () => {
+    const ios = parseSwiftEntries();
+    for (const entry of allExercises()) {
+      const iosEntry = ios.get(entry.name);
+      if (!iosEntry) continue; // covered by the test above
+      expect(iosEntry.primary, `${entry.name} primary`).toEqual(entry.primary);
+      expect(iosEntry.secondary, `${entry.name} secondary`).toEqual(entry.secondary);
+    }
   });
 });
 

@@ -21,6 +21,7 @@ import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import {
+  ActiveWorkoutExercise,
   ActiveWorkoutSession,
   PlannedExercise,
   PlannedWorkoutDay,
@@ -74,6 +75,15 @@ export const SwapExerciseRequest = z.object({
   sessionId: z.string().min(1).optional(),
   planId: z.string().min(1).default("current"),
   clientDate: z.string().date().optional(),
+  // The client's CURRENT session state, for scope=session. Required there,
+  // because the server's copy of the active workout is stale by design: set
+  // toggles and weight edits live only on the device until finish. Swapping
+  // against the server's copy silently discarded every set completed so far —
+  // the server saw zero completed sets, replaced the whole exercise, and the
+  // response then overwrote the client's real progress. Trusting this array
+  // is the SAME trust already extended to finishWorkoutSession, which accepts
+  // the client's exercises wholesale as the workout log.
+  exercises: z.array(ActiveWorkoutExercise).max(30).optional(),
 });
 
 export type GetExerciseSwapOptionsRequestType = z.infer<typeof GetExerciseSwapOptionsRequest>;
@@ -285,13 +295,26 @@ async function swapInSession(
     const activeSnap = await transaction.get(activeRef);
     if (!activeSnap.exists) throw new Error("active_workout_not_found");
 
-    const session = ActiveWorkoutSession.parse(stripSessionServerFields(activeSnap.data()));
-    if (session.sessionId !== request.sessionId) {
+    const stored = ActiveWorkoutSession.parse(stripSessionServerFields(activeSnap.data()));
+    if (stored.sessionId !== request.sessionId) {
       throw new Error("active_workout_session_mismatch");
     }
-    if (session.status !== "active") {
+    if (stored.status !== "active") {
       throw new Error("active_workout_not_active");
     }
+
+    // The client's exercises are the truth about this session, not the stored
+    // doc: completed sets exist only on the device until finish. Swapping
+    // against the stored copy means completedCount is always 0 — the whole
+    // exercise gets replaced and the response clobbers the user's real
+    // progress on every other exercise too. The session identity checks
+    // above still run against the STORED doc, so a client can't use this
+    // field to conjure a session that isn't the running one. Falling back to
+    // the stored exercises keeps old clients working; they just keep the old
+    // (lossy) behavior until updated.
+    const session = request.exercises !== undefined && request.exercises.length > 0
+      ? { ...stored, exercises: request.exercises }
+      : stored;
 
     const targetKey = normalizeExerciseKey(request.exerciseName);
     const targetIndex = session.exercises.findIndex(
