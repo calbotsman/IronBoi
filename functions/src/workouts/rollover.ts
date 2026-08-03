@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { safeLogger } from "../logging/safeLogger.js";
 import { workoutPlanPath } from "../paths.js";
 import { currentDateISO } from "./planAdjustments.js";
+import { applyBaselinesToDays, loadBaselines } from "./exerciseBaselines.js";
 import {
   parseTrainingProgramDocument,
   syncCurrentWeekSnapshot,
@@ -171,9 +172,26 @@ async function rolloverOneProgram(
     return "current";
   }
 
+  // Crossing a week boundary is where a progression protocol actually moves
+  // the bar. Recomputing here (rather than on a separate schedule) keeps the
+  // property the rest of this function relies on: the result is derived
+  // purely from (anchor, progression, today), so a retried or crashed run
+  // converges on the same numbers instead of stacking increases.
+  //
+  // Only exercises with BOTH an anchor and a non-"none" progression rule
+  // move; for everyone else applyBaselinesToDays returns the days unchanged.
+  const baselines = await loadBaselines(db, userId);
+  const progressedWeeks = baselines.size === 0
+    ? weeks
+    : weeks.map((week) => {
+        if (week.weekIndex < nextActiveWeekIndex) return week;
+        const { days, changed } = applyBaselinesToDays(week.days, baselines, today);
+        return changed ? { ...week, days } : week;
+      });
+
   const nextProgram: TrainingProgramType = {
     ...program,
-    weeks,
+    weeks: progressedWeeks,
     activeWeekIndex: nextActiveWeekIndex,
     updatedAt: now,
   };

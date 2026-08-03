@@ -15,6 +15,14 @@ import {
   workoutSessionPath,
 } from "../paths.js";
 import { nextOccurrenceOfWeekday } from "./planAdjustments.js";
+import { normalizeExerciseKey } from "./exerciseCatalog.js";
+import {
+  baselineDocFor,
+  baselineRefFor,
+  deriveBaselineSuggestions,
+  loadBaselines,
+  resolvePrescribedWeight,
+} from "./exerciseBaselines.js";
 
 export const StartWorkoutSessionRequest = z.object({
   dayKey: z.string().min(1),
@@ -61,6 +69,12 @@ export async function startWorkoutSession(
     defaultPlan,
   );
 
+  // The prescription is DERIVED, not read straight off the plan: an exercise
+  // the user has rebaselined starts from their own anchor, advanced by
+  // whatever progression protocol the plan carries. With no baseline (every
+  // user before this feature) resolvePrescribedWeight returns the plan's own
+  // weight, so nothing changes for them.
+  const baselines = await loadBaselines(db, userId);
   const activeWorkout = ActiveWorkoutSession.parse({
     userId,
     sessionId,
@@ -70,21 +84,33 @@ export async function startWorkoutSession(
     status: "active",
     startedAt,
     updatedAt: now,
-    exercises: dayPlan.exercises.map((exercise, exerciseIndex) => ({
-      exerciseIndex,
-      name: exercise.name,
-      targetSets: exercise.sets,
-      targetReps: exercise.reps,
-      targetWeight: exercise.weight,
-      completedSets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
-        setIndex,
-        completed: false,
-        reps: exercise.reps,
-        weight: exercise.weight,
-      })),
-      exerciseDone: false,
-    })),
+    exercises: dayPlan.exercises.map((exercise, exerciseIndex) => {
+      const targetWeight = resolvePrescribedWeight(exercise, baselines, sessionDate);
+      return {
+        exerciseIndex,
+        name: exercise.name,
+        targetSets: exercise.sets,
+        targetReps: exercise.reps,
+        targetWeight,
+        completedSets: Array.from({ length: exercise.sets }, (_, setIndex) => ({
+          setIndex,
+          completed: false,
+          reps: exercise.reps,
+          weight: targetWeight,
+        })),
+        exerciseDone: false,
+      };
+    }),
   });
+
+  // Seed an anchor for anything the plan wants to progress but that has none
+  // yet. Without this, a coach-authored protocol ("add 5 lb a week") would
+  // never move until the user happened to change a weight by hand — there
+  // would be no anchor for progression to measure from. Narrow by design:
+  // only exercises that carry a progression rule AND a real load, and the
+  // seeded anchor equals what the plan already said, so nothing the user
+  // sees changes on the day it is written.
+  await seedMissingProgressionBaselines(db, userId, dayPlan.exercises, baselines, sessionDate, now);
 
   await Promise.all([
     db.doc(activeWorkoutPath(userId)).set({
@@ -188,7 +214,44 @@ export async function finishWorkoutSession(
     }),
   ]);
 
-  return { activeWorkout: completedSession, workoutLog: log };
+  // Proposed, NOT applied. The user asked to be asked: finishing surfaces a
+  // card listing what changed, and nothing moves until they tap Apply
+  // (applyExerciseBaselines). Returning suggestions from the same call the
+  // client already makes avoids a second round trip on the finish screen.
+  const baselineSuggestions = deriveBaselineSuggestions(completedExercises);
+
+  return { activeWorkout: completedSession, workoutLog: log, baselineSuggestions };
+}
+
+async function seedMissingProgressionBaselines(
+  db: Firestore,
+  userId: string,
+  exercises: Array<{ name: string; weight: number; progression?: { mode: string } }>,
+  baselines: Awaited<ReturnType<typeof loadBaselines>>,
+  anchorDate: string,
+  now: string,
+) {
+  const missing = exercises.filter(
+    (exercise) =>
+      exercise.progression !== undefined &&
+      exercise.progression.mode !== "none" &&
+      exercise.weight > 0 &&
+      !baselines.has(normalizeExerciseKey(exercise.name)),
+  );
+  if (missing.length === 0) return;
+
+  const batch = db.batch();
+  for (const exercise of missing) {
+    batch.set(
+      baselineRefFor(db, userId, exercise.name),
+      {
+        ...baselineDocFor(userId, exercise.name, exercise.weight, anchorDate, "plan_seed", now),
+        serverUpdatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  }
+  await batch.commit();
 }
 
 async function loadWorkoutDay(

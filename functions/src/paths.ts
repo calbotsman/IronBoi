@@ -21,6 +21,17 @@ export function trainingProgramPath(userId: string, programId = "current") {
   return `${userRoot(userId)}/trainingPrograms/${programId}`;
 }
 
+// Per-exercise working-weight anchors. Document ID is
+// normalizeExerciseKey(exerciseName) so the same movement resolves to one
+// doc regardless of how a plan happened to capitalize it.
+export function exerciseBaselinesCollectionPath(userId: string) {
+  return `${userRoot(userId)}/exerciseBaselines`;
+}
+
+export function exerciseBaselinePath(userId: string, exerciseKey: string) {
+  return `${exerciseBaselinesCollectionPath(userId)}/${exerciseKey}`;
+}
+
 export function dailyCheckPath(userId: string, date: string) {
   return `${userRoot(userId)}/dailyChecks/${date}`;
 }

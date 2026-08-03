@@ -4,8 +4,10 @@ import {
   AdaptPlanRequest,
   AskFollowUpQuestionRequest,
   ClearPlanOverridesToolRequest,
+  FindExerciseSwapsRequest,
   RejectPlanAdjustmentToolRequest,
 } from "../contracts/tool-calls.js";
+import { CATALOG_EQUIPMENT, suggestSwaps, type Equipment } from "../workouts/exerciseCatalog.js";
 import {
   acceptLatestPlanAdjustmentFromChat,
   createClearOverridesProposalFromTool,
@@ -181,6 +183,43 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
     },
   },
   {
+    name: "find_exercise_swaps",
+    description:
+      "Look up real substitute exercises for one movement, ranked by muscle overlap. READ-ONLY — it changes nothing. Call this BEFORE proposing any exercise substitution so you name movements MYO actually knows (with form cues and demos) instead of inventing one. Then call adapt_plan with the option you picked to create the review card. If the user said what equipment they have — or that they have none — pass availableEquipment.",
+    parameters: {
+      type: "object",
+      properties: {
+        exerciseName: {
+          type: "string",
+          description: "The exercise being replaced, as it appears in their plan.",
+        },
+        availableEquipment: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: [
+              "none",
+              "dumbbell",
+              "barbell",
+              "kettlebell",
+              "bench",
+              "pullup_bar",
+              "cable",
+              "machine",
+              "band",
+              "club",
+              "sandbag",
+              "medball",
+            ],
+          },
+          description:
+            "Omit if they haven't said. Send an EMPTY array when they have no equipment at all — that returns bodyweight-only options.",
+        },
+      },
+      required: ["exerciseName"],
+    },
+  },
+  {
     name: "ask_follow_up_question",
     description:
       "End your turn on one specific clarifying question instead of guessing — use this when you need a detail before proposing a plan change or answering safely.",
@@ -225,6 +264,11 @@ const ClearPlanOverridesArgs = ClearPlanOverridesToolRequest.omit({
   tool: true,
 });
 const AskFollowUpQuestionArgs = AskFollowUpQuestionRequest.omit({
+  toolCallId: true,
+  requestedAt: true,
+  tool: true,
+});
+const FindExerciseSwapsArgs = FindExerciseSwapsRequest.omit({
   toolCallId: true,
   requestedAt: true,
   tool: true,
@@ -454,6 +498,55 @@ export function buildCoachToolRegistry(
         return { ok: false, error: "invalid_reject_plan_adjustment_args" };
       }
       return rejectLatestPlanAdjustmentFromChat(db, userId);
+    },
+    find_exercise_swaps: (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      const parsed = FindExerciseSwapsArgs.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "find_exercise_swaps", parsed.error.issues);
+        return { ok: false, error: "invalid_find_exercise_swaps_args" };
+      }
+
+      // Unknown equipment strings are dropped rather than failing the call:
+      // the model sending "resistance_bands" should still get band options,
+      // not a dead end. Filtering to the catalog's vocabulary here means a
+      // typo can only ever WIDEN the result set, never fabricate a filter.
+      const requested = parsed.data.availableEquipment;
+      const available =
+        requested === undefined
+          ? null
+          : requested.filter((item): item is Equipment =>
+              (CATALOG_EQUIPMENT as readonly string[]).includes(item),
+            );
+
+      const options = suggestSwaps({
+        exerciseName: parsed.data.exerciseName,
+        availableEquipment: available,
+        limit: 6,
+      });
+
+      if (options.length === 0) {
+        // An explicit empty result with a hint, not a bare failure — the
+        // model needs to know whether to widen the equipment filter or tell
+        // the user MYO simply doesn't know that movement.
+        return {
+          ok: true,
+          options: [],
+          hint: `No catalog match for "${parsed.data.exerciseName}"${
+            available && available.length === 0 ? " with no equipment" : ""
+          }. Do not invent a substitute — say you don't have a good swap for that movement, or ask what equipment they have.`,
+        };
+      }
+
+      return {
+        ok: true,
+        options: options.map((option) => ({
+          name: option.name,
+          primary: option.primary,
+          equipment: option.equipment,
+          reason: option.reason,
+        })),
+      };
     },
     ask_follow_up_question: (rawArgs) => {
       const { userId, ...args } = rawArgs;

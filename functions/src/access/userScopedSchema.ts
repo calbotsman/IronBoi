@@ -95,6 +95,21 @@ export const USER_SCOPED = {
     write: { kind: "server_only" },
     contextRole: "internal",
   },
+  // Per-exercise working-weight anchors. The prescribed weight in a plan is
+  // DERIVED from these (anchor + progression), so they are the real source of
+  // truth for load — server-only, and only ever written from a session the
+  // user actually completed sets in.
+  // "internal", not "primary": these anchors do not yet feed the coach
+  // context bundle. They reach the coach indirectly — the prescribed weights
+  // in workoutPlans/current are derived from them — so wiring them in
+  // directly would duplicate what the plan already says. Flip this to
+  // "primary" if and when contextBundle.ts reads the collection itself.
+  exerciseBaselines: {
+    pathPattern: "users/{uid}/exerciseBaselines/{exerciseKey}",
+    read: "owner",
+    write: { kind: "server_only" },
+    contextRole: "internal",
+  },
   coachFollowUps: {
     pathPattern: "users/{uid}/coachFollowUps/{followUpId}",
     read: "owner",

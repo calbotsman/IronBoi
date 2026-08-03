@@ -221,6 +221,36 @@ export const RejectPlanAdjustmentToolResult = ToolResultBase.extend({
   proposalId: z.string().optional(),
 });
 
+// READ-ONLY. Returns catalog-ranked substitutes for one exercise so the coach
+// can name real alternatives instead of inventing them.
+//
+// Deliberately has no write path. Applying a swap from chat still goes through
+// adapt_plan → review card → accept, like every other plan change: the model
+// picking a replacement is a judgment call, and the product principle is that
+// the user approves those. What this tool removes is the model GUESSING —
+// before it, adapt_plan let it author any exercise name with nothing checking
+// the movement trains what it replaced, or that the app has cues for it.
+export const FindExerciseSwapsRequest = ToolCallBase.extend({
+  tool: z.literal("find_exercise_swaps"),
+  exerciseName: z.string().min(1).max(120),
+  // Omit for no constraint. An explicitly EMPTY array means the user has no
+  // equipment at all, which filters the results to bodyweight movements.
+  availableEquipment: z.array(z.string().min(1).max(30)).max(12).optional(),
+}).strict();
+
+export const FindExerciseSwapsResult = ToolResultBase.extend({
+  options: z
+    .array(
+      z.object({
+        name: z.string(),
+        primary: z.array(z.string()),
+        equipment: z.array(z.string()),
+        reason: z.string(),
+      }).strict(),
+    )
+    .optional(),
+});
+
 export const ExplainExerciseRequest = ToolCallBase.extend({
   tool: z.literal("explain_exercise"),
   exerciseName: z.string().min(1),
@@ -294,6 +324,7 @@ export const CoachToolRequest = z.discriminatedUnion("tool", [
   AcceptPlanAdjustmentToolRequest,
   RejectPlanAdjustmentToolRequest,
   ClearPlanOverridesToolRequest,
+  FindExerciseSwapsRequest,
   ExplainExerciseRequest,
   FlagRiskRequest,
   SummarizeProgressRequest,

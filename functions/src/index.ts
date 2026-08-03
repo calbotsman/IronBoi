@@ -54,6 +54,14 @@ import {
   acceptPlanAdjustmentProposal as acceptPlanAdjustmentProposalCore,
   expireStalePendingProposals,
 } from "./workouts/planAdjustments.js";
+import {
+  GetExerciseSwapOptionsRequest,
+  SwapExerciseRequest,
+  getExerciseSwapOptions,
+  swapExercise,
+} from "./workouts/exerciseSwap.js";
+import { ApplyExerciseBaselinesRequest } from "./workouts/exerciseBaselines.js";
+import { applyExerciseBaselines } from "./workouts/rebaseline.js";
 import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
@@ -587,6 +595,112 @@ export const finishWorkoutSessionCallable = onCall(
     return { ok: true, ...result };
   },
 );
+
+// --- Exercise swaps & weight rebaselining ------------------------------
+//
+// These mutate the plan WITHOUT a review card, under the narrow-deterministic-
+// edit carve-out in docs/plans/myo-flexible-workout-adaptation-plan.md ("one-off
+// workout changes can be applied to the active session after user confirmation";
+// "narrow deterministic edits ... scoped to one exercise" may auto-apply). The
+// user's tap IS the confirmation, the change is bounded to a single exercise,
+// and both write an audit event since there's no proposal doc to look back at.
+
+export const getExerciseSwapOptionsCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = GetExerciseSwapOptionsRequest.parse(request.data ?? {});
+  return await getExerciseSwapOptions(db, userId, parsed);
+});
+
+export const swapExerciseCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = SwapExerciseRequest.parse(request.data ?? {});
+  return await swapExercise(db, userId, parsed);
+});
+
+export const applyExerciseBaselinesCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = ApplyExerciseBaselinesRequest.parse(request.data ?? {});
+  return await applyExerciseBaselines(db, userId, parsed);
+});
+
+// *Http twins. iOS routes through callBackend(httpName:callableName:), which
+// can be flipped back to the bearer-token transport by one line in AppModel —
+// a callable with no twin would strand these features on that rollback.
+export const getExerciseSwapOptionsHttp = onRequest(
+  { region: "us-central1", invoker: "public" },
+  async (request, response) => {
+    await handleWorkoutHttp(request, response, "get_swap_options_failed", async (userId, body) => {
+      const parsed = GetExerciseSwapOptionsRequest.parse(body);
+      return await getExerciseSwapOptions(db, userId, parsed);
+    });
+  },
+);
+
+export const swapExerciseHttp = onRequest(
+  { region: "us-central1", invoker: "public" },
+  async (request, response) => {
+    await handleWorkoutHttp(request, response, "swap_exercise_failed", async (userId, body) => {
+      const parsed = SwapExerciseRequest.parse(body);
+      return await swapExercise(db, userId, parsed);
+    });
+  },
+);
+
+export const applyExerciseBaselinesHttp = onRequest(
+  { region: "us-central1", invoker: "public" },
+  async (request, response) => {
+    await handleWorkoutHttp(request, response, "apply_baselines_failed", async (userId, body) => {
+      const parsed = ApplyExerciseBaselinesRequest.parse(body);
+      return await applyExerciseBaselines(db, userId, parsed);
+    });
+  },
+);
+
+// The CORS/method/auth preamble every *Http workout endpoint above repeats
+// verbatim. Extracted here rather than copied three more times. Structurally
+// typed like the other helpers in this file (bearerTokenFromRequest,
+// writeJsonResponse) so it stays testable without an express fixture.
+type HttpHandlerRequest = {
+  method: string;
+  body?: { data?: unknown } | unknown;
+  header(name: string): string | undefined;
+};
+
+type HttpHandlerResponse = {
+  set(field: string, value: string): unknown;
+  status(code: number): { json(body: unknown): void; send(body: string): void };
+};
+
+async function handleWorkoutHttp(
+  request: HttpHandlerRequest,
+  response: HttpHandlerResponse,
+  errorCode: string,
+  run: (userId: string, body: unknown) => Promise<unknown>,
+) {
+  response.set("Access-Control-Allow-Origin", "*");
+  response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+
+  if (request.method === "OPTIONS") {
+    response.status(204).send("");
+    return;
+  }
+  if (request.method !== "POST") {
+    writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
+    return;
+  }
+
+  const userId = await verifyBearerUserId(request, response);
+  if (!userId) return;
+
+  try {
+    const body = isRecord(request.body) ? (request.body.data ?? request.body) : request.body;
+    const result = await run(userId, body);
+    writeJsonResponse(response, 200, result);
+  } catch (error) {
+    writeHttpHandlerError(response, error, errorCode);
+  }
+}
 
 export const startWorkoutSessionHttp = onRequest(
   { region: "us-central1", invoker: "public" },

@@ -309,11 +309,74 @@ export const WorkoutLog = z.object({
   createdAt: ISODateTime,
 }).strict();
 
+// How an exercise's load is meant to move over time. Until this existed,
+// "progressive overload" was something the coach only ever SAID — every
+// materialized program week held a byte-identical copy of the same days, so
+// no prescribed weight ever changed on its own.
+//
+// The rule is deliberately tiny. It answers one question — "given an anchor
+// weight and how many weeks have passed, what should be on the bar?" — and
+// nothing else. Periodization, autoregulation, and rep progression are not
+// modelled here; a plan with no `progression` behaves exactly as it did
+// before (the prescribed weight simply stays put).
+//
+//   none      — hold the anchor. The default, and what every pre-existing
+//               plan gets, so this field can never change what a current
+//               user sees until a coach explicitly sets one.
+//   linear_lb — add `amount` POUNDS every `everyWeeks` weeks.
+//   percent   — add `amount` PERCENT of the anchor every `everyWeeks` weeks.
+//               Linear on the anchor, not compounding: compounding turns a
+//               modest 5%/week into a 63% jump over a 10-week program, which
+//               is not what anyone means by "5% a week".
+export const ExerciseProgression = z.object({
+  mode: z.enum(["none", "linear_lb", "percent"]),
+  // Bounded hard. This value is written by the model via the coach's
+  // plan-authoring tool, and an unbounded number here is a prescription to
+  // add 500 lb a week — the schema is the last place that can say no.
+  amount: z.number().nonnegative().max(50).default(0),
+  everyWeeks: z.number().int().min(1).max(8).default(1),
+  // Ceiling on where progression can carry the anchor, as a multiple of it.
+  // A program left running for a year must not silently prescribe triple the
+  // weight the user ever actually lifted.
+  capMultiple: z.number().min(1).max(3).default(1.5),
+}).strict();
+
 export const PlannedExercise = z.object({
   name: z.string().min(1),
   sets: z.number().int().nonnegative(),
   reps: z.number().int().nonnegative(),
   weight: z.number().nonnegative().default(0),
+  progression: ExerciseProgression.optional(),
+}).strict();
+
+// The weight a user ACTUALLY works at for one exercise, and the date that
+// weight was last true. This is the fact the plan's prescription is derived
+// from — not the other way round.
+//
+// The distinction matters: if the plan said 60 lb and the user lifted 30,
+// rewriting the plan to a flat 30 would also throw away the protocol that
+// said "add 5 lb a week". Anchoring instead keeps both — the anchor moves to
+// 30, the protocol keeps running from 30, and week three prescribes 40.
+//
+// Server-written only, and only from a workout the user finished and
+// explicitly confirmed (see applyExerciseBaselines). A weight the user typed
+// but never lifted never lands here.
+export const ExerciseBaseline = z.object({
+  userId: z.string().min(1),
+  // normalizeExerciseKey(exerciseName) — lowercased, punctuation-stripped, so
+  // "Single-arm DB Row" and "single arm db row" are one baseline, not two.
+  exerciseKey: z.string().min(1),
+  // Display name as last seen, for UI and coach context.
+  exerciseName: z.string().min(1),
+  anchorWeightLb: z.number().nonnegative().max(2000),
+  // The date the anchor was set. Progression is measured FROM here, so
+  // re-anchoring restarts the clock — which is the whole point: dropping to
+  // 30 lb should not immediately re-apply eight weeks of accumulated
+  // progression on top of the new number.
+  anchorDate: z.string().date(),
+  source: z.enum(["user_session", "coach", "plan_seed"]),
+  lastSessionId: z.string().optional(),
+  updatedAt: ISODateTime,
 }).strict();
 
 export const PlannedWorkoutDay = z.object({
@@ -635,6 +698,11 @@ export const AuditEventType = z.enum([
   "health_samples_ingested",
   "daily_spend_cap_reached",
   "account_deletion_requested",
+  // Both of these mutate the user's plan without a review card, under the
+  // "narrow deterministic edit" carve-out in the flexible-adaptation plan.
+  // No review card means the audit log is the only record that it happened.
+  "exercise_swapped",
+  "exercise_baseline_rebaselined",
 ]);
 
 export const AuditActor = z.enum(["user", "coach", "system"]);
