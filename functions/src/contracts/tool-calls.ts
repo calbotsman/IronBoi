@@ -129,15 +129,22 @@ export const AdaptPlanRequest = ToolCallBase.extend({
             z.object({
               name: z.string().min(1).max(80),
               sets: z.number().int().min(1).max(8),
-              reps: z.number().int().min(1).max(30),
+              // Timed holds live in `reps` as seconds (the generated plans
+              // carry "Plank 4x60"), so a faithful copy of the user's own
+              // day must fit. Seen live 2026-09-03: reps:too_big on every
+              // hotel-week patch, costing a self-correction round trip.
+              reps: z.number().int().min(1).max(120),
               weight: z.number().min(0).max(600).default(0),
             }).strict()
-              // Volume sanity: 8x30 bodyweight is fine; 8x30 loaded is not a
-              // recovery adjustment. Bounds are a backstop — the card now
-              // shows every exercise before the user approves.
-              .refine((exercise) => exercise.sets * exercise.reps <= 120, {
-                message: "sets x reps too high for a plan adjustment",
-              }),
+              // Volume sanity: 8x30 loaded is not a recovery adjustment;
+              // bodyweight and timed work can legitimately run 4x60 or
+              // 5x20. Bounds are a backstop — the card shows every
+              // exercise before the user approves.
+              .refine(
+                (exercise) =>
+                  exercise.sets * exercise.reps <= (exercise.weight > 0 ? 160 : 600),
+                { message: "sets x reps too high for a plan adjustment" },
+              ),
           )
           .min(1)
           .max(12),

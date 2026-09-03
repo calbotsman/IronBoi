@@ -249,6 +249,11 @@ export class GeminiCoachProvider implements CoachModelProvider {
     // budget left in the loop — the final forced-finish call below always
     // omits tools so Gemini can't open a 7th round trip.
     const canUseTools = Boolean(tools && tools.length > 0 && executeTool);
+    // Gemini via OpenRouter occasionally returns a 200 whose message has
+    // neither text nor a tool call (seen live 2026-09-03: finish_reason
+    // present, content ""). One re-ask of the identical request recovers it;
+    // throwing turned it into "I'm having trouble right now" for the user.
+    let emptyRetriesLeft = 1;
 
     for (let round = 0; round <= maxToolCalls; round += 1) {
       const offerTools = canUseTools && round < maxToolCalls;
@@ -481,6 +486,11 @@ export class OpenRouterCoachProvider implements CoachModelProvider {
     let outputTokens = 0;
 
     const canUseTools = Boolean(tools && tools.length > 0 && executeTool);
+    // Gemini via OpenRouter occasionally returns a 200 whose message has
+    // neither text nor a tool call (seen live 2026-09-03: finish_reason
+    // present, content ""). One re-ask of the identical request recovers it;
+    // throwing turned it into "I'm having trouble right now" for the user.
+    let emptyRetriesLeft = 1;
 
     for (let round = 0; round <= maxToolCalls; round += 1) {
       const offerTools = canUseTools && round < maxToolCalls;
@@ -509,6 +519,15 @@ export class OpenRouterCoachProvider implements CoachModelProvider {
       outputTokens += payload.usage?.completion_tokens ?? estimateTokens(text);
 
       const call = message?.tool_calls?.[0];
+      if (!call && !text && emptyRetriesLeft > 0) {
+        emptyRetriesLeft -= 1;
+        safeLogger.warn("OpenRouter returned an empty message, re-asking once", {
+          event: "openrouter_empty_message_retry",
+          outcome: `finish_${payload.choices?.[0]?.finish_reason ?? "unknown"}`,
+        });
+        round -= 1; // this attempt doesn't consume a tool round
+        continue;
+      }
       if (!call || !offerTools) {
         if (!text) {
           throw new Error("OpenRouter returned an empty coach response");

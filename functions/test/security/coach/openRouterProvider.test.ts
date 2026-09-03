@@ -298,4 +298,34 @@ describe("selectCoachModelProvider", () => {
     process.env.IRONBOI_COACH_PROVIDER = "anthropic";
     expect(selectCoachModelProvider({ geminiApiKey: "g", openRouterApiKey: "o" })).toBeNull();
   });
+
+  it("re-asks once when the message has neither text nor a tool call, then throws", async () => {
+    const empty = jsonResponse({
+      choices: [{ message: { content: "" }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 11, completion_tokens: 0 },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(empty)
+      .mockResolvedValueOnce(textReply("Recovered reply."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new OpenRouterCoachProvider("fake-key").generateCoachReply({
+      system: "system",
+      userContent: "hello",
+    });
+    expect(result.content).toBe("Recovered reply.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The re-ask is the identical request — no synthetic turn is appended.
+    const first = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    const second = JSON.parse((fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(second.messages).toEqual(first.messages);
+
+    // Two empties in a row still fail loudly rather than looping.
+    const alwaysEmpty = vi.fn().mockResolvedValue(empty);
+    vi.stubGlobal("fetch", alwaysEmpty);
+    await expect(
+      new OpenRouterCoachProvider("fake-key").generateCoachReply({ system: "system", userContent: "hello" }),
+    ).rejects.toThrow("empty coach response");
+    expect(alwaysEmpty).toHaveBeenCalledTimes(2);
+  });
 });
