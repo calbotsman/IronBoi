@@ -4,6 +4,7 @@ import {
   profilePath,
   progressSummaryPath,
   userRoot,
+  workoutPlanPath,
 } from "../paths.js";
 
 export type CoachLoadedContext = {
@@ -23,6 +24,11 @@ export type CoachLoadedContext = {
   // progress/store.ts). Null when the doc doesn't exist yet, the read
   // failed, or the includeProgress option is off.
   progressSummary: DocumentData | null;
+  // users/{uid}/workoutPlans/current — the plan the Train tab renders (the
+  // active week's days plus any date-keyed dailyOverrides). Null when the
+  // user has no plan yet or the read failed. Before 2026-09-03 the coach
+  // never saw this at all and answered "I can't see your full plan".
+  currentPlan: DocumentData | null;
 };
 
 // A fact is "confirmed-for-prompt" if either:
@@ -66,6 +72,15 @@ export async function loadCoachContext(
         .catch(() => null)
     : Promise.resolve(null);
 
+  // Never gated: a coach that can't see the plan can't coach. Degraded to
+  // null on failure like the other advisory reads — a plan-read hiccup
+  // must not take the whole turn down.
+  const currentPlanPromise = db
+    .doc(workoutPlanPath(userId, "current"))
+    .get()
+    .then((snap) => (snap.exists ? snap.data() ?? null : null))
+    .catch(() => null);
+
   const [
     profileSnap,
     recentFactsSnap,
@@ -73,6 +88,7 @@ export async function loadCoachContext(
     sessionHistorySnap,
     recentPlanChanges,
     progressSummary,
+    currentPlan,
   ] =
     await Promise.all([
       db.doc(profilePath(userId)).get(),
@@ -93,6 +109,7 @@ export async function loadCoachContext(
         .get(),
       recentPlanChangesPromise,
       progressSummaryPromise,
+      currentPlanPromise,
     ]);
 
   const allFacts = recentFactsSnap.docs
@@ -112,5 +129,6 @@ export async function loadCoachContext(
     pendingProposalCount,
     recentPlanChanges,
     progressSummary,
+    currentPlan,
   };
 }

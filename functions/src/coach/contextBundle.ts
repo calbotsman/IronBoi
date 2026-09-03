@@ -28,6 +28,29 @@ export type CoachContextBundleV1 = {
   // numbers the coach may ground progress claims in. Null until the first
   // rebuild has run (or when the read was gated off / failed).
   progressSummary: CoachContextProgressSummary | null;
+  // The user's actual plan as the Train tab shows it: the next 7 days from
+  // `today`, override-resolved, every exercise with sets/reps/weight. Null
+  // when the user has no plan yet.
+  currentPlan: CoachContextPlan | null;
+};
+
+export type CoachContextPlanDay = {
+  date: string;
+  dayKey: string;
+  name: string;
+  // Present (true) only when this date resolves from a dailyOverride — an
+  // approved adjustment the user already accepted.
+  adjusted?: true;
+  exercises: string[];
+};
+
+export type CoachContextPlan = {
+  today: string;
+  todayKey: string;
+  source?: string;
+  // First day on/after today that has exercises.
+  nextSession?: { date: string; dayKey: string; name: string };
+  days: CoachContextPlanDay[];
 };
 
 export type CoachContextMemoryFact = {
@@ -126,11 +149,16 @@ export function buildCoachContextBundle(
     sessionId,
     now = new Date().toISOString(),
     retrievedCorpus = [],
+    today,
   }: {
     userId: string;
     sessionId: string;
     now?: string;
     retrievedCorpus?: RetrievedCorpusEntry[];
+    // The user's LOCAL calendar date (client-stamped clientDate). Falls back
+    // to the UTC date of `now` — deterministic for fixtures, and only off by
+    // a few hours at the day boundary for real users without clientDate.
+    today?: string;
   },
 ): CoachContextBundleV1 {
   return {
@@ -168,7 +196,95 @@ export function buildCoachContextBundle(
     progressSummary: context.progressSummary
       ? progressSummaryForPrompt(context.progressSummary)
       : null,
+    // Defaults to null for callers/fixtures built before this field existed.
+    currentPlan: context.currentPlan
+      ? planForPrompt(context.currentPlan, today ?? now.slice(0, 10))
+      : null,
   };
+}
+
+const PLAN_HORIZON_DAYS = 7;
+const MAX_PLAN_EXERCISES_PER_DAY = 14;
+const PLAN_WEEKDAY_KEYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+function addDaysISO(isoDate: string, days: number): string {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return isoDate;
+  return new Date(parsed + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function weekdayKeyOf(isoDate: string): string {
+  const parsed = Date.parse(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return "";
+  return PLAN_WEEKDAY_KEYS[new Date(parsed).getUTCDay()];
+}
+
+// One line per exercise, the way a coach would read it off the card:
+// "Barbell Bench Press 5x8 @155 lb" / "Plank 4x60 (bodyweight)". Weight is
+// pounds everywhere in the plan contract (PlannedExercise.weight).
+function exerciseLine(exercise: unknown): string | null {
+  if (!isPlainObject(exercise)) return null;
+  const name = stringValue(exercise.name, 120);
+  if (!name) return null;
+  const sets = numberValue(exercise.sets);
+  const reps = numberValue(exercise.reps);
+  const weight = numberValue(exercise.weight) ?? 0;
+  const scheme = sets !== undefined && reps !== undefined ? ` ${sets}x${reps}` : "";
+  const load = weight > 0 ? ` @${weight} lb` : " (bodyweight)";
+  return `${name}${scheme}${load}`;
+}
+
+// Resolves what the user will actually see for each of the next 7 dates —
+// the same contract the Train tab and activeWorkout.ts use: a dailyOverride
+// for that ISO date wins over the weekday template. Server-written docs,
+// but every field is still re-picked and re-capped here: the bundle is the
+// token-budget boundary and never trusts document contents.
+function planForPrompt(plan: DocumentData, today: string): CoachContextPlan | null {
+  const days = isPlainObject(plan.days) ? plan.days : null;
+  if (!days) return null;
+  // An unparseable anchor date would render seven identical undated "Rest"
+  // days — worse than no plan. Unreachable through the validated clientDate
+  // path, but the bundle is the boundary and must not trust its inputs.
+  if (Number.isNaN(Date.parse(`${today}T00:00:00Z`))) return null;
+  const overrides = isPlainObject(plan.dailyOverrides) ? plan.dailyOverrides : {};
+
+  const resolved: CoachContextPlanDay[] = [];
+  for (let offset = 0; offset < PLAN_HORIZON_DAYS; offset += 1) {
+    const date = addDaysISO(today, offset);
+    const dayKey = weekdayKeyOf(date);
+    const override = overrides[date];
+    const source = isPlainObject(override) ? override : days[dayKey];
+    const day = isPlainObject(source) ? source : {};
+    // Filter junk rows BEFORE capping so a run of malformed entries can't
+    // push the real exercises out of the window.
+    const exercises = (Array.isArray(day.exercises) ? day.exercises : [])
+      .map(exerciseLine)
+      .filter((line): line is string => line !== null)
+      .slice(0, MAX_PLAN_EXERCISES_PER_DAY);
+    resolved.push(
+      compactObject({
+        date,
+        dayKey,
+        // `||` not `??`: an empty-string name must fall through to the label.
+        name: stringValue(day.name, 120) || (exercises.length ? "Workout" : "Rest"),
+        adjusted: isPlainObject(override) ? (true as const) : undefined,
+        exercises,
+      }) as CoachContextPlanDay,
+    );
+  }
+
+  const next = resolved.find((day) => day.exercises.length > 0);
+  // A template with no exercises anywhere in the window is "no plan yet",
+  // not "rest all week" — WorkoutPlan.days is a record, so {} is a valid
+  // write, and the prompt's null rule is the right response to it.
+  if (!next) return null;
+  return compactObject({
+    today,
+    todayKey: weekdayKeyOf(today),
+    source: stringValue(plan.source, 40),
+    nextSession: next ? { date: next.date, dayKey: next.dayKey, name: next.name } : undefined,
+    days: resolved,
+  }) as CoachContextPlan;
 }
 
 function pickProfile(profile: DocumentData) {

@@ -61,7 +61,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
           type: "string",
           enum: ["today", "rest_of_week", "going_forward", "reentry_ramp"],
           description:
-            "Only set once the user has told you which they want. rest_of_week = the adjusted days apply this week only, then the plan reverts automatically. reentry_ramp is implied by rampWeeks — don't set it yourself, and never ask 'today or going forward?' about a ramp.",
+            "Set it when the user has told you which they want — a stated duration counts ('all this week' = rest_of_week). If you already asked once and they moved on without answering, you may set rest_of_week for a temporary logistics reason (time_constraint, equipment_unavailable, schedule_change) and say so; never guess for pain or anything permanent. rest_of_week = the adjusted days apply through this Sunday only, then the plan reverts automatically. reentry_ramp is implied by rampWeeks — don't set it yourself, and never ask 'today or going forward?' about a ramp.",
         },
         rampWeeks: {
           type: "array",
