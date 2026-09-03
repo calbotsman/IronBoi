@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { deleteApp, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { loadCoachContext } from "../../../src/coach/context.js";
-import { planAdjustmentProposalPath, profilePath } from "../../../src/paths.js";
+import { planAdjustmentProposalPath, profilePath, workoutPlanPath } from "../../../src/paths.js";
 import { baseProfile } from "../fixtures/users.js";
 
 const USER_ID = "context-user-a";
@@ -83,5 +83,22 @@ describe("loadCoachContext", () => {
     );
     const context = await loadCoachContext(db, USER_ID, SESSION_ID);
     expect(context.recentPlanChanges).toEqual([]);
+  });
+
+  it("loads workoutPlans/current for the coach and degrades to null when the user has no plan", async () => {
+    const withoutPlan = await loadCoachContext(db, USER_ID, SESSION_ID);
+    expect(withoutPlan.currentPlan).toBeNull();
+
+    await db.doc(workoutPlanPath(USER_ID, "current")).set({
+      userId: USER_ID,
+      planId: "current",
+      source: "coach_generated",
+      days: { Mon: { name: "Push", exercises: [{ name: "Bench", sets: 3, reps: 8, weight: 100 }] } },
+      dailyOverrides: { "2026-09-04": { name: "Adjusted", exercises: [] } },
+      updatedAt: "2026-09-03T00:00:00.000Z",
+    });
+    const withPlan = await loadCoachContext(db, USER_ID, SESSION_ID);
+    expect(withPlan.currentPlan?.days?.Mon?.name).toBe("Push");
+    expect(withPlan.currentPlan?.dailyOverrides?.["2026-09-04"]?.name).toBe("Adjusted");
   });
 });

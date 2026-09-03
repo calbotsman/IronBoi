@@ -20,7 +20,11 @@ import {
   type SafetyVerdict,
 } from "./safety.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
-import { findLatestPendingProposal, publishDraftProposals } from "../workouts/planAdjustments.js";
+import {
+  currentDateISO,
+  findLatestPendingProposal,
+  publishDraftProposals,
+} from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
@@ -185,6 +189,9 @@ export async function orchestrateCoachTurn({
       userId,
       sessionId,
       retrievedCorpus,
+      // The plan block is anchored on the user's own calendar day, the same
+      // way today-scope overrides are keyed — devices aren't in ET.
+      today: clientDate ?? currentDateISO(),
     });
     const { system, userMessage } = assembleCoachPrompt(
       coach,
