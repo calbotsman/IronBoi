@@ -89,11 +89,18 @@ export function resolvePrescribedWeight(
 ): number {
   const baseline = baselines.get(normalizeExerciseKey(exercise.name));
   if (!baseline) return exercise.weight;
-  return applyProgression(
+  const progressed = applyProgression(
     baseline.anchorWeightLb,
     exercise.progression,
-    weeksBetween(baseline.anchorDate, todayISO),
+    weeksBetween(baseline.anchorDate, todayISO) - (baseline.holdWeeks ?? 0),
   );
+  // Absolute, deliberately: the rollover writes progressed numbers back
+  // into the program weeks, so anything relative to the stored weight would
+  // stack on every pass. The two cases this bites — one lift prescribed at
+  // two weights on two days, and a coach edit setting a new weight — are
+  // handled where the anchor is created (activeWorkout.ts skips ambiguous
+  // lifts; planAdjustments.ts re-anchors on an accepted going_forward edit).
+  return progressed;
 }
 
 export async function loadBaselines(db: Firestore, userId: string): Promise<BaselineMap> {
@@ -127,6 +134,14 @@ function stripServerFields(data: FirebaseFirestore.DocumentData | undefined) {
     anchorDate: raw.anchorDate,
     source: raw.source,
     lastSessionId: raw.lastSessionId,
+    // Rep-gate bookkeeping (rollover.ts gateProgression). Picked explicitly:
+    // this function is a field allowlist, and a field it doesn't name is
+    // silently dropped on every read — which is how holds vanished the
+    // moment they were written.
+    holdWeeks: raw.holdWeeks,
+    consecutiveHolds: raw.consecutiveHolds,
+    lastGateWeekIndex: raw.lastGateWeekIndex,
+    lastGateDate: raw.lastGateDate,
     updatedAt: raw.updatedAt,
   };
 }
@@ -275,8 +290,44 @@ export function baselineDocFor(
     anchorDate,
     source,
     ...(sessionId !== undefined ? { lastSessionId: sessionId } : {}),
+    // A fresh anchor is a fresh clock: no held weeks, no stall count.
+    holdWeeks: 0,
+    consecutiveHolds: 0,
     updatedAt: now,
   });
+}
+
+// A coach edit the user approved going forward ("bench is 185 from now on")
+// is a new working weight. Anchors are absolute, so without this the next
+// rollover would overwrite the coach's number with anchor + steps. Only
+// exercises that already have an anchor are touched: one without an anchor
+// simply seeds from the patched weight at its next session start.
+export async function reanchorForApprovedEdit(
+  db: Firestore,
+  userId: string,
+  days: Array<{ exercises: Array<{ name: string; weight: number }> }>,
+  anchorDate: string,
+  now: string,
+): Promise<number> {
+  const baselines = await loadBaselines(db, userId);
+  const batch = db.batch();
+  let count = 0;
+  for (const day of days) {
+    for (const exercise of day.exercises) {
+      const key = normalizeExerciseKey(exercise.name);
+      const existing = baselines.get(key);
+      if (!existing || !(exercise.weight > 0)) continue;
+      if (roundToPlate(exercise.weight) === existing.anchorWeightLb) continue;
+      batch.set(
+        baselineRefFor(db, userId, exercise.name),
+        { ...baselineDocFor(userId, exercise.name, exercise.weight, anchorDate, "coach", now), serverUpdatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      );
+      count += 1;
+    }
+  }
+  if (count > 0) await batch.commit();
+  return count;
 }
 
 export function baselineRefFor(db: Firestore, userId: string, exerciseName: string) {

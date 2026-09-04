@@ -382,6 +382,16 @@ export const ExerciseBaseline = z.object({
   anchorDate: z.string().date(),
   source: z.enum(["user_session", "coach", "plan_seed"]),
   lastSessionId: z.string().optional(),
+  // Rep-gate bookkeeping (workouts/rollover.ts gateProgression). A week in
+  // which the exercise was skipped or reps were missed does not advance the
+  // step: holdWeeks is subtracted from the weeks elapsed since the anchor.
+  // consecutiveHolds counts missed-rep holds only; two in a row deloads
+  // (re-anchors 10% lower). lastGateWeekIndex makes a retried rollover a
+  // no-op for the gate; lastGateDate bounds which sessions count as "since".
+  holdWeeks: z.number().int().nonnegative().optional(),
+  consecutiveHolds: z.number().int().nonnegative().optional(),
+  lastGateWeekIndex: z.number().int().nonnegative().optional(),
+  lastGateDate: z.string().date().optional(),
   updatedAt: ISODateTime,
 }).strict();
 

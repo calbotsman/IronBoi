@@ -13,6 +13,7 @@ import {
 } from "../contracts/coach-agent.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { safeLogger } from "../logging/safeLogger.js";
+import { reanchorForApprovedEdit } from "./exerciseBaselines.js";
 import {
   coachFollowUpPath,
   coachFollowUpsCollectionPath,
@@ -1061,6 +1062,9 @@ export async function acceptPlanAdjustmentProposal(
     await ensureTrainingProgram(db, userId);
   }
 
+  // Filled inside the transaction when a going_forward edit carries loads;
+  // consumed after the commit (see reanchorForApprovedEdit).
+  let reanchorDays: Array<{ exercises: Array<{ name: string; weight: number }> }> = [];
   await db.runTransaction(async (transaction) => {
     const [proposalSnap, planSnap, programSnap] = await Promise.all([
       transaction.get(proposalRef),
@@ -1108,6 +1112,11 @@ export async function acceptPlanAdjustmentProposal(
       proposal.proposedPlanPatch.type === "clear_overrides"
         ? undefined
         : (request.scope ?? proposal.appliesTo.scope);
+    if (scope === "going_forward" && proposal.proposedPlanPatch.type !== "clear_overrides") {
+      reanchorDays = (proposal.proposedPlanPatch.dayPatches ?? []).map(
+        (patch: { replacementDay: { exercises: Array<{ name: string; weight: number }> } }) => patch.replacementDay,
+      );
+    }
     const program = programSnap?.exists
       ? parseTrainingProgramDocument(programSnap.data())
       : null;
@@ -1228,6 +1237,27 @@ export async function acceptPlanAdjustmentProposal(
     proposalId: request.proposalId,
     outcome: "accepted",
   });
+
+  // A going_forward edit with explicit loads becomes the new anchor for
+  // any lift that already had one — otherwise the next rollover would put
+  // the old anchor + steps back over the coach's number. Best effort,
+  // after the commit: the plan change itself is already durable.
+  if (reanchorDays.length > 0) {
+    {
+      try {
+        await reanchorForApprovedEdit(
+          db, userId, reanchorDays, request.clientDate ?? currentDateISO(), serverDecidedAt,
+        );
+      } catch (error) {
+        safeLogger.warn("Re-anchor after approved edit failed", {
+          event: "plan_adjustment_reanchor_failed",
+          userId,
+          proposalId: request.proposalId,
+          errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+        });
+      }
+    }
+  }
 
   return { ok: true, proposalId: request.proposalId, decidedAt: serverDecidedAt };
 }

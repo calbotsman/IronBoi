@@ -915,4 +915,32 @@ describe("coach context bundle", () => {
     );
     expect(defaulted.today).toBe("2026-09-03");
   });
+
+  it("bundle_shows_reps_and_load_per_exercise_so_the_coach_can_see_missed_reps", () => {
+    const bundle = buildCoachContextBundle(
+      { profile: null, recentFacts: [], sessionHistory: [], recentLogs: [{
+        sessionId: "s1", date: "2026-09-01", source: "manual", postSessionNotes: "Mon: Push",
+        exercises: [
+          { name: "Barbell Bench Press", sets: [{ reps: 8, loadKg: 72.6 }, { reps: 8, loadKg: 72.6 }, { reps: 6, loadKg: 72.6 }] },
+          { name: "Plank", sets: [{ reps: 60 }, { reps: 60 }] },
+        ],
+      }] },
+      { userId: "u", sessionId: "s", now: "2026-09-03T12:00:00.000Z" },
+    );
+    expect(bundle.recentWorkouts[0].summary).toBe(
+      "Mon: Push — Barbell Bench Press 3 sets, reps 8/8/6 @160 lb; Plank 2 sets, reps 60/60",
+    );
+    // A plan line carries its progression rule.
+    const plan = buildCoachContextBundle(
+      { profile: null, recentFacts: [], recentLogs: [], sessionHistory: [], currentPlan: { days: { Thu: { name: "Push", exercises: [
+        { name: "Barbell Bench Press", sets: 5, reps: 8, weight: 155, progression: { mode: "linear_lb", amount: 5, everyWeeks: 1, capMultiple: 1.3 } },
+        { name: "Lateral Raises", sets: 4, reps: 15, weight: 20, progression: { mode: "linear_lb", amount: 5, everyWeeks: 4, capMultiple: 1.3 } },
+      ] } } } },
+      { userId: "u", sessionId: "s", now: "2026-09-03T12:00:00.000Z", today: "2026-09-03" },
+    );
+    expect(plan.currentPlan?.days[0].exercises).toEqual([
+      "Barbell Bench Press 5x8 @155 lb (+5 lb/wk)",
+      "Lateral Raises 4x15 @20 lb (+5 lb/4wk)",
+    ]);
+  });
 });

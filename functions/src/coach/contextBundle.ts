@@ -1,6 +1,7 @@
 import type { DocumentData } from "firebase-admin/firestore";
 import type { CoachLoadedContext } from "./context.js";
 import type { RetrievedCorpusEntry } from "../corpus/researchCorpus.js";
+import { progressionLabel } from "../workouts/progressionDefaults.js";
 
 export type CoachContextBundleV1 = {
   schema: "coach_context_bundle.v1";
@@ -254,7 +255,15 @@ function exerciseLine(exercise: unknown): string | null {
   const weight = numberValue(exercise.weight) ?? 0;
   const scheme = sets !== undefined && reps !== undefined ? ` ${sets}x${reps}` : "";
   const load = weight > 0 ? ` @${weight} lb` : " (bodyweight)";
-  return `${name}${scheme}${load}`;
+  const progression = isPlainObject(exercise.progression)
+    ? progressionLabel({
+        mode: exercise.progression.mode as "none" | "linear_lb" | "percent",
+        amount: numberValue(exercise.progression.amount) ?? 0,
+        everyWeeks: numberValue(exercise.progression.everyWeeks) ?? 1,
+        capMultiple: numberValue(exercise.progression.capMultiple) ?? 1.5,
+      })
+    : undefined;
+  return `${name}${scheme}${load}${progression ? ` (${progression})` : ""}`;
 }
 
 // Resolves what the user will actually see for each of the next 7 dates —
@@ -346,11 +355,20 @@ function workoutForPrompt(log: DocumentData): CoachContextWorkout {
             return "";
           }
           const name = stringValue(exercise.name, 120);
-          const setCount = Array.isArray(exercise.sets) ? exercise.sets.length : 0;
-          return name ? `${name}${setCount ? ` (${setCount} sets)` : ""}` : "";
+          if (!name) return "";
+          const sets = Array.isArray(exercise.sets) ? exercise.sets.filter(isPlainObject) : [];
+          const reps = sets.map((set) => numberValue(set.reps)).filter((value): value is number => value !== undefined);
+          const loadsLb = sets
+            .map((set) => numberValue(set.loadKg))
+            .filter((value): value is number => value !== undefined)
+            .map((kg) => Math.round(kg * 2.20462));
+          const maxLoad = loadsLb.length ? Math.max(...loadsLb) : 0;
+          // "Barbell Bench Press 5 sets, reps 8/8/7/6/5 @160 lb" — the reps
+          // are what the rep gate and the coach's hold/deload advice read.
+          return `${name} ${sets.length} sets${reps.length ? `, reps ${reps.join("/")}` : ""}${maxLoad > 0 ? ` @${maxLoad} lb` : ""}`;
         })
         .filter(Boolean)
-        .join(", ")
+        .join("; ")
     : "";
 
   return compactObject({
@@ -359,8 +377,7 @@ function workoutForPrompt(log: DocumentData): CoachContextWorkout {
     source: stringValue(log.source, 80),
     perceivedEffort: numberValue(log.perceivedEffort),
     summary:
-      postSessionNotes ||
-      exerciseSummary ||
+      [postSessionNotes, exerciseSummary].filter(Boolean).join(" — ") ||
       stringValue(log.sessionId, 120) ||
       "Workout logged with no summary.",
   });
