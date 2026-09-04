@@ -20,6 +20,7 @@ import {
   workoutPlanPath,
 } from "../paths.js";
 import { buildTrainingProgramFromDays } from "../workouts/program.js";
+import { attachDefaultProgression } from "../workouts/progressionDefaults.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -531,7 +532,7 @@ export function selectPlanDays(
   );
 
   const restDay = { name: "Rest", muscles: [], exercises: [] };
-  return Object.fromEntries(
+  const selected = Object.fromEntries(
     WEEK_ORDER.map((day) => {
       const trainingIdx = trainingDays.indexOf(day);
       if (trainingIdx === -1) return [day, restDay];
@@ -540,7 +541,10 @@ export function selectPlanDays(
         seedDaysWithExercises[trainingIdx % seedDaysWithExercises.length];
       return [day, seed ?? restDay];
     }),
-  );
+  ) as Record<string, PlannedWorkoutDayType>;
+  // Every loaded exercise the catalog knows gets a progression rule, so the
+  // plan actually moves week to week (see workouts/progressionDefaults.ts).
+  return attachDefaultProgression(selected).days;
 }
 
 // If the user listed preferred days in onboarding and they're well-formed

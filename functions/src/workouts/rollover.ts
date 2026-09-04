@@ -4,6 +4,7 @@ import { safeLogger } from "../logging/safeLogger.js";
 import { workoutPlanPath } from "../paths.js";
 import { currentDateISO } from "./planAdjustments.js";
 import { applyBaselinesToDays, loadBaselines } from "./exerciseBaselines.js";
+import { attachDefaultProgression } from "./progressionDefaults.js";
 import {
   parseTrainingProgramDocument,
   syncCurrentWeekSnapshot,
@@ -180,14 +181,21 @@ async function rolloverOneProgram(
   //
   // Only exercises with BOTH an anchor and a non-"none" progression rule
   // move; for everyone else applyBaselinesToDays returns the days unchanged.
+  // Plans generated before default rules existed (pre 2026-09-03) carry no
+  // progression at all. Backfill the current and future weeks once here —
+  // idempotent, derived only from the catalog — so the next session start
+  // seeds anchors and the following rollover moves the bar. Past weeks stay
+  // as they were: history isn't rewritten.
   const baselines = await loadBaselines(db, userId);
-  const progressedWeeks = baselines.size === 0
-    ? weeks
-    : weeks.map((week) => {
-        if (week.weekIndex < nextActiveWeekIndex) return week;
-        const { days, changed } = applyBaselinesToDays(week.days, baselines, today);
-        return changed ? { ...week, days } : week;
-      });
+  const progressedWeeks = weeks.map((week) => {
+    if (week.weekIndex < nextActiveWeekIndex) return week;
+    const withRules = attachDefaultProgression(week.days);
+    const { days, changed } =
+      baselines.size === 0
+        ? { days: withRules.days, changed: false }
+        : applyBaselinesToDays(withRules.days, baselines, today);
+    return changed || withRules.changed ? { ...week, days } : week;
+  });
 
   const nextProgram: TrainingProgramType = {
     ...program,

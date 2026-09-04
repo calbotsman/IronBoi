@@ -6,7 +6,7 @@ import {
   acceptPlanAdjustmentProposal,
   maybeCreatePlanAdjustmentProposal,
 } from "../../../src/workouts/planAdjustments.js";
-import { profilePath, trainingProgramPath, workoutPlanPath } from "../../../src/paths.js";
+import { exerciseBaselinePath, profilePath, trainingProgramPath, workoutPlanPath } from "../../../src/paths.js";
 import { baseProfile } from "../fixtures/users.js";
 
 // Unique per-file user ids — the emulator DB is shared across the suite.
@@ -22,7 +22,11 @@ const USER_CORRUPT = "rollover-user-e";
 const USER_PRUNE = "rollover-user-f";
 const USER_CASCADE = "rollover-user-g";
 const USER_CAP = "rollover-user-h";
+const USER_BACKFILL = "rollover-user-i";
+const USER_PROGRESS = "rollover-user-j";
 const ALL_USERS = [
+  USER_BACKFILL,
+  USER_PROGRESS,
   USER_ROLL,
   USER_OVERRIDES,
   USER_EXTEND,
@@ -304,5 +308,59 @@ describe("weekly program rollover", () => {
     expect(planSnap.data()?.days?.Tue).toMatchObject({ name: "Rest · Skipped" });
     // Untouched days still serve the original template.
     expect(planSnap.data()?.days?.Mon).toMatchObject({ name: "Push" });
+  });
+
+  it("backfills default progression rules onto the current and future weeks of a plan that had none", async () => {
+    const oldDays = {
+      Mon: { name: "Push", muscles: ["Chest"], exercises: [
+        { name: "Barbell Bench Press", sets: 5, reps: 8, weight: 155 },
+        { name: "Diamond Push-ups", sets: 3, reps: 15, weight: 0 },
+      ] },
+      Tue: { name: "Rest", muscles: [], exercises: [] },
+    };
+    await db.doc(trainingProgramPath(USER_BACKFILL)).set({
+      ...makeProgram(USER_BACKFILL, START_DATE, 4),
+      weeks: Array.from({ length: 4 }, (_, weekIndex) => ({ weekIndex, days: oldDays })),
+    });
+    await db.doc(workoutPlanPath(USER_BACKFILL, "current")).set(makePlan(USER_BACKFILL, oldDays));
+
+    await rolloverTrainingPrograms(db, TODAY); // week 0 → week 2
+
+    const program = (await db.doc(trainingProgramPath(USER_BACKFILL)).get()).data();
+    expect(program?.activeWeekIndex).toBe(2);
+    // Past weeks are history and stay rule-less; current and future carry the default.
+    expect(program?.weeks[0].days.Mon.exercises[0].progression).toBeUndefined();
+    expect(program?.weeks[2].days.Mon.exercises[0].progression).toMatchObject({ mode: "linear_lb", amount: 5 });
+    expect(program?.weeks[3].days.Mon.exercises[0].progression).toMatchObject({ mode: "linear_lb", amount: 5 });
+    expect(program?.weeks[2].days.Mon.exercises[1].progression).toBeUndefined();
+    // No anchor yet, so the number the user reads is unchanged this week…
+    const plan = (await db.doc(workoutPlanPath(USER_BACKFILL, "current")).get()).data();
+    expect(plan?.days.Mon.exercises[0].weight).toBe(155);
+    expect(plan?.days.Mon.exercises[0].progression).toMatchObject({ mode: "linear_lb", amount: 5 });
+  });
+
+  it("with an anchor in place, the backfilled rule moves the bar on the very next rollover", async () => {
+    const days = {
+      Mon: { name: "Push", muscles: ["Chest"], exercises: [{ name: "Barbell Bench Press", sets: 5, reps: 8, weight: 155 }] },
+      Tue: { name: "Rest", muscles: [], exercises: [] },
+    };
+    await db.doc(trainingProgramPath(USER_PROGRESS)).set({
+      ...makeProgram(USER_PROGRESS, START_DATE, 4),
+      weeks: Array.from({ length: 4 }, (_, weekIndex) => ({ weekIndex, days })),
+    });
+    await db.doc(workoutPlanPath(USER_PROGRESS, "current")).set(makePlan(USER_PROGRESS, days));
+    // Anchored at 155 on the start date (what seedMissingProgressionBaselines
+    // writes the first time the user starts this session).
+    await db.doc(exerciseBaselinePath(USER_PROGRESS, "barbell_bench_press")).set({
+      userId: USER_PROGRESS, exerciseKey: "barbell_bench_press", exerciseName: "Barbell Bench Press",
+      anchorWeightLb: 155, anchorDate: START_DATE, source: "plan_seed", updatedAt: "2026-07-03T00:00:00.000Z",
+    });
+
+    await rolloverTrainingPrograms(db, TODAY); // two weeks after the anchor
+
+    const plan = (await db.doc(workoutPlanPath(USER_PROGRESS, "current")).get()).data();
+    expect(plan?.days.Mon.exercises[0].weight).toBe(165); // 155 + 2 × 5
+    const program = (await db.doc(trainingProgramPath(USER_PROGRESS)).get()).data();
+    expect(program?.weeks[3].days.Mon.exercises[0].weight).toBe(165);
   });
 });
