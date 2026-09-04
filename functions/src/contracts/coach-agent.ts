@@ -271,6 +271,12 @@ export const CoachMemoryFact = z.object({
   state: CoachMemoryFactState.optional(),
   sourceMessageId: z.string().optional(),
   evidenceExcerpt: z.string().max(500).optional(),
+  // Timeline fields, written by the coach's remember_user_fact tool. When
+  // the user gave a time ("tweaked my shoulder last Tuesday", "travelling
+  // until the 20th") it lands here so a later turn can reason "three weeks
+  // ago" instead of treating every fact as current.
+  happenedOn: z.string().date().optional(),
+  until: z.string().date().optional(),
   expiresAt: ISODateTime.optional(),
   lastConfirmedAt: ISODateTime.optional(),
   createdAt: ISODateTime,

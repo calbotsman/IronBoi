@@ -8,6 +8,9 @@ export type CoachContextBundleV1 = {
   userId: string;
   sessionId: string;
   assembledAt: string;
+  // The user's local calendar date — the anchor for every "how long ago"
+  // the model reasons about (memory fact dates, plan dates).
+  today: string;
   profile: Record<string, unknown> | null;
   memoryFacts: CoachContextMemoryFact[];
   // Phase 2 Task 2.3 — count of proposed-but-unconfirmed facts. The coach
@@ -61,6 +64,8 @@ export type CoachContextMemoryFact = {
   confidence?: number;
   createdAt?: string;
   lastReinforcedAt?: string;
+  happenedOn?: string;
+  until?: string;
 };
 
 export type CoachContextWorkout = {
@@ -167,9 +172,17 @@ export function buildCoachContextBundle(
     userId,
     sessionId,
     assembledAt: now,
+    today: today ?? now.slice(0, 10),
     profile: context.profile ? pickProfile(context.profile) : null,
     memoryFacts: context.recentFacts
       .filter((fact) => !fact.userDeletedAt)
+      // A temporary fact past its `until` date is over — drop it in code
+      // rather than asking the model to ignore a live-looking constraint.
+      .filter((fact) => !isLapsed(fact.until, today ?? now.slice(0, 10)))
+      // Safety and constraint facts must never be evicted by twenty newer
+      // preferences or accepted-card records: rank by category first, then
+      // recency, THEN take the window.
+      .sort((a, b) => factRank(a.category) - factRank(b.category) || String(b.createdAt ?? "").localeCompare(String(a.createdAt ?? "")))
       .slice(0, 20)
       .map(memoryFactForPrompt)
       .filter((fact): fact is CoachContextMemoryFact => hasText(fact.content)),
@@ -201,6 +214,16 @@ export function buildCoachContextBundle(
       ? planForPrompt(context.currentPlan, today ?? now.slice(0, 10))
       : null,
   };
+}
+
+function factRank(category: unknown): number {
+  if (category === "safety_note") return 0;
+  if (category === "constraint") return 1;
+  return 2;
+}
+
+function isLapsed(until: unknown, today: string): boolean {
+  return typeof until === "string" && /^\d{4}-\d{2}-\d{2}$/.test(until) && until < today;
 }
 
 const PLAN_HORIZON_DAYS = 7;
@@ -308,6 +331,8 @@ function memoryFactForPrompt(fact: DocumentData): CoachContextMemoryFact {
     confidence: numberValue(fact.confidence),
     createdAt: stringValue(fact.createdAt, 80),
     lastReinforcedAt: stringValue(fact.lastReinforcedAt, 80),
+    happenedOn: stringValue(fact.happenedOn, 20),
+    until: stringValue(fact.until, 20),
   });
 }
 
