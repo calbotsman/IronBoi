@@ -22,23 +22,48 @@ import { lookupExercise } from "./exerciseCatalog.js";
 type ExerciseProgressionType = z.infer<typeof ExerciseProgression>;
 type PlannedWorkoutDayType = z.infer<typeof PlannedWorkoutDay>;
 
+const CAP = 1.3;
+
+// Steps are chosen by what a gym can actually load, not just by how heavy
+// the movement is:
+//   barbell  — 2.5 lb plates exist: +5/wk on squat/bench/deadlift; the press
+//              and rows stall sooner, so +2.5/wk and +5/2wk; bar isolation
+//              (skull crushers, EZ curl) +5/2wk.
+//   dumbbell / bench-only loaded work — racks go in 5 lb steps per hand, so
+//              +5 every 2 weeks (moderate) or every 4 weeks (light).
+//   cable / machine — 5-10 lb stacks: +5/2wk.
+//   kettlebell / club / sandbag / medball — fixed implements with big jumps
+//              (a 53 → 62 lb bell is +17%); no automatic step. The coach can
+//              propose the jump when the user reports the bell is easy.
+//   bodyweight, timed, or unknown — nothing.
 export function defaultProgressionFor(
   exerciseName: string,
   weight: number,
 ): ExerciseProgressionType | undefined {
   if (!(weight > 0)) return undefined;
   const entry = lookupExercise(exerciseName);
-  if (!entry) return undefined;
-  switch (entry.loadClass) {
-    case "heavy":
-      return { mode: "linear_lb", amount: 5, everyWeeks: 1, capMultiple: 1.5 };
-    case "moderate":
-      return { mode: "linear_lb", amount: 2.5, everyWeeks: 1, capMultiple: 1.5 };
-    case "light":
-      return { mode: "linear_lb", amount: 2.5, everyWeeks: 2, capMultiple: 1.5 };
-    default:
-      return undefined;
+  if (!entry || entry.loadClass === "bodyweight") return undefined;
+  const has = (equipment: string) => (entry.equipment as string[]).includes(equipment);
+  const rule = (amount: number, everyWeeks: number): ExerciseProgressionType => ({
+    mode: "linear_lb",
+    amount,
+    everyWeeks,
+    capMultiple: CAP,
+  });
+
+  if (has("kettlebell") || has("club") || has("sandbag") || has("medball")) return undefined;
+
+  if (has("barbell")) {
+    if (entry.loadClass === "heavy") {
+      if (entry.pattern === "vertical_push") return rule(2.5, 1);
+      if (entry.pattern === "horizontal_pull") return rule(5, 2);
+      return rule(5, 1);
+    }
+    return rule(5, 2);
   }
+  if (has("cable") || has("machine")) return rule(5, 2);
+  // Dumbbells, and loaded work whose only listed kit is a bench or nothing.
+  return entry.loadClass === "light" ? rule(5, 4) : rule(5, 2);
 }
 
 // Attaches a default rule to every loaded exercise that has none. Returns

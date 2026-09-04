@@ -60,7 +60,7 @@ export async function startWorkoutSession(
   const sessionId =
     request.sessionId ?? `${startedAt.slice(0, 10)}_${request.dayKey.toLowerCase()}`;
   const sessionDate = request.clientDate ?? startedAt.slice(0, 10);
-  const dayPlan = await loadWorkoutDay(
+  const { day: dayPlan, fromOverride, planDays } = await loadWorkoutDay(
     db,
     userId,
     request.planId,
@@ -74,7 +74,12 @@ export async function startWorkoutSession(
   // whatever progression protocol the plan carries. With no baseline (every
   // user before this feature) resolvePrescribedWeight returns the plan's own
   // weight, so nothing changes for them.
-  const baselines = await loadBaselines(db, userId);
+  //
+  // EXCEPT for a dated dailyOverride: that is a specific adjustment the user
+  // approved (a ramp week at 50%, a back-safe substitution) and it is served
+  // exactly as approved — anchors and progression do not apply to it, and it
+  // never seeds an anchor, or a 50% ramp week would become the baseline.
+  const baselines = fromOverride ? new Map() : await loadBaselines(db, userId);
   const activeWorkout = ActiveWorkoutSession.parse({
     userId,
     sessionId,
@@ -110,7 +115,11 @@ export async function startWorkoutSession(
   // only exercises that carry a progression rule AND a real load, and the
   // seeded anchor equals what the plan already said, so nothing the user
   // sees changes on the day it is written.
-  await seedMissingProgressionBaselines(db, userId, dayPlan.exercises, baselines, sessionDate, now);
+  if (!fromOverride) {
+    await seedMissingProgressionBaselines(
+      db, userId, dayPlan.exercises, baselines, sessionDate, now, ambiguousLifts(planDays),
+    );
+  }
 
   await Promise.all([
     db.doc(activeWorkoutPath(userId)).set({
@@ -230,13 +239,15 @@ async function seedMissingProgressionBaselines(
   baselines: Awaited<ReturnType<typeof loadBaselines>>,
   anchorDate: string,
   now: string,
+  skip: Set<string> = new Set(),
 ) {
   const missing = exercises.filter(
     (exercise) =>
       exercise.progression !== undefined &&
       exercise.progression.mode !== "none" &&
       exercise.weight > 0 &&
-      !baselines.has(normalizeExerciseKey(exercise.name)),
+      !baselines.has(normalizeExerciseKey(exercise.name)) &&
+      !skip.has(normalizeExerciseKey(exercise.name)),
   );
   if (missing.length === 0) return;
 
@@ -274,13 +285,37 @@ async function loadWorkoutDay(
   // different day early can't accidentally pick up today's override.
   const overrideDate = nextOccurrenceOfWeekday(dayKey, sessionDate);
   const override = readDay(planData?.dailyOverrides, overrideDate);
+  const planDays = planSnap.exists ? planData?.days : defaultPlan;
   if (override) {
-    return PlannedWorkoutDay.parse(override);
+    return { day: PlannedWorkoutDay.parse(override), fromOverride: true, planDays };
   }
 
-  const planDays = planSnap.exists ? planData?.days : defaultPlan;
   const dayData = readDay(planDays, dayKey) ?? readFirstWorkoutDay(planDays);
-  return PlannedWorkoutDay.parse(dayData);
+  return { day: PlannedWorkoutDay.parse(dayData), fromOverride: false, planDays };
+}
+
+// Lifts the plan prescribes at more than one weight across the week
+// (Deadlift 4x6 @135 Tue, 5x5 @155 Fri). Anchors are keyed by exercise, so
+// auto-seeding one of them would drag the other day to its number; those
+// lifts keep the plan's own weights until the user or the coach anchors
+// them deliberately.
+function ambiguousLifts(planDays: unknown): Set<string> {
+  const weights = new Map<string, Set<number>>();
+  if (planDays && typeof planDays === "object") {
+    for (const day of Object.values(planDays as Record<string, unknown>)) {
+      const exercises = (day as { exercises?: unknown })?.exercises;
+      if (!Array.isArray(exercises)) continue;
+      for (const exercise of exercises) {
+        if (!exercise || typeof exercise !== "object") continue;
+        const { name, weight } = exercise as { name?: unknown; weight?: unknown };
+        if (typeof name !== "string" || typeof weight !== "number") continue;
+        const key = normalizeExerciseKey(name);
+        if (!weights.has(key)) weights.set(key, new Set());
+        weights.get(key)!.add(weight);
+      }
+    }
+  }
+  return new Set([...weights.entries()].filter(([, set]) => set.size > 1).map(([key]) => key));
 }
 
 function readDay(planDays: unknown, dayKey: string): DocumentData | undefined {

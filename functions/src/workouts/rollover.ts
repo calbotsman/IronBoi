@@ -5,6 +5,11 @@ import { workoutPlanPath } from "../paths.js";
 import { currentDateISO } from "./planAdjustments.js";
 import { applyBaselinesToDays, loadBaselines } from "./exerciseBaselines.js";
 import { attachDefaultProgression } from "./progressionDefaults.js";
+import { normalizeExerciseKey } from "./exerciseCatalog.js";
+import type { z } from "zod";
+import type { PlannedExercise } from "../contracts/coach-agent.js";
+import { roundToPlate, resolvePrescribedWeight, type BaselineMap } from "./exerciseBaselines.js";
+import { exerciseBaselinePath, userRoot } from "../paths.js";
 import {
   parseTrainingProgramDocument,
   syncCurrentWeekSnapshot,
@@ -187,6 +192,18 @@ async function rolloverOneProgram(
   // seeds anchors and the following rollover moves the bar. Past weeks stay
   // as they were: history isn't rewritten.
   const baselines = await loadBaselines(db, userId);
+  // Rep gate: a step is earned, not scheduled. Before recomputing the
+  // weeks, decide per anchored exercise whether the week(s) just finished
+  // count — skipped or reps missed → hold; two missed-rep holds → deload.
+  const activeDays = attachDefaultProgression(
+    (weeks.find((week) => week.weekIndex === nextActiveWeekIndex) ?? weeks[weeks.length - 1]).days,
+  ).days;
+  await gateProgression(db, userId, baselines, activeDays, {
+    today,
+    now,
+    weeksRolled: Math.max(1, nextActiveWeekIndex - program.activeWeekIndex),
+    gateWeekIndex: nextActiveWeekIndex,
+  });
   const progressedWeeks = weeks.map((week) => {
     if (week.weekIndex < nextActiveWeekIndex) return week;
     const withRules = attachDefaultProgression(week.days);
@@ -232,6 +249,122 @@ async function rolloverOneProgram(
     outcome: `week_${program.activeWeekIndex}_to_${nextActiveWeekIndex}`,
   });
   return "rolled";
+}
+
+const GATE_LOG_LIMIT = 30;
+const DELOAD_FACTOR = 0.9;
+const HOLDS_BEFORE_DELOAD = 2;
+
+type GateOptions = { today: string; now: string; weeksRolled: number; gateWeekIndex: number };
+type GateExercise = z.infer<typeof PlannedExercise>;
+
+// Reads the user's recent workout logs and updates each anchored,
+// progressing exercise's hold bookkeeping IN PLACE on `baselines` (so the
+// recompute that follows sees it) and on disk. Idempotent per gateWeekIndex.
+//
+// A set's reps come from the finished session (activeWorkout.ts): the user's
+// edited number when they changed it, else the target. So "missed reps" is
+// only ever what the user told the app — a tap-through session counts as
+// hit. That is the honest limit of the data; it still stops the bar from
+// climbing through weeks the user never trained.
+export async function gateProgression(
+  db: Firestore,
+  userId: string,
+  baselines: BaselineMap,
+  activeDays: Record<string, { exercises: GateExercise[] }>,
+  options: GateOptions,
+): Promise<void> {
+  const progressing = new Map<string, GateExercise>();
+  for (const day of Object.values(activeDays)) {
+    for (const exercise of day.exercises) {
+      const key = normalizeExerciseKey(exercise.name);
+      if (exercise.progression && exercise.progression.mode !== "none" && baselines.has(key) && !progressing.has(key)) {
+        progressing.set(key, exercise);
+      }
+    }
+  }
+  if (progressing.size === 0) return;
+
+  const logsSnap = await db
+    .collection(`${userRoot(userId)}/workoutLogs`)
+    .orderBy("date", "desc")
+    .limit(GATE_LOG_LIMIT)
+    .get();
+  // Most recent logged sets per exercise, with the log's date.
+  const latest = new Map<string, { date: string; reps: number[] }>();
+  for (const doc of logsSnap.docs) {
+    const data = doc.data();
+    const date = typeof data.date === "string" ? data.date : "";
+    if (!Array.isArray(data.exercises)) continue;
+    for (const exercise of data.exercises) {
+      if (!isRecord(exercise) || typeof exercise.name !== "string") continue;
+      const key = normalizeExerciseKey(exercise.name);
+      if (latest.has(key)) continue; // docs are newest-first
+      const reps = Array.isArray(exercise.sets)
+        ? exercise.sets
+            .map((set) => (isRecord(set) && typeof set.reps === "number" ? set.reps : undefined))
+            .filter((value): value is number => value !== undefined)
+        : [];
+      latest.set(key, { date, reps });
+    }
+  }
+
+  const batch = db.batch();
+  let writes = 0;
+  for (const [key, exercise] of progressing) {
+    const baseline = baselines.get(key)!;
+    if (baseline.lastGateWeekIndex === options.gateWeekIndex) continue; // retried run
+    // Inclusive on both bounds: the rollover runs at 00:30, so a session
+    // dated the gate day happened after it and belongs to the next window;
+    // and the anchor day's own session (the one that seeded the anchor) is
+    // a trained session.
+    const recent = latest.get(key);
+    const performedSince =
+      recent !== undefined && recent.date >= (baseline.lastGateDate ?? baseline.anchorDate);
+    const missed = performedSince && recent.reps.length > 0 && recent.reps.some((reps) => reps < exercise.reps);
+
+    let next = { ...baseline, lastGateWeekIndex: options.gateWeekIndex, lastGateDate: options.today, updatedAt: options.now };
+    let outcome: string;
+    if (!performedSince) {
+      next.holdWeeks = (baseline.holdWeeks ?? 0) + options.weeksRolled;
+      outcome = "hold_not_trained";
+    } else if (missed) {
+      const holds = (baseline.consecutiveHolds ?? 0) + 1;
+      if (holds >= HOLDS_BEFORE_DELOAD) {
+        // Deload: re-anchor 10% below what was being prescribed, restart the clock.
+        const prescribed = resolvePrescribedWeight(exercise, baselines, options.today);
+        next = {
+          ...next,
+          anchorWeightLb: roundToPlate(prescribed * DELOAD_FACTOR),
+          anchorDate: options.today,
+          source: "coach",
+          holdWeeks: 0,
+          consecutiveHolds: 0,
+        };
+        outcome = "deload";
+      } else {
+        next.holdWeeks = (baseline.holdWeeks ?? 0) + options.weeksRolled;
+        next.consecutiveHolds = holds;
+        outcome = "hold_missed_reps";
+      }
+    } else {
+      next.consecutiveHolds = 0;
+      outcome = "advance";
+    }
+    baselines.set(key, next);
+    // Optional fields a loaded baseline never had arrive as explicit
+    // undefined; Firestore rejects those unless the client opted out, and
+    // the emulator suite doesn't everywhere. Never write an undefined key.
+    const doc = Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined));
+    batch.set(db.doc(exerciseBaselinePath(userId, key)), { ...doc, serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    writes += 1;
+    safeLogger.info("Progression gate evaluated", {
+      event: "progression_gate",
+      userId,
+      outcome: `${outcome}:${key}`,
+    });
+  }
+  if (writes > 0) await batch.commit();
 }
 
 // Housekeeping on the same rollover pass: dailyOverrides are date-keyed

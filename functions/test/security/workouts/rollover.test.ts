@@ -356,6 +356,14 @@ describe("weekly program rollover", () => {
       anchorWeightLb: 155, anchorDate: START_DATE, source: "plan_seed", updatedAt: "2026-07-03T00:00:00.000Z",
     });
 
+    // A logged session after the anchor with every rep hit — the gate needs
+    // evidence the exercise was trained before it hands out the steps.
+    await db.doc(`users/${USER_PROGRESS}/workoutLogs/s1`).set({
+      userId: USER_PROGRESS, sessionId: "s1", date: "2026-07-10", source: "manual",
+      exercises: [{ name: "Barbell Bench Press", sets: [{ reps: 8 }, { reps: 8 }, { reps: 8 }, { reps: 8 }, { reps: 8 }] }],
+      createdAt: "2026-07-10T12:00:00.000Z",
+    });
+
     await rolloverTrainingPrograms(db, TODAY); // two weeks after the anchor
 
     const plan = (await db.doc(workoutPlanPath(USER_PROGRESS, "current")).get()).data();

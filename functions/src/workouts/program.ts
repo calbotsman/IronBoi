@@ -165,6 +165,10 @@ function sanitizeDaysForBackfill(
               sets: coerceNonNegativeInt(rawExercise.sets),
               reps: coerceNonNegativeInt(rawExercise.reps),
               weight: coerceNonNegativeNumber(rawExercise.weight),
+              // An explicit rule (including a coach's "none") survives the
+              // backfill; without this the next rollover attaches the
+              // default over a deliberate "don't progress this".
+              ...(isRecord(rawExercise.progression) ? { progression: rawExercise.progression } : {}),
             }
           : rawExercise,
       );
