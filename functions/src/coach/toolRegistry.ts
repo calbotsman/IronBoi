@@ -5,8 +5,13 @@ import {
   AskFollowUpQuestionRequest,
   ClearPlanOverridesToolRequest,
   FindExerciseSwapsRequest,
+  ForgetUserFactToolRequest,
   RejectPlanAdjustmentToolRequest,
+  RememberUserFactToolRequest,
 } from "../contracts/tool-calls.js";
+import { CoachMemoryFact } from "../contracts/coach-agent.js";
+import { recordAuditEventBestEffort } from "../audit/log.js";
+import { memoryFactPath, userRoot } from "../paths.js";
 import { CATALOG_EQUIPMENT, suggestSwaps, type Equipment } from "../workouts/exerciseCatalog.js";
 import {
   acceptLatestPlanAdjustmentFromChat,
@@ -183,6 +188,34 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
     },
   },
   {
+    name: "remember_user_fact",
+    description:
+      "Save one fact the user just told you that you'd need to know next week. Content: their own words, briefly. happenedOn: when it happened, if they said. until: when it stops applying, if temporary.",
+    parameters: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: ["safety_note", "constraint", "preference", "schedule", "equipment", "motivation", "exercise_response", "adherence_pattern"],
+        },
+        content: { type: "string", maxLength: 300, description: "The fact, in the user's words. e.g. 'Tweaked left shoulder doing overhead press; dull ache, no numbness.'" },
+        happenedOn: { type: "string", description: "YYYY-MM-DD, only if the user said when. 'last Tuesday' → work it out from today's date." },
+        until: { type: "string", description: "YYYY-MM-DD, only for temporary facts ('travelling until the 20th')." },
+      },
+      required: ["category", "content"],
+    },
+  },
+  {
+    name: "forget_user_fact",
+    description:
+      "Delete exactly one remembered fact, by the factId shown in <memory_facts>, when the user asks you to forget it.",
+    parameters: {
+      type: "object",
+      properties: { factId: { type: "string" } },
+      required: ["factId"],
+    },
+  },
+  {
     name: "find_exercise_swaps",
     description:
       "Look up real substitute exercises for one movement, ranked by muscle overlap. READ-ONLY — it changes nothing. Call this BEFORE proposing any exercise substitution so you name movements MYO actually knows (with form cues and demos) instead of inventing one. Then call adapt_plan with the option you picked to create the review card. If the user said what equipment they have — or that they have none — pass availableEquipment.",
@@ -268,6 +301,17 @@ const AskFollowUpQuestionArgs = AskFollowUpQuestionRequest.omit({
   requestedAt: true,
   tool: true,
 });
+const RememberUserFactArgs = RememberUserFactToolRequest.omit({
+  toolCallId: true,
+  requestedAt: true,
+  tool: true,
+});
+const ForgetUserFactArgs = ForgetUserFactToolRequest.omit({
+  toolCallId: true,
+  requestedAt: true,
+  tool: true,
+});
+
 const FindExerciseSwapsArgs = FindExerciseSwapsRequest.omit({
   toolCallId: true,
   requestedAt: true,
@@ -304,12 +348,29 @@ export type CoachToolRegistryContext = {
   // The injury severe-screen and category coercion run over this so a model
   // paraphrase can't route around the triage gate.
   rawUserText?: string;
+  // The triggering message id — remembered facts are keyed to it so a fact
+  // can always be traced to the message that produced it.
+  sourceMessageId?: string;
 };
+
+const MAX_LIVE_MEMORY_FACTS = 100;
+
+// "Verbatim" = the remembered content appears in the user's own message once
+// case, whitespace and trailing punctuation are normalised. Anything else is
+// a paraphrase and is labelled as such.
+function isVerbatim(content: string, rawUserText: string | undefined): boolean {
+  if (!rawUserText) return false;
+  const norm = (value: string) => value.toLowerCase().replace(/[\s]+/g, " ").replace(/[.!?,;:]+$/g, "").trim();
+  return norm(rawUserText).includes(norm(content));
+}
 
 export function buildCoachToolRegistry(
   db: Firestore,
   context: CoachToolRegistryContext,
 ): ToolRegistry {
+  // Facts are keyed chat_<messageId>_<n>; the counter keeps two facts from
+  // one turn from overwriting each other.
+  let rememberedThisTurn = 0;
   return {
     adapt_plan: async (rawArgs) => {
       // executeTool injects userId onto every handler's args — strip it
@@ -454,6 +515,96 @@ export function buildCoachToolRegistry(
         };
       }
       return { ok: true, ...result };
+    },
+    remember_user_fact: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      const parsed = RememberUserFactArgs.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "remember_user_fact", parsed.error.issues);
+        return {
+          ok: false,
+          error: "invalid_remember_user_fact_args",
+          hint: "category must be one of the listed values, content 1-300 chars, dates YYYY-MM-DD.",
+        };
+      }
+      // Bounded memory: past the cap the model is told to prune rather than
+      // silently filling, and the prompt window (20, safety-first) never
+      // sees the overflow anyway.
+      const liveCount = (
+        await db.collection(`${userRoot(userId)}/memoryFacts`).limit(MAX_LIVE_MEMORY_FACTS + 1).get()
+      ).docs.filter((doc) => !doc.get("userDeletedAt")).length;
+      if (liveCount >= MAX_LIVE_MEMORY_FACTS) {
+        return {
+          ok: false,
+          error: "memory_full",
+          hint: "This user has the maximum number of remembered facts. Ask which older facts to forget, then call forget_user_fact, before remembering more.",
+        };
+      }
+      rememberedThisTurn += 1;
+      const now = new Date().toISOString();
+      const factId = `chat_${context.sourceMessageId ?? now.replace(/\D/g, "")}_${rememberedThisTurn}`;
+      // Provenance is honest: content the user literally said is
+      // user_stated at confidence 1; a model paraphrase is coach_inferred at
+      // 0.8, with the raw message as evidence either way. The fact is
+      // confirmed in both cases because the reply tells the user what was
+      // noted and they can say "forget that" — a proposed/unconfirmed fact
+      // would never reach the prompt (no client UI confirms facts yet).
+      const verbatim = isVerbatim(parsed.data.content, context.rawUserText);
+      const fact = CoachMemoryFact.parse({
+        userId,
+        factId,
+        category: parsed.data.category,
+        content: parsed.data.content,
+        source: verbatim ? "user_stated" : "coach_inferred",
+        confidence: verbatim ? 1 : 0.8,
+        state: "confirmed",
+        ...(context.sourceMessageId ? { sourceMessageId: context.sourceMessageId } : {}),
+        ...(context.rawUserText ? { evidenceExcerpt: context.rawUserText.slice(0, 500) } : {}),
+        ...(parsed.data.happenedOn ? { happenedOn: parsed.data.happenedOn } : {}),
+        ...(parsed.data.until ? { until: parsed.data.until } : {}),
+        lastConfirmedAt: now,
+        createdAt: now,
+        lastReinforcedAt: now,
+        userEditable: true,
+      });
+      await db.doc(memoryFactPath(userId, factId)).set(fact);
+      await recordAuditEventBestEffort(db, {
+        userId,
+        eventType: "memory_fact_written",
+        actor: "coach",
+        payload: { factId, category: fact.category, source: fact.source, state: "confirmed" },
+      });
+      safeLogger.info("Coach remembered a user fact", {
+        event: "coach_memory_fact_remembered",
+        userId,
+        factId,
+        outcome: fact.category,
+      });
+      return { ok: true, factId, remembered: fact.content };
+    },
+    forget_user_fact: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      const parsed = ForgetUserFactArgs.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "forget_user_fact", parsed.error.issues);
+        return { ok: false, error: "invalid_forget_user_fact_args" };
+      }
+      // Path is user-scoped, so a factId from another user's memory simply
+      // doesn't exist here. Soft delete, same as the deleteMemoryFact callable.
+      const ref = db.doc(memoryFactPath(userId, parsed.data.factId));
+      const snap = await ref.get();
+      if (!snap.exists || snap.get("userDeletedAt")) {
+        return { ok: false, error: "fact_not_found" };
+      }
+      const now = new Date().toISOString();
+      await ref.set({ userDeletedAt: now, serverDeletedAt: now }, { merge: true });
+      await recordAuditEventBestEffort(db, {
+        userId,
+        eventType: "memory_fact_deleted",
+        actor: "user",
+        payload: { factId: parsed.data.factId },
+      });
+      return { ok: true, factId: parsed.data.factId };
     },
     clear_plan_overrides: async (rawArgs) => {
       const { userId, ...args } = rawArgs;

@@ -240,6 +240,7 @@ export async function orchestrateCoachTurn({
           latestPendingProposalId,
           clientDate,
           rawUserText: userContent,
+          sourceMessageId: messageId,
         })
       : undefined;
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry

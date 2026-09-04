@@ -228,6 +228,37 @@ export const RejectPlanAdjustmentToolResult = ToolResultBase.extend({
   proposalId: z.string().optional(),
 });
 
+// Durable memory. Before 2026-09-03 nothing wrote users/{uid}/memoryFacts
+// from chat — iOS never called upsertMemoryFact and the only writer was the
+// accepted-proposal record — so the coach forgot an injury the moment it
+// left the 30-message window. The model may only remember what the user
+// said in THIS turn; the raw user text rides along as evidenceExcerpt.
+export const RememberUserFactToolRequest = ToolCallBase.extend({
+  tool: z.literal("remember_user_fact"),
+  category: z.enum([
+    "safety_note",
+    "constraint",
+    "preference",
+    "schedule",
+    "equipment",
+    "motivation",
+    "exercise_response",
+    "adherence_pattern",
+  ]),
+  content: z.string().min(1).max(300),
+  happenedOn: z.string().date().optional(),
+  until: z.string().date().optional(),
+}).strict();
+
+export const RememberUserFactToolResult = ToolResultBase.extend({
+  factId: z.string().optional(),
+});
+
+export const ForgetUserFactToolRequest = ToolCallBase.extend({
+  tool: z.literal("forget_user_fact"),
+  factId: z.string().min(1).max(120),
+}).strict();
+
 // READ-ONLY. Returns catalog-ranked substitutes for one exercise so the coach
 // can name real alternatives instead of inventing them.
 //
@@ -331,6 +362,8 @@ export const CoachToolRequest = z.discriminatedUnion("tool", [
   AcceptPlanAdjustmentToolRequest,
   RejectPlanAdjustmentToolRequest,
   ClearPlanOverridesToolRequest,
+  RememberUserFactToolRequest,
+  ForgetUserFactToolRequest,
   FindExerciseSwapsRequest,
   ExplainExerciseRequest,
   FlagRiskRequest,
@@ -345,6 +378,7 @@ export const CoachToolResult = z.union([
   AdaptPlanResult,
   AcceptPlanAdjustmentToolResult,
   RejectPlanAdjustmentToolResult,
+  RememberUserFactToolResult,
   ExplainExerciseResult,
   FlagRiskResult,
   SummarizeProgressResult,

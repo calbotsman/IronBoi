@@ -861,4 +861,58 @@ describe("coach context bundle", () => {
     expect(fri?.name).toBe("Workout");
     expect(sat?.name).toBe("Rest");
   });
+
+  it("bundle_carries_today_and_dated_memory_facts_and_the_prompt_tags_today_in_both_flag_states", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: null,
+        recentFacts: [{
+          factId: "chat_m_1", category: "safety_note", content: "Tweaked left shoulder.", source: "user_stated",
+          confidence: 1, createdAt: "2026-08-13T10:00:00.000Z", happenedOn: "2026-08-11", until: "2026-08-31",
+          evidenceExcerpt: "should never reach the prompt", userId: "attacker-user",
+        }],
+        recentLogs: [], sessionHistory: [],
+      },
+      { userId: "u", sessionId: "s", now: "2026-09-03T23:30:00.000Z", today: "2026-09-03" },
+    );
+    expect(bundle.today).toBe("2026-09-03");
+    // until 2026-08-31 is before today → lapsed, removed in code.
+    expect(bundle.memoryFacts).toEqual([]);
+    const live = buildCoachContextBundle(
+      { profile: null, recentLogs: [], sessionHistory: [], recentFacts: [
+        { factId: "f_today", category: "constraint", content: "Hotel until today.", until: "2026-09-03", createdAt: "2026-09-01T00:00:00.000Z" },
+        { factId: "f_future", category: "constraint", content: "Hotel until the 12th.", until: "2026-09-12", createdAt: "2026-09-01T00:00:00.000Z" },
+        { factId: "f_none", category: "safety_note", content: "Tweaked left shoulder.", happenedOn: "2026-08-11", createdAt: "2026-08-13T10:00:00.000Z" },
+        { factId: "f_junk", category: "constraint", content: "Bad date.", until: "soon", createdAt: "2026-09-01T00:00:00.000Z" },
+      ] },
+      { userId: "u", sessionId: "s", now: "2026-09-03T23:30:00.000Z", today: "2026-09-03" },
+    );
+    // safety_note first, then constraints newest-first, then the rest.
+    expect(live.memoryFacts.map((fact) => fact.factId)).toEqual(["f_none", "f_today", "f_future", "f_junk"]);
+    expect(live.memoryFacts[0]).toMatchObject({ happenedOn: "2026-08-11" });
+    expect(live.memoryFacts[2]).toMatchObject({ until: "2026-09-12" });
+
+    // Twenty newer preferences never evict an old safety note.
+    const crowded = buildCoachContextBundle(
+      { profile: null, recentLogs: [], sessionHistory: [], recentFacts: [
+        ...Array.from({ length: 25 }, (_, index) => ({ factId: `pref_${index}`, category: "preference", content: `Pref ${index}`, createdAt: `2026-09-0${1 + (index % 3)}T00:00:00.000Z` })),
+        { factId: "old_safety", category: "safety_note", content: "Herniated disc; no loaded spinal flexion.", createdAt: "2026-01-01T00:00:00.000Z" },
+      ] },
+      { userId: "u", sessionId: "s", now: "2026-09-03T23:30:00.000Z", today: "2026-09-03" },
+    );
+    expect(crowded.memoryFacts).toHaveLength(20);
+    expect(crowded.memoryFacts[0].factId).toBe("old_safety");
+    expect(JSON.stringify(live.memoryFacts)).not.toContain("attacker-user");
+    for (const options of [{ toolsEnabled: true }, undefined]) {
+      const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi", options);
+      expect(userMessage).toContain("<today>2026-09-03</today>");
+      expect(system).toContain("<today>");
+    }
+    // Defaults to the UTC date of `now` when today isn't supplied.
+    const defaulted = buildCoachContextBundle(
+      { profile: null, recentFacts: [], recentLogs: [], sessionHistory: [] },
+      { userId: "u", sessionId: "s", now: "2026-09-03T23:30:00.000Z" },
+    );
+    expect(defaulted.today).toBe("2026-09-03");
+  });
 });
