@@ -72,7 +72,7 @@ The iOS project needs Xcode 16 and a Firebase config. See [`docs/operations/fire
 
 ## A note on the repo name
 
-The bundle is `IronBoi`, the product is MYO. The `src/` folder is a dead React shell from the first weekend; the real app is native and lives in `ios/`.
+The bundle is `IronBoi`, the product is MYO. The `src/` folder is a dead React shell from the earliest commits; the real app is native and lives in `ios/`.
 
 ---
 
