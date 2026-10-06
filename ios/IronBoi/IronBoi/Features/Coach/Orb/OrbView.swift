@@ -127,6 +127,7 @@ final class OrbModel {
     func step(phase: OrbPhase, you: VoiceReading, agent: VoiceReading,
               size: CGSize, anchor: SIMD2<Float>, move: BodyMove?, moveTime: Float,
               loop: ExerciseMotion? = nil, inWorkout: Bool = false, setsDone: Int = 0,
+              demo: ExerciseMotion? = nil,
               scale: Float = 1, reduceMotion: Bool) {
         bodyScale += (scale - bodyScale) * 0.15
         let now = CACurrentMediaTime()
@@ -173,10 +174,16 @@ final class OrbModel {
             let dist = max(hypot(dx, dy), 0.0001)
             drops[i].x += dx / dist * velocity[i] * dt * 0.6
             drops[i].y += dy / dist * velocity[i] * dt
+            // Blue in flight; the instant it touches the body it flips to
+            // amber (~80ms). A slow blend passes through grey.
+            // "Touch" is where the soft bridge starts: the edges within the fuse
+            // distance (0.16), not the centres.
+            let warm: Float = dist > radius + drops[i].z + 0.2 ? 1 : max(0, drops[i].w - dt * 14)
+            drops[i].w = min(drops[i].w, warm)
             if dist < radius * 0.6 {
                 drops[i].z *= pow(0.85, dt * 60)
                 tint = min(1, tint + dt * 3 * tintGain)
-                if drops[i].z < 0.004 { drops[i].z = 0 }
+                if drops[i].z < 0.004 { drops[i] = .zero }
             }
         }
         tint *= pow(0.985, dt * 60)
@@ -190,6 +197,8 @@ final class OrbModel {
         if !listening {
             if let shaped = move?.frame(at: moveTime, reducedMotion: reduceMotion) {
                 pose = shaped
+            } else if let demo, !reduceMotion {
+                pose = demo.frame(at: time)
             } else if inWorkout, !reduceMotion,
                       let alive = life.pose(motion: loop, setsDone: setsDone, time: time) {
                 pose = alive
@@ -219,6 +228,8 @@ struct OrbView: View {
     /// The exercise being demonstrated during a workout, if any.
     var loop: ExerciseMotion? = nil
     var inWorkout = false
+    /// A lift to show right now, continuously (the intro's choreography).
+    var demo: ExerciseMotion? = nil
     var setsDone = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -232,7 +243,7 @@ struct OrbView: View {
                 let _ = model.step(phase: phase, you: you.reading, agent: agent.reading,
                                    size: size, anchor: anchor(in: size),
                                    move: director.move, moveTime: director.elapsed,
-                                   loop: loop, inWorkout: inWorkout, setsDone: setsDone,
+                                   loop: loop, inWorkout: inWorkout, setsDone: setsDone, demo: demo,
                                    scale: Float(scale), reduceMotion: reduceMotion)
                 Rectangle()
                     .fill(Color.white)
@@ -244,7 +255,7 @@ struct OrbView: View {
                         .float2(model.center.x, model.center.y),
                         .float3(model.lobes.x, model.lobes.y, model.lobes.z),
                         .float(model.spin),
-                        .float(model.tint * 0.45),
+                        .float(0),  // the body stays amber; absorbed words warm to amber first
                         .float(0.16),
                         .float(0.025),
                         .float(0.14),
@@ -300,5 +311,61 @@ final class BodyDirector: ObservableObject {
     func rest() {
         move = nil
         startedAt = 0
+    }
+}
+
+/// The intro's choreography: words arrive as bloops and merge in, MYO
+/// stands up into a lift for a couple of reps, melts back to a blob, more
+/// bloops, a different lift. Loops for as long as the screen is up.
+@MainActor
+final class IntroChoreography: ObservableObject {
+    @Published private(set) var demo: ExerciseMotion?
+    let you = VoiceMeter()
+    private var task: Task<Void, Never>?
+    private static let lifts: [ExerciseMotion] = [.squat, .overheadPress, .curl, .lateralRaise]
+
+    func start() {
+        guard task == nil else { return }
+        task = Task { [weak self] in
+            var round = 0
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.bloops(count: Int.random(in: 6...9))
+                try? await Task.sleep(nanoseconds: 700_000_000)
+                let lift = Self.lifts[round % Self.lifts.count]
+                self.demo = lift
+                try? await Task.sleep(nanoseconds: UInt64(lift.repDuration * 2.2 * 1_000_000_000))
+                self.demo = nil
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                round += 1
+            }
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        demo = nil
+        you.reset()
+    }
+
+    /// A short burst of syllables, as if someone were talking to it.
+    private func bloops(count: Int) async {
+        var reading = VoiceReading()
+        reading.active = true
+        for _ in 0..<count {
+            guard !Task.isCancelled else { return }
+            reading.onsets += 1
+            reading.peak = Float.random(in: 0.45...0.95)
+            reading.level = 0.5
+            reading.presence = min(1, reading.presence + 0.35)
+            you.set(reading)
+            try? await Task.sleep(nanoseconds: UInt64.random(in: 180_000_000...380_000_000))
+        }
+        // Let the last bloops land, then let go of the lean.
+        try? await Task.sleep(nanoseconds: 900_000_000)
+        reading.active = false
+        reading.presence = 0
+        you.set(reading)
     }
 }

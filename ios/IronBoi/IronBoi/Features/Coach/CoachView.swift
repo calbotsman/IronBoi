@@ -123,37 +123,39 @@ struct CoachView: View {
     }
 
     /// Static meters for the intro orb — nobody's talking yet.
-    private static let quietYou = VoiceMeter()
     private static let quietCoach = VoiceMeter()
     @StateObject private var introBody = BodyDirector()
+    @StateObject private var intro = IntroChoreography()
 
-    /// The intro: the coach's body, alive before you've said a word — it
-    /// rests, now and then takes shape and moves, and goes back to a blob.
+    /// The intro: words bloop in and merge, MYO stands up into a lift,
+    /// melts back to a blob, more bloops, another lift.
     private var signedOutView: some View {
         ZStack {
             GeometryReader { geo in
                 OrbView(
                     phase: .rest,
-                    you: Self.quietYou,
+                    you: intro.you,
                     agent: Self.quietCoach,
                     focus: CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.36),
                     director: introBody,
                     scale: 0.9,
-                    loop: .squat,
-                    inWorkout: true
+                    demo: intro.demo
                 )
             }
             .ignoresSafeArea()
+            .onAppear { intro.start() }
+            .onDisappear { intro.stop() }
 
             VStack(spacing: 0) {
                 Spacer()
 
                 VStack(spacing: MyoTheme.Spacing.sm) {
-                    Text("MYO")
-                        .font(.system(size: 44, weight: .bold))
-                        .kerning(6)
-                        .foregroundStyle(MyoColor.Text.primary.color)
-                    Text("A strength coach you can talk to.")
+                    Image("MYOWordmark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 46)
+                        .accessibilityLabel("MYO")
+                    Text("Your new personal trainer.")
                         .myoStyle(.title)
                         .foregroundStyle(MyoColor.Text.secondary.color)
                         .multilineTextAlignment(.center)

@@ -165,11 +165,18 @@ static float hash21(float2 p) {
         // droplets carry your colour and blend into the body where they
         // touch; the body itself tints only as it absorbs them (uTint).
         float h = clamp(0.5 + 0.5 * (dd - d) / fuse, 0.0, 1.0);
-        you = max(you, 1.0 - h);
+        // drops[i+3] is how blue the drop still is: 1 in flight, falling
+        // to 0 as it reaches the body, so it's absorbed as amber instead of
+        // averaging blue with amber into grey.
+        you = max(you, (1.0 - h) * drops[i + 3]);
         d = smin(d, dd, fuse);
     }
 
-    float3 c = mix(float3(bodyColor.rgb), float3(youColor.rgb), clamp(max(you, tint), 0.0, 1.0));
+    float k = clamp(max(you, tint), 0.0, 1.0);
+    float3 c = mix(float3(bodyColor.rgb), float3(youColor.rgb), k);
+    // Blue and amber average to grey halfway; lift the midpoint toward a
+    // light pastel so a bloop warming into the body never reads as mud.
+    c = mix(c, float3(1.0), 4.0 * k * (1.0 - k) * 0.42);
     // Pale centre, soft edge, no dark rim.
     c = mix(c, float3(1.0), (1.0 - smoothstep(-radius, 0.0, d)) * 0.38);
     // Soft contact shading shows the tucked elbow against the torso. It
