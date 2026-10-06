@@ -20,6 +20,8 @@ import { recomputeProgressSummaryIfStale } from "./progress/store.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
+  CoachTips,
+  CoachTone,
   ConsentRecord,
   DailyCheck,
   IngestHealthSamplesRequest,
@@ -1362,6 +1364,8 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       userContent: data.content,
       clientDate: typeof data.clientDate === "string" ? data.clientDate : undefined,
       inputMode: typeof data.inputMode === "string" ? data.inputMode : undefined,
+      coachTips: CoachTips.safeParse(data.coachTips).data,
+      coachTone: CoachTone.safeParse(data.coachTone).data,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
       openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });

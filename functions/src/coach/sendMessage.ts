@@ -1,7 +1,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
-import { CoachInputMode } from "../contracts/coach-agent.js";
+import { CoachInputMode, CoachTips, CoachTone } from "../contracts/coach-agent.js";
 import {
   coachSessionMessagePath,
   coachSessionPath,
@@ -24,6 +24,10 @@ export const IosCoachMessageRequest = z.object({
   timestamp: z.string().datetime(),
   toolCallIds: z.array(z.string()).default([]),
   inputMode: CoachInputMode.default("text"),
+  // How the user wants the coach to talk (persisted on the message so the
+  // onUserCoachMessageCreated trigger passes them to the prompt).
+  coachTips: CoachTips.optional(),
+  coachTone: CoachTone.optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().min(1).optional(),
   startedAt: z.string().datetime().optional(),
@@ -209,6 +213,12 @@ export async function handleSendCoachMessage(
   }
   if (parsed.clientDate !== undefined) {
     messageData.clientDate = parsed.clientDate;
+  }
+  if (parsed.coachTips !== undefined) {
+    messageData.coachTips = parsed.coachTips;
+  }
+  if (parsed.coachTone !== undefined) {
+    messageData.coachTone = parsed.coachTone;
   }
 
   await db

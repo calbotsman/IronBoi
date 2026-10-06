@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { SynthesizeSpeechRequest, synthesizeSpeech } from "../../../src/voice/speech.js";
-import { VOICE_MODE_RULES } from "../../../src/coach/orchestrate.js";
+import { VOICE_MODE_RULES, coachStyleRules } from "../../../src/coach/orchestrate.js";
 
 describe("synthesizeSpeech", () => {
   it("asks Cloud TTS for a Chirp 3 HD voice as 24 kHz LINEAR16", async () => {
@@ -34,5 +34,33 @@ describe("voice mode prompt", () => {
   it("asks for short, list-free spoken replies", () => {
     expect(VOICE_MODE_RULES).toMatch(/1–3 short spoken sentences/);
     expect(VOICE_MODE_RULES).toMatch(/No lists/);
+  });
+});
+
+describe("coach style prompt", () => {
+  it("adds nothing for the defaults", () => {
+    expect(coachStyleRules()).toBeNull();
+    expect(coachStyleRules("full")).toBeNull();
+    expect(coachStyleRules("full", undefined)).toBeNull();
+  });
+
+  it("asks for fewer words when brief or quiet", () => {
+    expect(coachStyleRules("brief")).toMatch(/one or two short sentences/);
+    const quiet = coachStyleRules("quiet");
+    expect(quiet).toMatch(/under 15/);
+    expect(quiet).not.toMatch(/TONE/);
+  });
+
+  it("sets the tone, combined with tips", () => {
+    expect(coachStyleRules(undefined, "hype")).toMatch(/hype-man/);
+    const both = coachStyleRules("brief", "calm");
+    expect(both).toMatch(/STYLE/);
+    expect(both).toMatch(/No exclamation marks/);
+  });
+
+  it("always keeps safety rules in force", () => {
+    for (const [tips, tone] of [["brief", undefined], ["quiet", "hype"], [undefined, "calm"]] as const) {
+      expect(coachStyleRules(tips, tone)).toMatch(/Safety rules still apply/);
+    }
   });
 });

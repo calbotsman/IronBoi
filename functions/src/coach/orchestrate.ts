@@ -26,6 +26,7 @@ import {
   publishDraftProposals,
 } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
+import type { CoachTips, CoachTone } from "../contracts/coach-agent.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
@@ -49,6 +50,31 @@ export const VOICE_MODE_RULES = [
   "- Tools and safety rules are unchanged: still use the tools, still ask red-flag questions about pain.",
 ].join("\n");
 
+/**
+ * Appended to the system prompt (text and voice) when the user has asked the
+ * coach to talk less or in a particular tone. Defaults ("full" tips, no tone)
+ * return null so the prompt is unchanged.
+ */
+export function coachStyleRules(
+  tips?: CoachTips | null,
+  tone?: CoachTone | null,
+): string | null {
+  const lines: string[] = [];
+  if (tips === "brief") {
+    lines.push("STYLE — the user asked for less talking: answer in one or two short sentences. No tips or form cues unless they ask.");
+  } else if (tips === "quiet") {
+    lines.push("STYLE — the user asked you to be quiet: reply in as few words as possible (under 15). No tips, no follow-up questions unless safety requires one.");
+  }
+  if (tone === "hype") {
+    lines.push("TONE — high energy and encouraging, like a hype-man trainer: short, punchy lines.");
+  } else if (tone === "calm") {
+    lines.push("TONE — calm, steady and low-key. No exclamation marks, no hype.");
+  }
+  if (lines.length === 0) return null;
+  lines.push("Safety rules still apply: always ask red-flag questions about pain and give safety guidance when needed, whatever the style.");
+  return lines.join("\n");
+}
+
 type OrchestrateCoachTurnArgs = {
   db: Firestore;
   coach: CoachConfig;
@@ -62,6 +88,10 @@ type OrchestrateCoachTurnArgs = {
   clientDate?: string;
   /** "live_voice"/"dictation": the reply will be spoken aloud. */
   inputMode?: string;
+  /** How much the user wants the coach to talk; "full" = default. */
+  coachTips?: CoachTips;
+  /** The coach's tone; absent = default. */
+  coachTone?: CoachTone;
   geminiApiKey?: string;
   openRouterApiKey?: string;
 };
@@ -93,6 +123,8 @@ export async function orchestrateCoachTurn({
   userContent,
   clientDate,
   inputMode,
+  coachTips,
+  coachTone,
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
@@ -213,7 +245,12 @@ export async function orchestrateCoachTurn({
       { toolsEnabled: toolLoopEnabled },
     );
     const spoken = inputMode === "live_voice" || inputMode === "dictation";
-    const system = spoken ? `${assembled.system}\n\n${VOICE_MODE_RULES}` : assembled.system;
+    const styleRules = coachStyleRules(coachTips, coachTone);
+    const system = [
+      assembled.system,
+      spoken ? VOICE_MODE_RULES : null,
+      styleRules,
+    ].filter((part): part is string => Boolean(part)).join("\n\n");
     const userMessage = assembled.userMessage;
     const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });
 
