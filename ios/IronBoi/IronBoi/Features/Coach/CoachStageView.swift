@@ -142,6 +142,11 @@ struct CoachStageView: View {
                 } else {
                     caption
                         .padding(.horizontal, MyoTheme.Spacing.lg)
+                    if phase == .rest {
+                        quickTaps
+                            .padding(.top, MyoTheme.Spacing.md)
+                            .transition(.opacity)
+                    }
                     if let workout = appModel.activeWorkout {
                         // Begin workout drops the card down to this bar.
                         LiveWorkoutCard(workout: workout, expanded: $workoutExpanded)
@@ -324,6 +329,49 @@ struct CoachStageView: View {
     }
 
     // MARK: - Controls
+
+    // MARK: - Quick taps
+
+    /// Ways to talk to MYO, as one-tap actions. Tap and it starts.
+    private var quickTaps: some View {
+        HStack(spacing: 6) {
+                if appModel.activeWorkout == nil {
+                    quickTap("Start workout", systemImage: "play.fill") { beginWorkout() }
+                    quickTap("Today's workout", systemImage: "list.bullet") { showTodayCard = true }
+                } else {
+                    quickTap("Resume", systemImage: "play.fill") { workoutExpanded = true }
+                }
+                quickTap("Adjust", systemImage: "slider.horizontal.3") {
+                    // Coach asks what needs to change; the conversation stays
+                    // open so you can just answer out loud.
+                    conversationActive = true
+                    silentRestarts = []
+                    send("I need to adjust my workout.", spoken: true)
+                }
+            }
+        .padding(.horizontal, MyoTheme.Spacing.md)
+    }
+
+    private func quickTap(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(MyoTheme.Colors.coachAmber)
+                Text(title)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(MyoColor.Text.primary.color)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 36)
+            .background(MyoColor.Surface.elevated.color, in: Capsule())
+            .overlay(Capsule().stroke(MyoColor.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
 
     private var controls: some View {
         HStack(alignment: .center) {
