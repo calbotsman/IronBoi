@@ -139,20 +139,26 @@ enum CoachingStyle {
     enum Change: Equatable {
         case tips(Tips)
         case tone(Tone)
+        /// "Stop" / "enough" while Coach is talking: stop this, change nothing.
+        case hush
     }
 
     /// What you asked for, if what you said was about how Coach talks.
     /// Only short asides count — a long message that happens to contain
     /// "stop" is a message, not a request to be quiet.
-    static func change(in text: String) -> Change? {
+    /// `coachJustSpoke`: a bare "stop" only means "stop talking" when
+    /// there's talking to stop — otherwise it's a song lyric, or about the set.
+    static func change(in text: String, coachJustSpoke: Bool) -> Change? {
         let t = text.lowercased()
             .replacingOccurrences(of: "’", with: "'")
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         guard !t.isEmpty, t.split(separator: " ").count <= 10 else { return nil }
         func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
 
-        if ["stop", "stop it", "okay stop", "ok stop", "quiet", "shh", "shush", "hush", "enough"].contains(t)
-            || says(#"\b(stop talking|shut up|be quiet|quiet down|no talking|stop coaching|just count|enough talking|zip it)\b"#) {
+        if ["stop", "stop it", "okay stop", "ok stop", "quiet", "shh", "shush", "hush", "enough", "okay okay", "got it"].contains(t) {
+            return coachJustSpoke ? .hush : nil
+        }
+        if says(#"\b(stop talking|shut up|be quiet|quiet down|no talking|stop coaching|just count|enough talking|zip it)\b"#) {
             return .tips(.quiet)
         }
         if says(#"\b(no (more )?tips|don't need (the )?tips|skip the tips|stop (with )?the tips|i know (how|what i'm doing)|less talking|talk less|keep it short|too much talking|fewer tips|don't want (to hear )?(the )?tips)\b"#) {
@@ -173,7 +179,7 @@ enum CoachingStyle {
     /// Coach's reply to the change: short, and nothing at all for quiet.
     static func acknowledgement(_ change: Change) -> String? {
         switch change {
-        case .tips(.quiet): return nil
+        case .tips(.quiet), .hush: return nil
         case .tips(.brief): return "Got it. I'll keep it short."
         case .tips(.full): return "You got it. I'll coach you through it."
         case .tone(.calm): return "Got it."

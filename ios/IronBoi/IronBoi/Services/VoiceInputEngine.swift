@@ -86,6 +86,13 @@ final class VoiceInputEngine: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
+        // On the phone where it can: the mic can be open for a whole
+        // workout, so keep that audio off the network (and off a weak gym
+        // connection).
+        if recognizer?.supportsOnDeviceRecognition == true {
+            request.requiresOnDeviceRecognition = true
+        }
+        request.contextualStrings = ["MYO", "Coach", "set done", "sets done", "reps"]
         self.request = request
         transcript = ""
 

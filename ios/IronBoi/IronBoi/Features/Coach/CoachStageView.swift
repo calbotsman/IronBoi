@@ -26,6 +26,12 @@ struct CoachStageView: View {
     @State private var lessonPlan: LessonPlan?
     /// The beat the body is acting out right now.
     @State private var lessonCue: LessonCue?
+    /// When Coach last stopped talking — a bare "stop" right after means
+    /// "stop talking"; long after, it's a lyric.
+    @State private var voiceStoppedAt: Date?
+    /// When Coach last asked you something — mid-workout, an answer
+    /// doesn't need "MYO" in front of it.
+    @State private var askedAt: Date?
     /// Message ids that existed when a voice turn was sent; the first new
     /// finished coach message after that is the reply to read aloud.
     @State private var awaitingReplyAfter: Set<String>?
@@ -296,6 +302,7 @@ struct CoachStageView: View {
                 // Ask out loud too; "yes" / "just today" answers it.
                 let line = (tone == .hype ? "Great work! " : "Nice work. ")
                     + "You changed a few things today. Want to keep them for next time?"
+                askedAt = Date()
                 if speaksReplies, tips != .quiet {
                     voice.speak(line, messageId: "local-\(UUID().uuidString)")
                 } else {
@@ -306,6 +313,7 @@ struct CoachStageView: View {
             }
         }
         .onChange(of: voice.isSpeaking) { _, speaking in
+            if !speaking { voiceStoppedAt = Date() }
             if !speaking, let plan = lessonPlan {
                 // Let the last "like this" reps finish, then hand back.
                 Task {
@@ -620,7 +628,11 @@ struct CoachStageView: View {
 
     /// Every finished utterance comes here. Mid-workout, counting and weight
     /// changes are handled on the phone; everything else goes to Coach.
-    private func handleUtterance(_ text: String) {
+    private func handleUtterance(_ heard: String) {
+        // "MYO, add curls" → "add curls". Mid-workout, saying MYO's name is
+        // what sends a free-form question to the coach.
+        let addressed = Self.addressesCoach(heard)
+        let text = addressed ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
         if !appModel.pendingSessionChanges.isEmpty, let keep = Self.yesOrNo(text) {
             if keep {
@@ -632,7 +644,10 @@ struct CoachStageView: View {
             }
             return
         }
-        if let workout = appModel.activeWorkout, repCount == 0,
+        // A long run of words with no pause is music or a conversation
+        // nearby, not a command.
+        let short = text.split(separator: " ").count <= 14
+        if let workout = appModel.activeWorkout, repCount == 0, short,
            let edit = WorkoutEdit.parse(text, exercises: workout.exercises, current: currentExerciseIndex) {
             apply(edit)
             return
@@ -648,7 +663,7 @@ struct CoachStageView: View {
                 restartHandledLocally = true
                 resumeListening()
                 return
-            } else if let logged = WorkoutVoice.setsLogged(in: text), let index = currentExerciseIndex,
+            } else if short, let logged = WorkoutVoice.setsLogged(in: text), let index = currentExerciseIndex,
                       let exercise = currentExercise {
                 // You didn't count — "set done", "two sets done".
                 let left = exercise.targetSets - exercise.completedSetCount
@@ -661,7 +676,7 @@ struct CoachStageView: View {
                 let head = count == 1 ? "Set \(last ?? 1) done." : "\(count) sets logged."
                 confirm(setDoneLine(head, exerciseIndex: index))
                 return
-            } else if let change = WorkoutVoice.weightChange(in: text), let index = currentExerciseIndex,
+            } else if short, let change = WorkoutVoice.weightChange(in: text), let index = currentExerciseIndex,
                       let exercise = currentExercise {
                 let now = appModel.workingWeight(for: exercise)
                 let next: Double
@@ -674,8 +689,32 @@ struct CoachStageView: View {
                 confirm("\(Self.short(exercise.name)) at \(LiveWorkoutCard.pounds(max(0, next))) pounds.")
                 return
             }
+            // Mid-workout the mic hears the whole gym — music, other people.
+            // Only what's said to MYO (or an answer to its question) goes to
+            // the coach; everything else is ignored.
+            let justAsked = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
+            guard addressed || justAsked else {
+                restartHandledLocally = true
+                resumeListening()
+                return
+            }
         }
+        askedAt = nil
         send(text, spoken: true)
+    }
+
+    private static let addressPattern = #"^\W*(hey |hi |ok |okay |yo )?(myo|my o|my oh|mayo|mio|meo|miyo|coach)\b[\s,.!?]*"#
+
+    /// Starts with MYO's name (as the recognizer tends to hear it) or "coach".
+    private static func addressesCoach(_ text: String) -> Bool {
+        text.lowercased().range(of: addressPattern, options: .regularExpression) != nil
+    }
+
+    private static func strippingAddress(_ text: String) -> String {
+        let lower = text.lowercased()
+        guard let range = lower.range(of: addressPattern, options: .regularExpression) else { return text }
+        let cut = lower.distance(from: lower.startIndex, to: range.upperBound)
+        return String(text.dropFirst(cut)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Live: each number you say moves the count, carrying across pauses.
@@ -961,8 +1000,12 @@ struct CoachStageView: View {
     /// Coach changes how it talks, says so in a word (or not at all), and
     /// keeps listening. True when that's all you said.
     private func applyStyleChange(in text: String) -> Bool {
-        guard let change = CoachingStyle.change(in: text) else { return false }
+        let justSpoke = voice.isSpeaking || cutIn
+            || (voiceStoppedAt.map { Date().timeIntervalSince($0) < 5 } ?? false)
+        guard let change = CoachingStyle.change(in: text, coachJustSpoke: justSpoke) else { return false }
         switch change {
+        case .hush:
+            endLesson()
         case .tips(let level):
             tipsSetting = level.rawValue
             if level != .full { endLesson() }
@@ -1039,6 +1082,7 @@ struct CoachStageView: View {
         }) else { return }
         awaitingReplyAfter = nil
         guard conversationActive, !voiceInput.isListening else { return }
+        if reply.content.contains("?") { askedAt = Date() }
         if speaksReplies {
             voice.speak(reply.content, messageId: reply.id)
             // Keep the mic open under Coach only where its voice is cancelled

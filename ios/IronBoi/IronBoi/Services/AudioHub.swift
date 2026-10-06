@@ -22,8 +22,7 @@ final class AudioHub {
     func start() throws {
         let session = AVAudioSession.sharedInstance()
         if session.category != .playAndRecord {
-            try session.setCategory(.playAndRecord, mode: .default,
-                                    options: [.defaultToSpeaker, .allowBluetooth, .duckOthers])
+            try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
@@ -34,8 +33,10 @@ final class AudioHub {
             do {
                 try engine.inputNode.setVoiceProcessingEnabled(true)
                 if #available(iOS 17.0, *) {
+                    // Your music dips only while someone's actually talking
+                    // — Coach or you — not for the whole time the mic is open.
                     engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration =
-                        .init(enableAdvancedDucking: false, duckingLevel: .min)
+                        .init(enableAdvancedDucking: true, duckingLevel: .mid)
                 }
                 echoCancelling = true
             } catch {
@@ -49,6 +50,19 @@ final class AudioHub {
             engine.prepare()
             try engine.start()
         }
+    }
+
+    /// Plays alongside your music rather than stopping it. Bluetooth stays
+    /// in its full-quality music mode (A2DP) — the old hands-free mode
+    /// turned Spotify into phone-call audio for the whole workout. On iOS 26
+    /// AirPods that support it record at full quality too; otherwise the
+    /// phone's own mic listens.
+    private static var categoryOptions: AVAudioSession.CategoryOptions {
+        var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers, .allowBluetoothA2DP]
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) { options.insert(.bluetoothHighQualityRecording) }
+        #endif
+        return options
     }
 
     /// Plays one buffer of Coach's voice; returns when it has been heard (or
