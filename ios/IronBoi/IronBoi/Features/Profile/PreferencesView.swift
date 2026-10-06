@@ -129,12 +129,20 @@ struct PreferencesView: View {
             MyoHairline()
             navRow(title: "History", detail: historyDetail, highlight: false,
                    systemImage: "chart.bar") { RecordView() }
+            MyoHairline()
+            navRow(title: "Conversation", detail: conversationDetail, highlight: false,
+                   systemImage: "text.bubble") { ConversationView() }
         }
     }
 
     private var planDetail: String {
         if appModel.activeWorkout != nil { return "Workout in progress" }
         return appModel.currentWorkoutPlan == nil ? "No plan yet" : "This week's sessions"
+    }
+
+    private var conversationDetail: String {
+        let count = appModel.messages.count
+        return count == 0 ? "Nothing yet" : "Everything you and Coach have said"
     }
 
     private var historyDetail: String {

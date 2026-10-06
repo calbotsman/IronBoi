@@ -82,7 +82,10 @@ enum OrbPhase: Equatable {
 /// body sits at `anchor` and droplets start just below the bottom edge.
 final class OrbModel {
     private static let maxDrops = 16
-    private let baseR: Float = 0.36, levelR: Float = 0.18
+    /// MYO reads bigger than orb-lab's: the blob and the person it becomes
+    /// scale together.
+    private static let size: Float = 1.25
+    private let baseR: Float = 0.36 * OrbModel.size, levelR: Float = 0.18
     private let lobeGains = SIMD3<Float>(0.10, 0.08, 0.03)
     private let lean: Float = 0.16, squashGain: Float = 0.1
     private let dropSize: Float = 0.05, dropSpeed: Float = 1.3
@@ -120,14 +123,17 @@ final class OrbModel {
     private var life = WorkoutLife()
     /// Scaled with the body, so the person shrinks with the blob when a card
     /// takes the space below.
-    var jointArray: [Float] { joints.flatMap { [$0.x * bodyScale, $0.y * bodyScale, $0.z * bodyScale] } }
+    var jointArray: [Float] {
+        let s = bodyScale * Self.size
+        return joints.flatMap { [$0.x * s, $0.y * s, $0.z * s] }
+    }
 
     /// `anchor`: where the body rests, in shader units. `move`/`moveTime`:
     /// the demonstration playing, if any, and how far into it.
     func step(phase: OrbPhase, you: VoiceReading, agent: VoiceReading,
               size: CGSize, anchor: SIMD2<Float>, move: BodyMove?, moveTime: Float,
               loop: ExerciseMotion? = nil, inWorkout: Bool = false, setsDone: Int = 0,
-              demo: ExerciseMotion? = nil,
+              demo: ExerciseMotion? = nil, spawnY: Float? = nil,
               scale: Float = 1, reduceMotion: Bool) {
         bodyScale += (scale - bodyScale) * 0.15
         let now = CACurrentMediaTime()
@@ -156,7 +162,7 @@ final class OrbModel {
         if spin > 2 * .pi * 1000 { spin -= 2 * .pi * 1000 }
 
         // Your syllables → droplets rising from just below the screen.
-        let bottom = -Float(size.height / max(min(size.width, size.height), 1)) - 0.1
+        let bottom = spawnY ?? -Float(size.height / max(min(size.width, size.height), 1)) - 0.1
         if you.onsets != lastYouOnsets {
             if you.active, !reduceMotion {
                 drops[nextDrop] = SIMD4(anchor.x + Float.random(in: -0.5...0.5) * 0.9, bottom,
@@ -230,6 +236,8 @@ struct OrbView: View {
     var inWorkout = false
     /// A lift to show right now, continuously (the intro's choreography).
     var demo: ExerciseMotion? = nil
+    /// Where bloops start, in points from the top. Default: below the screen.
+    var bloopStart: CGFloat? = nil
     var setsDone = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -244,6 +252,7 @@ struct OrbView: View {
                                    size: size, anchor: anchor(in: size),
                                    move: director.move, moveTime: director.elapsed,
                                    loop: loop, inWorkout: inWorkout, setsDone: setsDone, demo: demo,
+                                   spawnY: bloopStart.map { -Float(($0 - size.height / 2) / (min(size.width, size.height) / 2)) },
                                    scale: Float(scale), reduceMotion: reduceMotion)
                 Rectangle()
                     .fill(Color.white)

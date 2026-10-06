@@ -14,7 +14,6 @@ struct CoachStageView: View {
     @ObservedObject var voice: CoachVoice
     @ObservedObject var director: BodyDirector
     var askedForWorkout = 0
-    @Binding var showTranscript: Bool
     @Binding var showKeyboard: Bool
 
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
@@ -142,6 +141,9 @@ struct CoachStageView: View {
                 } else {
                     caption
                         .padding(.horizontal, MyoTheme.Spacing.lg)
+                    // Keeps the status line up near the body; the chips and
+                    // controls stay at the bottom.
+                    Spacer(minLength: 0).frame(maxHeight: 160)
                     if phase == .rest {
                         quickTaps
                             .padding(.top, MyoTheme.Spacing.md)
@@ -334,14 +336,15 @@ struct CoachStageView: View {
 
     /// Ways to talk to MYO, as one-tap actions. Tap and it starts.
     private var quickTaps: some View {
-        HStack(spacing: 6) {
+        ScrollView(.horizontal) {
+            HStack(spacing: 6) {
                 if appModel.activeWorkout == nil {
-                    quickTap("Start workout", systemImage: "play.fill") { beginWorkout() }
+                    quickTap("Start my workout", systemImage: "play.fill") { beginWorkout() }
                     quickTap("Today's workout", systemImage: "list.bullet") { showTodayCard = true }
                 } else {
                     quickTap("Resume", systemImage: "play.fill") { workoutExpanded = true }
                 }
-                quickTap("Adjust", systemImage: "slider.horizontal.3") {
+                quickTap("Adjust my workout", systemImage: "slider.horizontal.3") {
                     // Coach asks what needs to change; the conversation stays
                     // open so you can just answer out loud.
                     conversationActive = true
@@ -349,7 +352,9 @@ struct CoachStageView: View {
                     send("I need to adjust my workout.", spoken: true)
                 }
             }
-        .padding(.horizontal, MyoTheme.Spacing.md)
+            .padding(.horizontal, MyoTheme.Spacing.md)
+        }
+        .scrollIndicators(.hidden)
     }
 
     private func quickTap(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -363,6 +368,8 @@ struct CoachStageView: View {
                     .foregroundStyle(MyoTheme.Colors.coachAmber)
                 Text(title)
                     .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    .fixedSize()
                     .foregroundStyle(MyoColor.Text.primary.color)
             }
             .padding(.horizontal, 11)
@@ -381,10 +388,6 @@ struct CoachStageView: View {
             }
 
             Spacer()
-
-            sideButton(systemImage: "text.bubble", label: "Conversation") {
-                showTranscript = true
-            }
         }
     }
 

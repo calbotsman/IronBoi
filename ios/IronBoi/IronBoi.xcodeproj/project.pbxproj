@@ -20,6 +20,7 @@
 		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
 		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
+		517EC3482C4841986CFB46AD /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC8A7F0156E886437433E203 /* ConversationView.swift */; };
 		51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */; };
 		56407351422DBC9891A5C08B /* OneBodyMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */; };
 		572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */; };
@@ -84,6 +85,7 @@
 		A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryFact.swift; sourceTree = "<group>"; };
 		A4734F76A950FA7C6ECA47EC /* WorkoutLogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLogModels.swift; sourceTree = "<group>"; };
 		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AC8A7F0156E886437433E203 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		CD792AC9EF71C813B550654E /* CoachStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachStageView.swift; sourceTree = "<group>"; };
@@ -184,6 +186,7 @@
 			children = (
 				CD792AC9EF71C813B550654E /* CoachStageView.swift */,
 				8251B627C5781604E47176FE /* CoachView.swift */,
+				AC8A7F0156E886437433E203 /* ConversationView.swift */,
 				451607DCC308F24BECF26C07 /* LiveWorkoutCard.swift */,
 				349CFA8575361D4715FDABD9 /* TodayWorkoutCard.swift */,
 				2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */,
@@ -380,6 +383,7 @@
 				772BF83112E39339AC2E9561 /* CoachStageView.swift in Sources */,
 				61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */,
 				8FB00210D5060ADFCBB12BBF /* CoachVoice.swift in Sources */,
+				517EC3482C4841986CFB46AD /* ConversationView.swift in Sources */,
 				08454E67831E64CF5B0DA3AD /* DossierComponents.swift in Sources */,
 				D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */,
 				7F4F9205CA0F79F743E265AE /* ExerciseMotion.swift in Sources */,

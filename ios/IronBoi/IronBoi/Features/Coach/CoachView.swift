@@ -6,7 +6,6 @@ struct CoachView: View {
     @StateObject private var coachVoice = CoachVoice()
     @StateObject private var bodyDirector = BodyDirector()
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
-    @State private var showTranscript = false
     @State private var showKeyboard = false
     /// Bumped when a typed message asks for today's workout; the stage shows the card.
     @State private var askedForWorkout = 0
@@ -24,22 +23,12 @@ struct CoachView: View {
                         voice: coachVoice,
                         director: bodyDirector,
                         askedForWorkout: askedForWorkout,
-                        showTranscript: $showTranscript,
                         showKeyboard: $showKeyboard
                     )
                     .overlay(alignment: .topTrailing) {
                         ProfileButton()
                             .padding(.trailing, MyoTheme.Spacing.sm)
                     }
-                    // The full conversation: a card floating over the coach,
-                    // not a drawer. Tap outside or × to put it away.
-                    .overlay {
-                        if showTranscript {
-                            transcriptCard
-                                .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                        }
-                    }
-                    .animation(MyoTheme.Motion.fade, value: showTranscript)
                 }
             }
             .background(PaperBackground())
@@ -72,63 +61,11 @@ struct CoachView: View {
         }
     }
 
-    private var transcriptCard: some View {
-        ZStack {
-            // Paper scrim — the coach stays visible behind, dimmed.
-            MyoTheme.Colors.cream.opacity(0.72)
-                .ignoresSafeArea()
-                .onTapGesture { showTranscript = false }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("Close conversation")
-
-            VStack(spacing: 0) {
-                HStack(spacing: MyoTheme.Spacing.sm) {
-                    MyoSectionLabel(text: "Conversation")
-                    Spacer()
-                    Button {
-                        speaksReplies.toggle()
-                        if !speaksReplies { coachVoice.stop() }
-                    } label: {
-                        Image(systemName: speaksReplies ? "speaker.wave.2" : "speaker.slash")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(MyoColor.Text.secondary.color)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(speaksReplies ? "Mute Coach's voice" : "Unmute Coach's voice")
-                    Button {
-                        showTranscript = false
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(MyoColor.Text.secondary.color)
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Close conversation")
-                }
-                .padding(.leading, MyoTheme.Spacing.md)
-                .padding(.trailing, MyoTheme.Spacing.xs)
-
-                MyoHairline()
-
-                messageList
-            }
-            .frame(maxWidth: .infinity)
-            .myoCard()
-            .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 24, y: 8)
-            .padding(.horizontal, MyoTheme.Spacing.md)
-            .padding(.vertical, MyoTheme.Spacing.xxl)
-        }
-    }
-
-    /// Static meters for the intro orb — nobody's talking yet.
+    /// Static meter for the intro orb's coach side — it never speaks there.
     private static let quietCoach = VoiceMeter()
     @StateObject private var introBody = BodyDirector()
     @StateObject private var intro = IntroChoreography()
 
-    /// The intro: words bloop in and merge, MYO stands up into a lift,
-    /// melts back to a blob, more bloops, another lift.
     private var signedOutView: some View {
         ZStack {
             GeometryReader { geo in
@@ -139,7 +76,9 @@ struct CoachView: View {
                     focus: CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.36),
                     director: introBody,
                     scale: 0.9,
-                    demo: intro.demo
+                    demo: intro.demo,
+                    // Rise from just above the wordmark, not through the text.
+                    bloopStart: geo.size.height * 0.56
                 )
             }
             .ignoresSafeArea()
