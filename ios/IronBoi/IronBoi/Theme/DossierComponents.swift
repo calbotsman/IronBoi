@@ -180,12 +180,22 @@ extension View {
     /// your finger); frosted material on older systems. `tint` warms it.
     @ViewBuilder
     func myoGlass(tint: Color? = nil, in shape: some Shape = Capsule()) -> some View {
+        // compiler(>=6.2) ⇔ Xcode 26 SDK, where Glass exists; CI's older
+        // Xcode compiles only the fallback.
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *) {
             glassEffect(tint.map { Glass.regular.tint($0).interactive() } ?? Glass.regular.interactive(), in: shape)
         } else {
-            background(.ultraThinMaterial, in: shape)
-                .background((tint ?? .clear).opacity(0.35), in: shape)
-                .overlay(shape.stroke(Color.white.opacity(0.5), lineWidth: 0.75))
+            frosted(tint: tint, in: shape)
         }
+        #else
+        frosted(tint: tint, in: shape)
+        #endif
+    }
+
+    private func frosted(tint: Color?, in shape: some Shape) -> some View {
+        background(.ultraThinMaterial, in: shape)
+            .background((tint ?? .clear).opacity(0.35), in: shape)
+            .overlay(shape.stroke(Color.white.opacity(0.5), lineWidth: 0.75))
     }
 }
