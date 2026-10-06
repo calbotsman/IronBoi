@@ -56,6 +56,14 @@ struct CoachStageView: View {
         return ExerciseMotion.match(current.name)
     }
 
+    /// The stage's size, for placing the body when nothing else is open.
+    @State private var stageSize: CGSize = .zero
+
+    /// Nothing below the body: it sits near the middle of the screen with
+    /// the status line pinned just under it.
+    private var centered: Bool { !cardOpen && appModel.pendingPlanAdjustmentProposal == nil }
+    private var restFocus: CGPoint { CGPoint(x: stageSize.width / 2, y: stageSize.height * 0.42) }
+
     /// Any card that needs the space below the body.
     private var cardOpen: Bool {
         !appModel.pendingBaselineSuggestions.isEmpty || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
@@ -92,10 +100,12 @@ struct CoachStageView: View {
                     phase: phase,
                     you: voiceInput.meter,
                     agent: voice.meter,
-                    focus: orbSlot.map { CGPoint(x: $0.midX - origin.x, y: $0.midY - origin.y) },
+                    focus: centered
+                        ? CGPoint(x: restFocus.x - origin.x, y: restFocus.y - origin.y)
+                        : orbSlot.map { CGPoint(x: $0.midX - origin.x, y: $0.midY - origin.y) },
                     director: director,
                     // Fit the body to its slot when a card squeezes it.
-                    scale: orbSlot.map { min(1, max(0.4, $0.height / 460)) } ?? 1,
+                    scale: centered ? 1 : orbSlot.map { min(1, max(0.4, $0.height / 460)) } ?? 1,
                     loop: currentMotion,
                     inWorkout: appModel.activeWorkout != nil,
                     setsDone: appModel.activeWorkout?.exercises.reduce(0) { $0 + $1.completedSetCount } ?? 0
@@ -139,11 +149,10 @@ struct CoachStageView: View {
                     .padding(.horizontal, MyoTheme.Spacing.md)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else {
-                    caption
-                        .padding(.horizontal, MyoTheme.Spacing.lg)
-                    // Keeps the status line up near the body; the chips and
-                    // controls stay at the bottom.
-                    Spacer(minLength: 0).frame(maxHeight: 160)
+                    if !centered {
+                        caption
+                            .padding(.horizontal, MyoTheme.Spacing.lg)
+                    }
                     if phase == .rest {
                         quickTaps
                             .padding(.top, MyoTheme.Spacing.md)
@@ -162,6 +171,23 @@ struct CoachStageView: View {
                     .padding(.horizontal, MyoTheme.Spacing.lg)
                     .padding(.top, MyoTheme.Spacing.md)
                     .padding(.bottom, MyoTheme.Spacing.sm)
+            }
+        }
+        .overlay {
+            if centered {
+                // Pinned just under the body (radius ≈ 0.45 of half the short side).
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
+                    caption.padding(.horizontal, MyoTheme.Spacing.lg)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { stageSize = geo.size }
+                    .onChange(of: geo.size) { _, size in stageSize = size }
             }
         }
         .coordinateSpace(name: Self.space)
