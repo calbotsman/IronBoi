@@ -453,6 +453,8 @@ struct CoachStageView: View {
                 endConversation()
                 showKeyboard = true
             }
+            // Scrolled pills slide under the keyboard's glass, not over it.
+            .zIndex(1)
             if phase == .rest {
                 quickTaps.transition(.opacity)
             } else {
