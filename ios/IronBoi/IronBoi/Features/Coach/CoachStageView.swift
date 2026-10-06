@@ -153,11 +153,7 @@ struct CoachStageView: View {
                         caption
                             .padding(.horizontal, MyoTheme.Spacing.lg)
                     }
-                    if phase == .rest {
-                        quickTaps
-                            .padding(.top, MyoTheme.Spacing.md)
-                            .transition(.opacity)
-                    }
+                    Spacer(minLength: 0)
                     if let workout = appModel.activeWorkout {
                         // Begin workout drops the card down to this bar.
                         LiveWorkoutCard(workout: workout, expanded: $workoutExpanded)
@@ -168,7 +164,7 @@ struct CoachStageView: View {
                 }
 
                 controls
-                    .padding(.horizontal, MyoTheme.Spacing.lg)
+                    .padding(.leading, MyoTheme.Spacing.lg)
                     .padding(.top, MyoTheme.Spacing.md)
                     .padding(.bottom, MyoTheme.Spacing.sm)
             }
@@ -179,6 +175,11 @@ struct CoachStageView: View {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
                     caption.padding(.horizontal, MyoTheme.Spacing.lg)
+                    if phase == .rest, appModel.activeWorkout == nil {
+                        startButton
+                            .padding(.top, MyoTheme.Spacing.lg)
+                            .transition(.opacity)
+                    }
                     Spacer(minLength: 0)
                 }
             }
@@ -351,7 +352,7 @@ struct CoachStageView: View {
                     .multilineTextAlignment(.center)
                     .frame(minHeight: 88, alignment: .top)
             } else {
-                Color.clear.frame(height: 88)
+                Color.clear.frame(height: 4)
             }
         }
     }
@@ -364,23 +365,49 @@ struct CoachStageView: View {
     private var quickTaps: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
+                quickTap("I missed a few workouts", systemImage: "arrow.uturn.backward") {
+                    talk("I missed a few workouts.")
+                }
                 if appModel.activeWorkout == nil {
-                    quickTap("Start my workout", systemImage: "play.fill") { beginWorkout() }
                     quickTap("Today's workout", systemImage: "list.bullet") { showTodayCard = true }
-                } else {
-                    quickTap("Resume", systemImage: "play.fill") { workoutExpanded = true }
                 }
                 quickTap("Adjust my workout", systemImage: "slider.horizontal.3") {
-                    // Coach asks what needs to change; the conversation stays
-                    // open so you can just answer out loud.
-                    conversationActive = true
-                    silentRestarts = []
-                    send("I need to adjust my workout.", spoken: true)
+                    talk("I need to adjust my workout.")
                 }
             }
-            .padding(.horizontal, MyoTheme.Spacing.md)
+            .padding(.trailing, MyoTheme.Spacing.lg)
         }
         .scrollIndicators(.hidden)
+    }
+
+    /// Says it for you, then keeps listening so you can answer out loud.
+    private func talk(_ line: String) {
+        conversationActive = true
+        silentRestarts = []
+        send(line, spoken: true)
+    }
+
+    /// The one big action, right under the coach: jump into today's session.
+    private var startButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            beginWorkout()
+        } label: {
+            HStack(spacing: MyoTheme.Spacing.sm) {
+                if appModel.isWorkoutBusy {
+                    ProgressView().tint(MyoTheme.Colors.cream)
+                } else {
+                    Image(systemName: "play.fill").font(.footnote.weight(.bold))
+                }
+                Text("Start my workout").font(.body.weight(.semibold))
+            }
+            .foregroundStyle(MyoTheme.Colors.cream)
+            .padding(.horizontal, 26)
+            .frame(height: 52)
+            .background(MyoTheme.Colors.ink, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(appModel.isWorkoutBusy)
     }
 
     private func quickTap(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -407,13 +434,16 @@ struct CoachStageView: View {
     }
 
     private var controls: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: MyoTheme.Spacing.sm) {
             sideButton(systemImage: "keyboard", label: "Type instead") {
                 endConversation()
                 showKeyboard = true
             }
-
-            Spacer()
+            if phase == .rest {
+                quickTaps.transition(.opacity)
+            } else {
+                Spacer()
+            }
         }
     }
 
