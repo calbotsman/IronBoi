@@ -12,6 +12,9 @@ final class CoachVoice: NSObject, ObservableObject {
     @Published private(set) var speakingMessageId: String?
     /// The sentence being spoken right now — a subtitle, not a transcript.
     @Published private(set) var caption = ""
+    /// Which line of a `speak(lines:)` is playing, so the body can act it out.
+    @Published private(set) var lineIndex = 0
+    private var lines: [String] = []
 
     let meter = VoiceMeter()
     /// Text in, WAV out. Set by the screen that owns the backend connection.
@@ -35,18 +38,33 @@ final class CoachVoice: NSObject, ObservableObject {
     func speak(_ text: String, messageId: String) {
         let spoken = Self.speakable(text)
         guard !spoken.isEmpty else { return }
+        play(Self.chunks(spoken), messageId: messageId)
+        lines = []
+    }
+
+    /// Speaks these lines one after another, each its own request, keeping
+    /// `lineIndex` on the one playing — for a lesson the body acts out.
+    func speak(lines: [String], messageId: String) {
+        let spoken = lines.map(Self.speakable).filter { !$0.isEmpty }
+        guard !spoken.isEmpty else { return }
+        play(spoken, messageId: messageId)
+        self.lines = spoken
+    }
+
+    private func play(_ chunks: [String], messageId: String) {
+        let spoken = chunks.joined(separator: " ")
         stop()
         generation += 1
         let gen = generation
         speakingMessageId = messageId
         caption = ""
+        lineIndex = 0
         isSpeaking = true
 
         guard let fetchAudio else {
             speakOnDevice(spoken)
             return
         }
-        let chunks = Self.chunks(spoken)
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -71,6 +89,7 @@ final class CoachVoice: NSObject, ObservableObject {
                 next = index + 1 < chunks.count ? Task { try await fetchAudio(chunks[index + 1]) } : nil
                 guard gen == self.generation else { return }
                 self.caption = chunk
+                self.lineIndex = index
                 await self.hub.play(buffer)
             }
             if gen == self.generation { self.finish() }
@@ -150,6 +169,7 @@ final class CoachVoice: NSObject, ObservableObject {
         guard let range = sentenceRanges.first(where: { NSLocationInRange(location, $0) }) else { return }
         let sentence = (text as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
         if sentence != caption { caption = sentence }
+        if let line = lines.firstIndex(where: { $0.contains(sentence) }), line != lineIndex { lineIndex = line }
     }
 
     private static func sentenceRanges(in text: String) -> [NSRange] {

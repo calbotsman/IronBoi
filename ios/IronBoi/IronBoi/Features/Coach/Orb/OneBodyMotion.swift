@@ -44,6 +44,9 @@ struct BodyPose {
     /// How side-on the figure is; drives the tucked-arm shading.
     var side: Float
     var label: String
+    /// What's held, and whether there's a bench underneath.
+    var gear: Gear = .none
+    var bench = false
 }
 
 enum OneBodyMotion {
@@ -62,14 +65,63 @@ enum OneBodyMotion {
     private static func mix(_ a: Float, _ b: Float, _ t: Float) -> Float { a + (b - a) * t }
 
     static func standing(_ time: Float = 0) -> [Joint] {
-        let breath = sin(time * 1.35) * 0.014
-        let sway = sin(time * 0.85) * 0.018
+        // Breathing in is quicker than breathing out, and the weight drifts
+        // rather than swings: hips shift, the chest and head carry on past
+        // them, and the hands don't hang in perfect step.
+        let breath = breathing(time) * 0.016
+        let sway = (sin(time * 0.85) * 0.6 + sin(time * 0.37 + 1.3) * 0.3 + sin(time * 1.9 + 0.4) * 0.1) * 0.02
+        let drift = sin(time * 0.53 + 2.1) * 0.006
         return [
-            Joint(sway * 1.3, 0.50 + breath, 0.165), Joint(sway, 0.26 + breath, 0.185), Joint(sway * 0.35, 0.005, 0.17),
-            Joint(-0.16 + sway, 0.24 + breath, 0.10), Joint(-0.24 + sway * 0.5, 0.10, 0.105), Joint(-0.275, -0.065 + breath * 0.5, 0.10),
-            Joint(0.16 + sway, 0.24 + breath, 0.10), Joint(0.25 + sway * 0.5, 0.10, 0.105), Joint(0.275, -0.065 - breath * 0.4, 0.10),
-            Joint(-0.13, -0.19, 0.115), Joint(-0.15, -0.385, 0.11), Joint(0.13, -0.19, 0.115), Joint(0.15, -0.385, 0.11),
+            Joint(sway * 1.3, 0.50 + breath, 0.165), Joint(sway, 0.26 + breath, 0.185), Joint(sway * 0.45, 0.005, 0.17),
+            Joint(-0.16 + sway, 0.24 + breath, 0.10), Joint(-0.24 + sway * 0.5, 0.10, 0.105), Joint(-0.275 + drift, -0.065 + breath * 0.5, 0.10),
+            Joint(0.16 + sway, 0.24 + breath, 0.10), Joint(0.25 + sway * 0.5, 0.10, 0.105), Joint(0.275 + drift * 0.6, -0.065 - breath * 0.4, 0.10),
+            Joint(-0.13 + sway * 0.2, -0.19, 0.115), Joint(-0.15, -0.385, 0.11), Joint(0.13 + sway * 0.2, -0.19, 0.115), Joint(0.15, -0.385, 0.11),
         ]
+    }
+
+    /// -1…1 over a ~4.6 s breath: in over 40% of it, out over the rest.
+    static func breathing(_ time: Float) -> Float {
+        let x = time / 4.6 - floor(time / 4.6)
+        return x < 0.4 ? smooth(x / 0.4) * 2 - 1 : 1 - smooth((x - 0.4) / 0.6) * 2
+    }
+
+    /// How far into one rep a lifter is (0 = start pose, 1 = end pose) at
+    /// `x`, the fraction of the rep elapsed. The lowering is slow and
+    /// controlled, there's a beat at the turn, and the drive is quicker —
+    /// how a coach would show it, not a metronome. `variation` (0…1, one
+    /// value per rep) nudges the timing so no two reps are identical.
+    static func repTempo(_ x: Float, lowersFirst: Bool, variation: Float) -> Float {
+        let v = variation - 0.5
+        if lowersFirst {
+            // Hold at the top, lower, pause at the bottom, drive, settle.
+            let lowerEnd = 0.54 + v * 0.06
+            let driveStart = lowerEnd + 0.08
+            let driveEnd = driveStart + 0.25 + v * 0.05
+            if x < 0.05 { return 0 }
+            if x < lowerEnd { return smooth((x - 0.05) / (lowerEnd - 0.05)) }
+            if x < driveStart { return 1 }
+            if x < driveEnd { return 1 - drive((x - driveStart) / (driveEnd - driveStart)) }
+            return 0
+        }
+        // Drive, squeeze at the top, lower slowly, a breath at the bottom.
+        let driveEnd = 0.31 + v * 0.05
+        let lowerStart = driveEnd + 0.10
+        if x < 0.05 { return 0 }
+        if x < driveEnd { return drive((x - 0.05) / (driveEnd - 0.05)) }
+        if x < lowerStart { return 1 }
+        if x < 0.93 { return 1 - smooth((x - lowerStart) / (0.93 - lowerStart)) }
+        return 0
+    }
+
+    /// The push: gets moving early and decelerates into lockout.
+    private static func drive(_ x: Float) -> Float {
+        smooth(pow(min(max(x, 0), 1), 0.75))
+    }
+
+    /// A stable 0…1 per rep, so each rep's variation holds still while it plays.
+    static func variation(_ rep: Float) -> Float {
+        let s = sin(rep * 12.9898 + 78.233) * 43758.5453
+        return s - floor(s)
     }
 
     static func crouching() -> [Joint] {
@@ -114,7 +166,7 @@ enum OneBodyMotion {
 
     /// A continuous Catmull-Rom curve through poses. Going down, hands lead
     /// and the heavier middle and head follow; coming up, the reverse.
-    private static func flow(_ poses: [[Joint]], _ progress: Float, rising: Bool = false) -> [Joint] {
+    static func flow(_ poses: [[Joint]], _ progress: Float, rising: Bool = false) -> [Joint] {
         let delays: [Float] = rising
             ? [0.075, 0.045, 0, 0.06, 0.08, 0.11, 0.06, 0.08, 0.11, 0.01, 0, 0.01, 0]
             : [0.055, 0.04, 0.08, 0.015, 0, 0, 0.015, 0, 0, 0.085, 0.095, 0.085, 0.095]
@@ -149,14 +201,14 @@ enum OneBodyMotion {
         }
         if t < pushupEnd {
             let cycle = (t - pushupStart) / repDuration
-            let depth = (1 - cos(cycle * .pi * 2)) / 2
+            let depth = repTempo(cycle - floor(cycle), lowersFirst: true, variation: variation(floor(cycle)))
             // A small wave travels through the mass while contacts stay planted.
             let envelope = pow(sin(cycle * .pi / 3), 2)
             let wave = sin(cycle * .pi * 2) * envelope
             let hip = min(max(depth - wave * 0.065, 0), 1)
             let head = min(max(depth - wave * 0.11, 0), 1)
             let rep = min(3, Int(cycle) + 1)
-            let phase = cycle.truncatingRemainder(dividingBy: 1) < 0.5 ? "Lower" : "Push away"
+            let phase = cycle.truncatingRemainder(dividingBy: 1) < 0.58 ? "Lower" : "Push away"
             return BodyPose(joints: plank(depth, hipDepth: hip, headDepth: head), form: form, side: 1,
                             label: "\(rep) / 3 · \(phase)")
         }
@@ -183,7 +235,7 @@ enum OneBodyMotion {
         }
         if t < plankHoldEnd {
             // Long and still; only the breath moves, a little sag and lift.
-            let breath = (1 - cos((t - pushupStart) * 1.3)) / 2 * 0.06
+            let breath = (breathing(t - pushupStart) + 1) / 2 * 0.05
             let left = Int(ceil(plankHoldEnd - t))
             return BodyPose(joints: plank(0, hipDepth: breath, headDepth: breath * 0.5), form: form, side: 1,
                             label: "Hold · \(left)")

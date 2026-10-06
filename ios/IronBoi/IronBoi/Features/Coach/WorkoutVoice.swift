@@ -11,7 +11,7 @@ enum WorkoutVoice {
 
     // MARK: - Counting
 
-    private static let numberWords: [String: Int] = [
+    static let numberWords: [String: Int] = [
         "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
         "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
         "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
@@ -56,6 +56,58 @@ enum WorkoutVoice {
         let filler: Set<String> = ["and", "done", "finished", "set", "that's", "it", "last", "the", "got", "rep", "reps", "okay", "ok"]
         let counted = words.filter { Int($0) != nil || numberWords[$0] != nil || soundAlikes[$0] != nil || filler.contains($0) }
         return Double(counted.count) / Double(words.count) >= 0.8 && repCount(in: transcript) > 0
+    }
+
+    /// Mostly numbers (and a little filler) — someone counting, not a
+    /// sentence that happens to contain "12". Doesn't need to start at one:
+    /// a count resumes mid-way after a pause.
+    static func looksLikeCounting(_ transcript: String) -> Bool {
+        let words = tokens(transcript)
+        guard !words.isEmpty else { return false }
+        let filler: Set<String> = ["and", "done", "finished", "set", "that's", "it", "last", "the", "got", "rep", "reps",
+                                   "okay", "ok", "uh", "um", "come", "on", "more"]
+        let counted = words.filter { Int($0) != nil || numberWords[$0] != nil || soundAlikes[$0] != nil || filler.contains($0) }
+        return Double(counted.count) / Double(words.count) >= 0.75
+    }
+
+    // MARK: - Sets without counting
+
+    struct SetsLogged: Equatable {
+        /// How many sets; nil means every set left on this exercise.
+        let sets: Int?
+        /// Reps per set if you said ("set done, eight reps"), else the target.
+        let reps: Int?
+    }
+
+    /// "Set done", "finished that set", "two sets done", "did three sets of
+    /// eight", "all sets done" — for when you didn't count out loud. Needs
+    /// the word "set", so a bare "done" (finishing the workout?) isn't one.
+    static func setsLogged(in transcript: String) -> SetsLogged? {
+        let t = normalized(transcript)
+        func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
+        guard says(#"\bsets?\b"#),
+              says(#"\b(done|finished|finish|complete|completed|did|that's|got|knocked out|logged)\b"#) else { return nil }
+        let reps = number(before: #"\s*(reps?|times)\b"#, in: t) ?? number(after: #"\bsets? of\s+"#, in: t)
+        if says(#"\b(all|every|remaining)( the| my| of my| of the)? sets\b"#) || says(#"\ball done\b"#) {
+            return SetsLogged(sets: nil, reps: reps)
+        }
+        let sets = number(before: #"\s+sets\b"#, in: t) ?? 1
+        guard (1...10).contains(sets) else { return nil }
+        return SetsLogged(sets: sets, reps: reps.flatMap { (1...100).contains($0) ? $0 : nil })
+    }
+
+    /// The number (digits or a word) right before `suffix`.
+    private static func number(before suffix: String, in t: String) -> Int? {
+        guard let range = t.range(of: #"(\d+|[a-z]+)"# + suffix, options: .regularExpression) else { return nil }
+        let word = t[range].split(separator: " ").first.map(String.init) ?? ""
+        return Int(word) ?? numberWords[word] ?? (word == "a" || word == "one" ? 1 : nil)
+    }
+
+    /// The number (digits or a word) right after `prefix`.
+    private static func number(after prefix: String, in t: String) -> Int? {
+        guard let range = t.range(of: prefix + #"(\d+|[a-z]+)"#, options: .regularExpression) else { return nil }
+        let word = t[range].split(separator: " ").last.map(String.init) ?? ""
+        return Int(word) ?? numberWords[word]
     }
 
     // MARK: - Weight

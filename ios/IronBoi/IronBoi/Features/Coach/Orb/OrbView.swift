@@ -68,6 +68,15 @@ final class VoiceMeter: @unchecked Sendable {
     }
 }
 
+/// A lesson beat the body is acting out: ease from `from` into the cue's
+/// position (or show reps) for this lift, starting at `startedAt`.
+struct LessonCue: Equatable {
+    let motion: ExerciseMotion
+    let body: ExerciseLesson.BodyCue
+    let from: Float
+    let startedAt: CFTimeInterval
+}
+
 enum OrbPhase: Equatable {
     case rest, listening, thinking, speaking
 }
@@ -117,10 +126,24 @@ final class OrbModel {
     // The person the body becomes for a move — joints follow the authored
     // pose on springs, heavier joints slower, contact points quickest.
     private var joints = OneBodyMotion.standing()
+    private var jointVelocity = [SIMD2<Float>](repeating: .zero, count: 13)
+    // The equipment: what's out, whether side-on, and how far grown.
+    private var gearShown: Gear = .none
+    private var benchShown = false
+    private var gearSideOn = false
+    private var gearGrow: Float = 0
+    private var gearGrowVelocity: Float = 0
+    private static let maxGearShapes = 16
+    /// 8 floats per shape, padded; kind -1 is skipped.
+    private(set) var gearArray = [Float](repeating: -1, count: OrbModel.maxGearShapes * 8)
+    /// How gooey the join between body and equipment is: stretched while it
+    /// grows out, a slight fillet at the grip once it's out.
+    private(set) var gearBlend: Float = 0.12
     private(set) var form: Float = 0
     private(set) var armDepth: Float = 0
     private var bodyScale: Float = 1
     private var life = WorkoutLife()
+    private var ambientLife = AmbientLife()
     /// Scaled with the body, so the person shrinks with the blob when a card
     /// takes the space below.
     var jointArray: [Float] {
@@ -133,7 +156,9 @@ final class OrbModel {
     func step(phase: OrbPhase, you: VoiceReading, agent: VoiceReading,
               size: CGSize, anchor: SIMD2<Float>, move: BodyMove?, moveTime: Float,
               loop: ExerciseMotion? = nil, inWorkout: Bool = false, setsDone: Int = 0,
-              demo: ExerciseMotion? = nil, spawnY: Float? = nil,
+              demo: ExerciseMotion? = nil, ambient: Bool = false,
+              lesson: LessonCue? = nil, counting: Bool = false, youTalking: Bool = false,
+              spawnY: Float? = nil,
               scale: Float = 1, reduceMotion: Bool) {
         bodyScale += (scale - bodyScale) * 0.15
         let now = CACurrentMediaTime()
@@ -196,8 +221,13 @@ final class OrbModel {
 
         // While you talk (mic on) the coach is a blob — that's how it
         // listens. A named move beats the workout cycle; with neither, blob.
-        let listening = phase == .listening
+        // Mid-workout the mic stays open the whole time, so there it's a
+        // blob only while words are actually being heard — not for gym
+        // noise, not while you count (it does the reps with you), and not
+        // mid-lesson.
+        let listening = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
         if listening { life.rest(until: time + 2) }
+        if phase != .rest { ambientLife.rest(until: time + 1.2) }
         let blob = BodyPose(joints: OneBodyMotion.standing(reduceMotion ? 0 : time), form: 0, side: 0, label: "")
         var pose = blob
         if !listening {
@@ -205,19 +235,126 @@ final class OrbModel {
                 pose = shaped
             } else if let demo, !reduceMotion {
                 pose = demo.frame(at: time)
-            } else if inWorkout, !reduceMotion,
-                      let alive = life.pose(motion: loop, setsDone: setsDone, time: time) {
+            } else if let lesson {
+                let elapsed = Float(CACurrentMediaTime() - lesson.startedAt)
+                switch lesson.body {
+                case .hold(let depth):
+                    // A slow, deliberate move into the position, then still.
+                    let x = min(max(elapsed / 1.4, 0), 1)
+                    let eased = x * x * (3 - 2 * x)
+                    pose = lesson.motion.frame(holding: lesson.from + (depth - lesson.from) * eased, time: time)
+                case .reps:
+                    pose = lesson.motion.frame(at: elapsed)
+                }
+            } else if counting, let loop, !reduceMotion {
+                pose = loop.frame(at: time)
+            } else if inWorkout {
+                if !reduceMotion, let alive = life.pose(motion: loop, setsDone: setsDone, time: time) {
+                    pose = alive
+                }
+            } else if ambient, phase == .rest, !reduceMotion, let alive = ambientLife.pose(time: time) {
                 pose = alive
             }
         }
         let motionEase = reduceMotion ? 1 : 1 - exp(-dt * 7)
         form += (pose.form - form) * motionEase
-        for i in joints.indices {
-            let rate: Float = i == 0 ? 8 : [5, 8, 10, 12].contains(i) ? 16 : 10
-            let follow = reduceMotion ? 1 : 1 - exp(-dt * rate)
-            joints[i] += (pose.joints[i] - joints[i]) * follow
+        moveJoints(toward: pose.joints, dt: dt, reduceMotion: reduceMotion)
+        updateGear(for: pose, dt: dt, reduceMotion: reduceMotion)
+        // Eased: acts switch between side-on and front-on.
+        armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * 6))
+    }
+}
+
+extension OrbModel {
+    /// Each joint is a damped spring with its own weight: the hips and chest
+    /// are heavy and settle without fuss, elbows and hands are light and
+    /// carry on a little past where they're going, the head nods after the
+    /// body stops. Feet, and hands on the floor, stay planted. This is what
+    /// stops a demonstration looking like poses being swapped.
+    fileprivate static func spring(_ joint: Int, planted: Bool) -> (stiffness: Float, damping: Float) {
+        if planted { return (24, 1) }
+        switch joint {
+        case 0: return (11, 0.55)       // head
+        case 1: return (10, 0.75)       // chest
+        case 2: return (8.5, 0.85)      // hips
+        case 3, 6: return (11, 0.75)    // shoulders
+        case 4, 7: return (13, 0.62)    // elbows
+        case 5, 8: return (15, 0.58)    // hands
+        case 9, 11: return (12, 0.8)    // knees
+        default: return (24, 1)         // feet
         }
-        armDepth = form * pose.side
+    }
+
+    /// Equipment grows out of the hands once the body has taken shape and
+    /// melts back in before it goes back to a blob. Switching lifts melts
+    /// the old gear first, then grows the new.
+    fileprivate func updateGear(for pose: BodyPose, dt: Float, reduceMotion: Bool) {
+        let wanted = pose.form > 0.5 ? pose.gear : .none
+        let wantsBench = pose.form > 0.5 && pose.bench
+        let changing = wanted != gearShown || wantsBench != benchShown
+        if changing, gearGrow < 0.04 {
+            gearShown = wanted
+            benchShown = wantsBench
+            gearSideOn = pose.side > 0.5
+        }
+        let hasGear = gearShown != .none || benchShown
+        let target: Float = !changing && hasGear && form > 0.75 ? 1 : 0
+        if reduceMotion {
+            gearGrow = target
+            gearGrowVelocity = 0
+        } else {
+            // A little overshoot: it pops out, then settles.
+            let (w, z): (Float, Float) = target > 0 ? (9, 0.5) : (11, 0.9)
+            let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+            let h = dt / Float(steps)
+            for _ in 0..<steps {
+                gearGrowVelocity += (-(w * w) * (gearGrow - target) - 2 * z * w * gearGrowVelocity) * h
+                gearGrow += gearGrowVelocity * h
+            }
+            if gearGrow < 0 { gearGrow = 0; gearGrowVelocity = max(0, gearGrowVelocity) }
+        }
+
+        gearBlend = 0.02 + 0.11 * (1 - min(gearGrow, 1))
+        var flat = [Float](repeating: -1, count: Self.maxGearShapes * 8)
+        if gearGrow > 0.02 {
+            let s = bodyScale * Self.size
+            let shapes = GearShape.build(gear: gearShown, bench: benchShown, sideOn: gearSideOn,
+                                         joints: joints, grow: gearGrow)
+            for (i, shape) in shapes.prefix(Self.maxGearShapes).enumerated() {
+                flat.replaceSubrange(i * 8 ..< i * 8 + 8, with: shape.scaled(s).floats)
+            }
+        }
+        gearArray = flat
+    }
+
+    fileprivate func moveJoints(toward targets: [Joint], dt: Float, reduceMotion: Bool) {
+        guard !reduceMotion else {
+            joints = targets
+            jointVelocity = jointVelocity.map { _ in .zero }
+            return
+        }
+        let floor: Float = -0.385
+        // Small fixed substeps keep the springs stable on a slow frame.
+        let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+        let h = dt / Float(steps)
+        for i in joints.indices {
+            let target = targets[i]
+            let planted = [5, 8].contains(i) && target.y <= floor + 0.01
+            let (w, z) = Self.spring(i, planted: planted)
+            var position = SIMD2(joints[i].x, joints[i].y)
+            var velocity = jointVelocity[i]
+            let goal = SIMD2(target.x, target.y)
+            for _ in 0..<steps {
+                velocity += (-(w * w) * (position - goal) - 2 * z * w * velocity) * h
+                position += velocity * h
+            }
+            if [5, 8, 10, 12].contains(i), position.y < floor {
+                position.y = floor
+                velocity.y = max(0, velocity.y)
+            }
+            jointVelocity[i] = velocity
+            joints[i] = Joint(position.x, position.y, joints[i].z + (target.z - joints[i].z) * (1 - exp(-dt * 10)))
+        }
     }
 }
 
@@ -236,6 +373,14 @@ struct OrbView: View {
     var inWorkout = false
     /// A lift to show right now, continuously (the intro's choreography).
     var demo: ExerciseMotion? = nil
+    /// Keep busy between conversations, like a trainer on the floor.
+    var ambient = false
+    /// A lesson beat to act out right now.
+    var lesson: LessonCue? = nil
+    /// You're counting reps out loud: do them with you.
+    var counting = false
+    /// Words are being heard right now (not just sound).
+    var youTalking = false
     /// Where bloops start, in points from the top. Default: below the screen.
     var bloopStart: CGFloat? = nil
     var setsDone = 0
@@ -252,6 +397,7 @@ struct OrbView: View {
                                    size: size, anchor: anchor(in: size),
                                    move: director.move, moveTime: director.elapsed,
                                    loop: loop, inWorkout: inWorkout, setsDone: setsDone, demo: demo,
+                                   ambient: ambient, lesson: lesson, counting: counting, youTalking: youTalking,
                                    spawnY: bloopStart.map { -Float(($0 - size.height / 2) / (min(size.width, size.height) / 2)) },
                                    scale: Float(scale), reduceMotion: reduceMotion)
                 Rectangle()
@@ -274,7 +420,9 @@ struct OrbView: View {
                         .floatArray(model.dropArray),
                         .floatArray(model.jointArray),
                         .float(model.form),
-                        .float(model.armDepth)
+                        .float(model.armDepth),
+                        .floatArray(model.gearArray),
+                        .float(model.gearBlend)
                     ))
             }
         }
@@ -331,7 +479,10 @@ final class IntroChoreography: ObservableObject {
     @Published private(set) var demo: ExerciseMotion?
     let you = VoiceMeter()
     private var task: Task<Void, Never>?
-    private static let lifts: [ExerciseMotion] = [.squat, .overheadPress, .curl, .lateralRaise]
+    private static let lifts: [ExerciseMotion] = [
+        ExerciseMotion(.squat, .dumbbell), ExerciseMotion(.overheadPress, .barbell),
+        ExerciseMotion(.curl, .dumbbells), ExerciseMotion(.swing, .kettlebell),
+    ]
 
     func start() {
         guard task == nil else { return }

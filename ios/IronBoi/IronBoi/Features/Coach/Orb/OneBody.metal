@@ -118,6 +118,45 @@ static float person(float2 p, device const float *joints, thread float &frontArm
     return smin(d, frontArm, 0.045);
 }
 
+// ── Equipment: shapes the CPU lays out from the hands ──────────────
+// gear[] is 8 floats per shape: kind, a.xy, b.xy, r, angle, depth. Kind -1
+// is an empty slot; 0 capsule a→b, 1 rounded box at a (half-size b, turned
+// by angle), 2 upper half-ring at a (radius b.x, thickness r). Depth 2 is in
+// front of everything, 1 in front of the body but under the hands, 0.5
+// between the legs (behind the near one), -1 behind the body. Returns the
+// field for each layer: (held, behind, front, between).
+static float4 gearField(float2 p, device const float *gear, int count) {
+    float4 d = float4(10.0);
+    for (int i = 0; i + 7 < count; i += 8) {
+        float kind = gear[i];
+        if (kind < 0.0) continue;
+        float2 a = float2(gear[i + 1], gear[i + 2]);
+        float2 b = float2(gear[i + 3], gear[i + 4]);
+        float r = gear[i + 5];
+        float s;
+        if (kind < 0.5) {
+            s = bone(p, float3(a, r), float3(b, r));
+        } else if (kind < 1.5) {
+            float c = cos(gear[i + 6]), sn = sin(gear[i + 6]);
+            float2 q = float2(c * (p.x - a.x) + sn * (p.y - a.y), -sn * (p.x - a.x) + c * (p.y - a.y));
+            float2 e = abs(q) - b + r;
+            s = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0) - r;
+        } else {
+            float c = cos(gear[i + 6]), sn = sin(gear[i + 6]);
+            float2 q = float2(c * (p.x - a.x) + sn * (p.y - a.y), -sn * (p.x - a.x) + c * (p.y - a.y));
+            float ring = abs(length(q) - b.x) - r;
+            // Only the arch above the centre; below it, the distance to the arch's ends.
+            s = q.y >= 0.0 ? ring : length(float2(abs(q.x) - b.x, q.y)) - r;
+        }
+        float depth = gear[i + 7];
+        if (depth > 1.5) d.z = min(d.z, s);
+        else if (depth > 0.75) d.x = min(d.x, s);
+        else if (depth > 0.0) d.w = min(d.w, s);
+        else d.y = min(d.y, s);
+    }
+    return d;
+}
+
 static float hash21(float2 p) {
     return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
 }
@@ -130,7 +169,8 @@ static float hash21(float2 p) {
     half4 bodyColor, half4 youColor,
     device const float *drops, int dropCount,
     device const float *joints, int jointCount,
-    float form, float armDepth
+    float form, float armDepth,
+    device const float *gear, int gearCount, float gearBlend
 ) {
     // Same space as the web version: the short side spans -1…1, y up.
     float2 p = (position - size * 0.5) / min(size.x, size.y) * 2.0;
@@ -153,6 +193,20 @@ static float hash21(float2 p) {
     float2 local = p - center;
     if (form > 0.001 && jointCount >= 39) {
         d = mix(d, person(local, joints, frontArm, behindArm), form);
+    }
+    // Equipment, grown out of the same material: gooey while it grows out,
+    // then its own object, layered in front of or behind the body.
+    float bodyD = d;
+    float handD = 10.0, nearLegD = 10.0;
+    float4 gearD = gearField(local, gear, gearCount);
+    if (form > 0.001 && jointCount >= 39) {
+        handD = min(length(local - J(joints, 5).xy) - J(joints, 5).z,
+                    length(local - J(joints, 8).xy) - J(joints, 8).z);
+        if (gearD.w < 1.0) nearLegD = limb(local, J(joints, 2), J(joints, 11), J(joints, 12));
+    }
+    float anyGear = min(min(gearD.x, gearD.y), min(gearD.z, gearD.w));
+    if (anyGear < 1.0) {
+        d = smin(d, anyGear, gearBlend);
     }
 
     // Your syllables: droplets that merge into the body as they arrive.
@@ -188,6 +242,27 @@ static float hash21(float2 p) {
         c *= 1.0 - crease * 0.08;
         float armFill = 1.0 - smoothstep(-0.035, 0.01, frontArm);
         c = mix(c, mix(c, float3(1.0), 0.055), armFill * overlap * 0.7);
+    }
+    if (anyGear < 1.0) {
+        float e = 0.01;
+        float bodyIn = 1.0 - smoothstep(-e, e, bodyD);
+        float handIn = 1.0 - smoothstep(-e, e, handD);
+        float heldIn = (1.0 - smoothstep(-e, e, gearD.x)) * (1.0 - handIn);
+        float frontIn = 1.0 - smoothstep(-e, e, gearD.z);
+        float nearLegIn = 1.0 - smoothstep(-e, e, nearLegD);
+        float betweenIn = (1.0 - smoothstep(-e, e, gearD.w)) * (1.0 - nearLegIn) * (1.0 - handIn);
+        float behindIn = (1.0 - smoothstep(-e, e, gearD.y)) * (1.0 - bodyIn);
+        float over = max(max(heldIn, frontIn), betweenIn);
+        float gearIn = max(over, behindIn);
+        // A soft contact shadow on whatever is underneath, right at the
+        // edge of what passes in front of it — that's what reads as depth.
+        float nearFront = exp(-max(min(min(gearD.x, gearD.z), gearD.w), 0.0) / 0.018);
+        float nearBody = exp(-max(bodyD, 0.0) / 0.018);
+        float nearLeg = exp(-max(nearLegD, 0.0) / 0.018);
+        float shade = bodyIn * (1.0 - over) * nearFront + behindIn * nearBody
+                    + betweenIn * (1.0 - smoothstep(-e, e, gearD.w)) * nearLeg;
+        c = mix(c, float3(bodyColor.rgb) * 0.84, gearIn);
+        c *= 1.0 - clamp(shade, 0.0, 1.0) * 0.16;
     }
     float edge = soft + form * 0.012;
     float fill = 1.0 - smoothstep(-edge, edge, d);

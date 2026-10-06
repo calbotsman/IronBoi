@@ -28,7 +28,23 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var pendingProgramProposal: ProgramProposalSummary?
     @Published private(set) var pendingPlanAdjustmentProposal: PlanAdjustmentProposalSummary?
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
-    @Published private(set) var activeWorkout: ActiveWorkoutSession?
+    @Published private(set) var activeWorkout: ActiveWorkoutSession? {
+        didSet {
+            if activeWorkout?.sessionId != oldValue?.sessionId {
+                focusedExerciseIndex = nil
+                sessionChanges = []
+                skippedExercises = []
+            }
+        }
+    }
+    /// The lift you chose to do next, out of order ("let's do swings now").
+    @Published private(set) var focusedExerciseIndex: Int?
+    /// What you changed mid-workout, in words — asked about at the end.
+    @Published private(set) var sessionChanges: [String] = []
+    /// Lifts you skipped today; left out of the log.
+    private var skippedExercises: Set<Int> = []
+    /// After finishing: today's changes, waiting on "keep them?".
+    @Published var pendingSessionChanges: [String] = []
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
     @Published private(set) var progressSummary: ProgressSummaryModel?
     /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
@@ -505,6 +521,28 @@ final class AppModel: NSObject, ObservableObject {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
+        #if DEBUG
+        // The preview has no backend: a small local session, enough to walk
+        // through starting, teaching and counting.
+        if isPreviewSession {
+            let now = Self.isoString(from: Date())
+            let lifts: [(String, Int, Int, Double)] = [
+                ("Goblet Squat", 3, 10, 35), ("Barbell Bench Press", 3, 8, 135), ("KB Swing", 3, 15, 35),
+            ]
+            activeWorkout = ActiveWorkoutSession(
+                userId: "preview", sessionId: "preview-\(UUID().uuidString)", planId: "preview", dayKey: dayKey,
+                workoutName: "Full Body", status: .active, startedAt: now, updatedAt: now, completedAt: nil,
+                exercises: lifts.enumerated().map { index, lift in
+                    ActiveWorkoutExercise(exerciseIndex: index, name: lift.0, targetSets: lift.1, targetReps: lift.2,
+                                          targetWeight: lift.3,
+                                          completedSets: (0..<lift.1).map {
+                                              ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+                                          },
+                                          exerciseDone: false, notes: nil)
+                })
+            return
+        }
+        #endif
 
         do {
             let now = Self.isoString(from: Date())
@@ -523,6 +561,107 @@ final class AppModel: NSObject, ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Changing the workout mid-session
+
+    /// The lift you're on: the one you jumped to, else the first not done.
+    var currentExerciseIndex: Int? {
+        guard let exercises = activeWorkout?.exercises else { return nil }
+        if let focus = focusedExerciseIndex, exercises.indices.contains(focus), !exercises[focus].exerciseDone {
+            return focus
+        }
+        return exercises.firstIndex { !$0.exerciseDone }
+    }
+
+    func focusExercise(_ index: Int) {
+        guard let exercises = activeWorkout?.exercises, exercises.indices.contains(index) else { return }
+        focusedExerciseIndex = index
+    }
+
+    /// Adds a lift to the end of today's workout. Returns its index.
+    @discardableResult
+    func addWorkoutExercise(name: String, sets: Int, reps: Int, weight: Double) -> Int? {
+        guard var workout = activeWorkout else { return nil }
+        let index = workout.exercises.count
+        workout.exercises.append(ActiveWorkoutExercise(
+            exerciseIndex: index, name: name, targetSets: sets, targetReps: reps, targetWeight: weight,
+            completedSets: (0..<sets).map { ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil) },
+            exerciseDone: false, notes: nil))
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("Added \(name), \(sets)×\(reps)\(weight > 0 ? " at \(Self.poundsText(weight)) lb" : "")")
+        return index
+    }
+
+    /// Replaces a lift with another, keeping its sets and reps. Sets already
+    /// done on the old lift stay with it, so it's only swapped if none were.
+    func swapWorkoutExercise(_ index: Int, to name: String, weight: Double) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+        let old = workout.exercises[index]
+        workout.exercises[index].name = name
+        workout.exercises[index].targetWeight = weight
+        workout.exercises[index].completedSets = (0..<old.targetSets).map {
+            ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+        }
+        workout.exercises[index].exerciseDone = false
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("Swapped \(old.name) for \(name)")
+    }
+
+    /// Skips a lift today: it's crossed off and left out of the log.
+    func skipWorkoutExercise(_ index: Int) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+        workout.exercises[index].exerciseDone = true
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        skippedExercises.insert(index)
+        if focusedExerciseIndex == index { focusedExerciseIndex = nil }
+        sessionChanges.append("Skipped \(workout.exercises[index].name)")
+    }
+
+    /// New sets and/or reps for a lift; sets already done are kept.
+    func setWorkoutTargets(_ index: Int, sets: Int?, reps: Int?) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+        var exercise = workout.exercises[index]
+        let before = "\(exercise.targetSets)×\(exercise.targetReps)"
+        if let reps, reps > 0 { exercise.targetReps = reps }
+        if let sets, sets > 0 {
+            exercise.targetSets = sets
+            if exercise.completedSets.count < sets {
+                exercise.completedSets += (exercise.completedSets.count..<sets).map {
+                    ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+                }
+            } else {
+                // Drop open sets past the new count; never drop a done one.
+                let keep = max(sets, (exercise.completedSets.lastIndex(where: \.completed) ?? -1) + 1)
+                exercise.completedSets = Array(exercise.completedSets.prefix(keep))
+            }
+        }
+        exercise.exerciseDone = !exercise.completedSets.isEmpty && exercise.completedSets.allSatisfy(\.completed)
+        workout.exercises[index] = exercise
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("\(exercise.name): \(exercise.targetSets)×\(exercise.targetReps) instead of \(before)")
+    }
+
+    private static func poundsText(_ weight: Double) -> String {
+        weight.rounded() == weight ? String(Int(weight)) : String(format: "%.1f", weight)
+    }
+
+    /// "Keep them": Coach turns today's changes into a plan update for you
+    /// to approve, the same way any plan change works.
+    func keepSessionChanges() async {
+        let changes = pendingSessionChanges
+        pendingSessionChanges = []
+        guard !changes.isEmpty else { return }
+        let list = changes.joined(separator: "; ")
+        await sendCoachMessage("Keep these changes from today's workout in my plan from now on: \(list).", spoken: true)
+    }
+
+    func dismissSessionChanges() {
+        pendingSessionChanges = []
     }
 
     func toggleWorkoutSet(exerciseIndex: Int, setIndex: Int) {
@@ -668,6 +807,18 @@ final class AppModel: NSObject, ObservableObject {
         guard !isWorkoutBusy, let activeWorkout else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
+        let changes = sessionChanges
+        // Skipped lifts with nothing done aren't part of what you did.
+        let performed = activeWorkout.exercises.filter {
+            !skippedExercises.contains($0.exerciseIndex) || $0.completedSets.contains(where: \.completed)
+        }
+        #if DEBUG
+        if isPreviewSession {
+            self.activeWorkout = nil
+            pendingSessionChanges = changes
+            return
+        }
+        #endif
 
         do {
             let completedAt = Self.isoString(from: Date())
@@ -677,10 +828,11 @@ final class AppModel: NSObject, ObservableObject {
                 data: [
                     "sessionId": activeWorkout.sessionId,
                     "completedAt": completedAt,
-                    "exercises": try Self.jsonObject(from: activeWorkout.exercises),
+                    "exercises": try Self.jsonObject(from: performed),
                 ]
             )
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
+            pendingSessionChanges = changes
             // Surface the rebaseline card. Nothing has been written yet —
             // the server only proposes here, and applyBaselineSuggestions is
             // what commits.

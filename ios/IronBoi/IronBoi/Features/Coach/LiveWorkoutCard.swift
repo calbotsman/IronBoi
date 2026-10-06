@@ -11,7 +11,7 @@ struct LiveWorkoutCard: View {
     private var totalSets: Int { workout.exercises.reduce(0) { $0 + $1.targetSets } }
     private var doneSets: Int { workout.exercises.reduce(0) { $0 + $1.completedSetCount } }
     private var progress: Double { totalSets == 0 ? 0 : Double(doneSets) / Double(totalSets) }
-    private var currentIndex: Int? { workout.exercises.firstIndex { !$0.exerciseDone } }
+    private var currentIndex: Int? { appModel.currentExerciseIndex }
     @State private var confirmDiscard = false
 
     /// Started on an earlier day: it's a leftover, not today's session.
@@ -208,6 +208,7 @@ struct LiveWorkoutCard: View {
     private func exerciseRow(_ exercise: ActiveWorkoutExercise, isCurrent: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: MyoTheme.Spacing.sm) {
+                // Tap a lift to do it next.
                 VStack(alignment: .leading, spacing: 2) {
                     Text(exercise.name)
                         .font(.body.weight(.semibold))
@@ -218,6 +219,14 @@ struct LiveWorkoutCard: View {
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard !exercise.exerciseDone, !isCurrent else { return }
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(MyoTheme.Motion.fade) { appModel.focusExercise(exercise.exerciseIndex) }
+                }
+                .accessibilityAddTraits(isCurrent || exercise.exerciseDone ? [] : .isButton)
+                .accessibilityHint(isCurrent || exercise.exerciseDone ? "" : "Do this one next")
                 Spacer(minLength: 0)
                 if exercise.targetWeight > 0 {
                     weightStepper(exercise)

@@ -35,6 +35,11 @@ final class VoiceInputEngine: ObservableObject {
     }
 
     func toggle() {
+        #if DEBUG
+        // MYO_NO_MIC=1: never open the mic — for watching Coach in the
+        // simulator, whose mic hears the Mac's speakers.
+        if ProcessInfo.processInfo.environment["MYO_NO_MIC"] == "1", !isListening, Self.fakeUtterances.isEmpty { return }
+        #endif
         if isListening {
             stop()
             return
