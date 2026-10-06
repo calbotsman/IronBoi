@@ -180,11 +180,11 @@ final class OrbModel {
             let dist = max(hypot(dx, dy), 0.0001)
             drops[i].x += dx / dist * velocity[i] * dt * 0.6
             drops[i].y += dy / dist * velocity[i] * dt
-            // Blue in flight; the instant it touches the body it flips to
-            // amber (~80ms). A slow blend passes through grey.
+            // Blue in flight; the instant it touches the body it's amber.
+            // Any blend between the two passes through grey.
             // "Touch" is where the soft bridge starts: the edges within the fuse
             // distance (0.16), not the centres.
-            let warm: Float = dist > radius + drops[i].z + 0.2 ? 1 : max(0, drops[i].w - dt * 14)
+            let warm: Float = dist > radius + drops[i].z + 0.2 ? 1 : 0
             drops[i].w = min(drops[i].w, warm)
             if dist < radius * 0.6 {
                 drops[i].z *= pow(0.85, dt * 60)
