@@ -178,8 +178,29 @@ struct ProfileButton: View {
 extension View {
     /// Liquid Glass on iOS 26 (interactive: it lights up and flexes under
     /// your finger); frosted material on older systems. `tint` warms it.
-    @ViewBuilder
     func myoGlass(tint: Color? = nil, in shape: some Shape = Capsule()) -> some View {
+        glassBase(tint: tint, in: shape)
+            // Light catching the top edge, fading round the sides…
+            .overlay(
+                shape.stroke(
+                    LinearGradient(colors: [.white.opacity(0.95), .white.opacity(0.15), .white.opacity(0.5)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1.2
+                )
+                .allowsHitTesting(false)
+            )
+            // …and a soft sheen across the upper half.
+            .overlay(
+                shape.fill(LinearGradient(colors: [.white.opacity(0.42), .white.opacity(0)],
+                                          startPoint: .top, endPoint: .center))
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 10, y: 4)
+    }
+
+    @ViewBuilder
+    private func glassBase(tint: Color?, in shape: some Shape) -> some View {
         // compiler(>=6.2) ⇔ Xcode 26 SDK, where Glass exists; CI's older
         // Xcode compiles only the fallback.
         #if compiler(>=6.2)

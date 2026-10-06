@@ -407,8 +407,18 @@ struct CoachStageView: View {
             .padding(.horizontal, 28)
             .frame(height: 54)
             .contentShape(Capsule())
-            .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.55))
-            .shadow(color: MyoTheme.Colors.coachAmber.opacity(0.35), radius: 18, y: 6)
+            .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.3))
+            // Warm colour behind the glass for it to bend and blur.
+            .background {
+                Capsule()
+                    .fill(LinearGradient(colors: [MyoTheme.Colors.coachAmber, MyoTheme.Colors.ochreLight.opacity(0.6)],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 6)
+                    .blur(radius: 14)
+                    .opacity(0.75)
+            }
+            .shadow(color: MyoTheme.Colors.coachAmber.opacity(0.4), radius: 22, y: 8)
         }
         .buttonStyle(.plain)
         .disabled(appModel.isWorkoutBusy)
