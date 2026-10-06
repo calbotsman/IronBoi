@@ -22,10 +22,17 @@ final class VoiceInputEngine: ObservableObject {
     private static let pauseSeconds: UInt64 = 1_400_000_000
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let audioEngine = AVAudioEngine()
+    /// Shared with Coach's voice so the mic can stay open while Coach talks.
+    private var audioEngine: AVAudioEngine { AudioHub.shared.engine }
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var hasInstalledTap = false
+
+    /// Starts listening if it isn't already (safe to call while Coach talks).
+    func listen() {
+        guard !isListening else { return }
+        toggle()
+    }
 
     func toggle() {
         if isListening {
@@ -47,10 +54,7 @@ final class VoiceInputEngine: ObservableObject {
         pauseTask?.cancel()
         pauseTask = nil
         meter.reset()
-        if audioEngine.isRunning {
-            audioEngine.stop()
-        }
-
+        // The engine stays up — Coach may be mid-sentence on it.
         if hasInstalledTap {
             audioEngine.inputNode.removeTap(onBus: 0)
             hasInstalledTap = false
@@ -69,17 +73,8 @@ final class VoiceInputEngine: ObservableObject {
         try await requestPermissions()
         stop()
 
-        let audioSession = AVAudioSession.sharedInstance()
-        // playAndRecord, not record: the coach answers out loud right after,
-        // and switching categories between turns clips the first word.
-        try audioSession.setCategory(
-            .playAndRecord,
-            mode: .default,
-            options: [.defaultToSpeaker, .duckOthers, .allowBluetooth]
-        )
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-        guard !audioSession.currentRoute.inputs.isEmpty else {
+        try AudioHub.shared.start()
+        guard !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty else {
             throw VoiceInputError.microphoneUnavailable
         }
 
@@ -119,9 +114,6 @@ final class VoiceInputEngine: ObservableObject {
             analyzer.process(buffer, into: meter)
         }
         hasInstalledTap = true
-
-        audioEngine.prepare()
-        try audioEngine.start()
         isListening = true
     }
 

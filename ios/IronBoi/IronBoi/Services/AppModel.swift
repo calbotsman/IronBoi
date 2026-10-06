@@ -284,9 +284,18 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    /// Coach's voice for a sentence or two: WAV bytes from Cloud TTS.
+    func synthesizeSpeech(_ text: String) async throws -> Data {
+        struct Speech: Decodable { let audio: String }
+        let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: ["text": text])
+        guard let data = Data(base64Encoded: speech.audio) else { throw CocoaError(.coderReadCorrupt) }
+        return data
+    }
+
     func sendCoachMessage(
         _ content: String,
-        structuredAnswer: [String: Any]? = nil
+        structuredAnswer: [String: Any]? = nil,
+        spoken: Bool = false
     ) async {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -311,6 +320,8 @@ final class AppModel: NSObject, ObservableObject {
                 "startedAt": now,
                 "toolCallIds": [],
                 "structuredAnswer": structuredAnswer ?? [:],
+                // Spoken turns get short, list-free replies made for the ear.
+                "inputMode": spoken ? "live_voice" : "text",
                 // Local calendar date — a chat-driven "yes, just today" keys
                 // its override to the user's day, not the server timezone.
                 "clientDate": Self.currentDateISO(),

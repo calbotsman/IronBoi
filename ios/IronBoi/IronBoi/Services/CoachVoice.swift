@@ -1,75 +1,149 @@
 import AVFoundation
 import Foundation
 
-/// Reads coach replies aloud with the on-device synthesizer and beats the
-/// orb's agent meter once per spoken word. On-device keeps it free, private
-/// and offline; a cloud voice can replace `synthesizer` later without
-/// touching the orb.
+/// Coach's voice. Replies are read by Google's Chirp 3 HD voice, fetched a
+/// sentence or two at a time from the backend so playback starts quickly and
+/// the next chunk downloads while this one plays. The orb's coach meter is
+/// fed from the real audio as it plays. If the voice can't be fetched (no
+/// network, preview mode), the on-device voice reads it instead.
 @MainActor
 final class CoachVoice: NSObject, ObservableObject {
     @Published private(set) var isSpeaking = false
-    /// The message currently (or last) being read, for the caption.
     @Published private(set) var speakingMessageId: String?
     /// The sentence being spoken right now — a subtitle, not a transcript.
     @Published private(set) var caption = ""
-    private var sentenceRanges: [NSRange] = []
 
     let meter = VoiceMeter()
+    /// Text in, WAV out. Set by the screen that owns the backend connection.
+    var fetchAudio: ((String) async throws -> Data)?
+
+    private let hub = AudioHub.shared
+    private var generation = 0
+    private var meterTapInstalled = false
+
+    // On-device fallback.
     private let synthesizer = AVSpeechSynthesizer()
-    // A cancelled utterance's callback can land after the next one started;
-    // only the current utterance may clear `isSpeaking`.
-    private var current: AVSpeechUtterance?
-    private lazy var voice: AVSpeechSynthesisVoice? = Self.bestVoice()
+    private var fallbackUtterance: AVSpeechUtterance?
+    private var sentenceRanges: [NSRange] = []
+    private lazy var fallbackVoice: AVSpeechSynthesisVoice? = Self.bestVoice()
 
     override init() {
         super.init()
         synthesizer.delegate = self
-        prewarm()
-    }
-
-    /// The synthesizer loads its voice the first time it's used, stalling
-    /// the main thread for a moment — right as Coach starts talking, which
-    /// made the body stutter. Render one silent utterance to a buffer
-    /// (nothing plays) so that cost is paid when the screen opens instead.
-    private func prewarm() {
-        let utterance = AVSpeechUtterance(string: " ")
-        utterance.voice = voice
-        utterance.volume = 0
-        synthesizer.write(utterance) { _ in }
     }
 
     func speak(_ text: String, messageId: String) {
         let spoken = Self.speakable(text)
         guard !spoken.isEmpty else { return }
         stop()
-        // Playback needs a session that can play; the mic engine may have
-        // left it in a record-capable one, which is fine — playAndRecord
-        // routes to the speaker.
-        let session = AVAudioSession.sharedInstance()
-        if session.category != .playAndRecord {
-            try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        }
-        try? session.setActive(true)
-
-        sentenceRanges = Self.sentenceRanges(in: spoken)
-        caption = ""
-        let utterance = AVSpeechUtterance(string: spoken)
-        utterance.voice = voice
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-        utterance.postUtteranceDelay = 0.1
+        generation += 1
+        let gen = generation
         speakingMessageId = messageId
-        current = utterance
+        caption = ""
         isSpeaking = true
-        synthesizer.speak(utterance)
+
+        guard let fetchAudio else {
+            speakOnDevice(spoken)
+            return
+        }
+        let chunks = Self.chunks(spoken)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try self.hub.start()
+                self.installMeterTap()
+            } catch {
+                self.speakOnDevice(spoken)
+                return
+            }
+            var next: Task<Data, Error>? = Task { try await fetchAudio(chunks[0]) }
+            for (index, chunk) in chunks.enumerated() {
+                guard gen == self.generation, let pending = next else { return }
+                let buffer: AVAudioPCMBuffer
+                do {
+                    buffer = try AudioHub.buffer(fromWAV: try await pending.value)
+                } catch {
+                    guard gen == self.generation else { return }
+                    self.speakOnDevice(chunks[index...].joined(separator: " "))
+                    return
+                }
+                // Download the next chunk while this one plays.
+                next = index + 1 < chunks.count ? Task { try await fetchAudio(chunks[index + 1]) } : nil
+                guard gen == self.generation else { return }
+                self.caption = chunk
+                await self.hub.play(buffer)
+            }
+            if gen == self.generation { self.finish() }
+        }
     }
 
+    /// Stops mid-word — you cut in, or the conversation ended.
     func stop() {
-        if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking(at: .immediate)
-        }
+        generation += 1
+        hub.stopPlayback()
+        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        fallbackUtterance = nil
+        finish()
+    }
+
+    private func finish() {
         isSpeaking = false
         caption = ""
         meter.reset()
+    }
+
+    /// The orb reacts to what you actually hear: loudness, syllables and
+    /// spectral bands analysed off the player's output.
+    private func installMeterTap() {
+        guard !meterTapInstalled else { return }
+        let analyzer = MicAnalyzer()
+        let meter = self.meter
+        hub.player.installTap(onBus: 0, bufferSize: 1_024, format: AudioHub.voiceFormat) { buffer, _ in
+            analyzer.process(buffer, into: meter)
+        }
+        meterTapInstalled = true
+    }
+
+    /// Sentences, merged so each request is a natural phrase (≤ ~220 chars)
+    /// but the first one is short — that's what you wait for.
+    static func chunks(_ text: String) -> [String] {
+        var sentences: [String] = []
+        text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { s, _, _, _ in
+            if let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty { sentences.append(s) }
+        }
+        if sentences.isEmpty { return [text] }
+        var out: [String] = []
+        for sentence in sentences {
+            if let last = out.last, out.count > 1 || last.count > 90, last.count + sentence.count < 220 {
+                out[out.count - 1] = last + " " + sentence
+            } else {
+                out.append(sentence)
+            }
+        }
+        return out.map { String($0.prefix(590)) }
+    }
+
+    /// Strip the markdown the coach sometimes writes so it isn't read out.
+    static func speakable(_ text: String) -> String {
+        var out = text
+        for token in ["**", "__", "`", "#"] { out = out.replacingOccurrences(of: token, with: "") }
+        out = out.replacingOccurrences(of: #"(?m)^\s*[-*•]\s+"#, with: "", options: .regularExpression)
+        out = out.replacingOccurrences(of: #"(?m)^\s*\d+\.\s+"#, with: "", options: .regularExpression)
+        out = out.replacingOccurrences(of: "\n\n", with: " ")
+        out = out.replacingOccurrences(of: "\n", with: ". ")
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - On-device fallback
+
+    private func speakOnDevice(_ spoken: String) {
+        isSpeaking = true
+        sentenceRanges = Self.sentenceRanges(in: spoken)
+        let utterance = AVSpeechUtterance(string: spoken)
+        utterance.voice = fallbackVoice
+        utterance.postUtteranceDelay = 0.1
+        fallbackUtterance = utterance
+        synthesizer.speak(utterance)
     }
 
     private func showSentence(at location: Int, in text: String) {
@@ -87,18 +161,6 @@ final class CoachVoice: NSObject, ObservableObject {
         return ranges
     }
 
-    /// Strip the markdown the coach sometimes writes so it isn't read out.
-    static func speakable(_ text: String) -> String {
-        var out = text
-        for token in ["**", "__", "`", "#"] { out = out.replacingOccurrences(of: token, with: "") }
-        out = out.replacingOccurrences(of: #"(?m)^\s*[-*•]\s+"#, with: "", options: .regularExpression)
-        out = out.replacingOccurrences(of: #"(?m)^\s*\d+\.\s+"#, with: "", options: .regularExpression)
-        out = out.replacingOccurrences(of: "\n\n", with: " ")
-        out = out.replacingOccurrences(of: "\n", with: ". ")
-        return out.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Highest-quality installed US English voice, skipping the novelty ones.
     private static func bestVoice() -> AVSpeechSynthesisVoice? {
         let candidates = AVSpeechSynthesisVoice.speechVoices().filter {
             $0.language == "en-US" && !$0.identifier.contains("speech.synthesis")
@@ -114,37 +176,24 @@ extension CoachVoice: AVSpeechSynthesizerDelegate {
         willSpeakRangeOfSpeechString characterRange: NSRange,
         utterance: AVSpeechUtterance
     ) {
-        let word = (utterance.speechString as NSString).substring(with: characterRange)
-        // Longer words land harder. The band split is a stand-in for real
-        // spectral analysis: vowels lean low, consonant clusters lean high.
-        let letters = word.lowercased().filter(\.isLetter)
-        let vowels = Float(letters.filter { "aeiou".contains($0) }.count)
-        let count = Float(max(letters.count, 1))
-        let strength = min(1, 0.45 + count / 12)
-        let bands = SIMD3<Float>(
-            min(1, 0.4 + vowels / count * 0.8),
-            min(1, 0.3 + count / 10),
-            min(1, (count - vowels) / count * 0.9)
-        )
-        meter.pulse(strength: strength, bands: bands)
+        let letters = Float((utterance.speechString as NSString).substring(with: characterRange).count)
+        meter.pulse(strength: min(1, 0.45 + letters / 12), bands: SIMD3(0.6, 0.5, 0.3))
         let location = characterRange.location
         let text = utterance.speechString
         Task { @MainActor in self.showSentence(at: location, in: text) }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.finished(utterance) }
+        Task { @MainActor in self.fallbackFinished(utterance) }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.finished(utterance) }
+        Task { @MainActor in self.fallbackFinished(utterance) }
     }
 
-    private func finished(_ utterance: AVSpeechUtterance) {
-        guard current === utterance else { return }
-        current = nil
-        isSpeaking = false
-        caption = ""
-        meter.reset()
+    private func fallbackFinished(_ utterance: AVSpeechUtterance) {
+        guard fallbackUtterance === utterance else { return }
+        fallbackUtterance = nil
+        finish()
     }
 }

@@ -39,6 +39,16 @@ export function isCoachToolLoopEnabled(): boolean {
   return process.env.IRONBOI_COACH_TOOL_LOOP_ENABLED === "true";
 }
 
+/** Appended to the system prompt when the user is talking out loud. */
+export const VOICE_MODE_RULES = [
+  "VOICE MODE — the user is talking to you out loud and your reply is read aloud by a voice.",
+  "- Reply in 1–3 short spoken sentences, about 40 words at most. Say the one thing that matters; offer more only if they ask.",
+  "- No lists, bullets, markdown, headings, or tables. Say numbers the way a coach would say them (\"three sets of eight at one fifty-five\").",
+  "- Sound like a calm personal trainer standing next to them, not a document.",
+  "- You have a body on their screen that can demonstrate push-ups and a plank. When showing would help, say it plainly (\"Let's do push-ups.\" / \"Watch this plank.\").",
+  "- Tools and safety rules are unchanged: still use the tools, still ask red-flag questions about pain.",
+].join("\n");
+
 type OrchestrateCoachTurnArgs = {
   db: Firestore;
   coach: CoachConfig;
@@ -50,6 +60,8 @@ type OrchestrateCoachTurnArgs = {
   // Local calendar date (YYYY-MM-DD) the client stamped on the triggering
   // message, if any — used to key today-scope overrides to the user's day.
   clientDate?: string;
+  /** "live_voice"/"dictation": the reply will be spoken aloud. */
+  inputMode?: string;
   geminiApiKey?: string;
   openRouterApiKey?: string;
 };
@@ -80,6 +92,7 @@ export async function orchestrateCoachTurn({
   turnId,
   userContent,
   clientDate,
+  inputMode,
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
@@ -193,12 +206,15 @@ export async function orchestrateCoachTurn({
       // way today-scope overrides are keyed — devices aren't in ET.
       today: clientDate ?? currentDateISO(),
     });
-    const { system, userMessage } = assembleCoachPrompt(
+    const assembled = assembleCoachPrompt(
       coach,
       contextBundle,
       userContent,
       { toolsEnabled: toolLoopEnabled },
     );
+    const spoken = inputMode === "live_voice" || inputMode === "dictation";
+    const system = spoken ? `${assembled.system}\n\n${VOICE_MODE_RULES}` : assembled.system;
+    const userMessage = assembled.userMessage;
     const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });
 
     if (!provider) {

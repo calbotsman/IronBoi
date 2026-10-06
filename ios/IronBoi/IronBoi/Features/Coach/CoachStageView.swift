@@ -23,6 +23,8 @@ struct CoachStageView: View {
     /// A hands-free conversation is running: listen → you pause → Coach
     /// thinks → Coach speaks → listen again, until you tap.
     @State private var conversationActive = false
+    /// You talked over Coach (or tapped) — keep the words already heard.
+    @State private var cutIn = false
     /// When listening last restarted on its own; three restarts inside ten
     /// seconds with nothing heard means the recognizer is failing — stop.
     @State private var silentRestarts: [Date] = []
@@ -73,8 +75,8 @@ struct CoachStageView: View {
     @State private var lastCueCheckedReplyId: String?
 
     private var phase: OrbPhase {
-        if voiceInput.isListening { return .listening }
         if voice.isSpeaking { return .speaking }
+        if voiceInput.isListening { return .listening }
         if appModel.isSending || awaitingReplyAfter != nil
             || appModel.messages.last?.isPendingCoachReply == true {
             return .thinking
@@ -200,7 +202,14 @@ struct CoachStageView: View {
         .onPreferenceChange(OrbSlotKey.self) { orbSlot = $0 }
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
         .onAppear {
-            voiceInput.onPause = { text in handleUtterance(text) }
+            voiceInput.onPause = { text in
+                if voice.isSpeaking {
+                    voiceInput.listen()
+                    return
+                }
+                handleUtterance(text)
+            }
+            voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
             lastCueCheckedReplyId = lastCoachMessage?.id
             #if DEBUG
             // MYO_BODY_MOVE=pushups|plank: start a move on launch, to tune
@@ -239,12 +248,28 @@ struct CoachStageView: View {
         }
         // Coach finished speaking: your turn again.
         .onChange(of: voice.isSpeaking) { _, speaking in
-            if !speaking { resumeListening() }
+            guard !speaking else { return }
+            // Coach finished on its own: whatever the open mic caught under
+            // it was echo or noise — start your turn clean. If you cut in,
+            // keep what you're saying.
+            if !cutIn, voiceInput.isListening {
+                restartHandledLocally = true
+                voiceInput.stop()
+            }
+            cutIn = false
+            resumeListening()
         }
         // Listening stopped without a send (the recognizer timed out on
         // silence): pick back up, unless it stopped on an error.
         // Counting reps out loud: the count updates as you say each number.
         .onChange(of: voiceInput.transcript) { _, transcript in
+            if voice.isSpeaking, conversationActive,
+               transcript.split(separator: " ").count >= 2 {
+                // You started talking: Coach stops and listens.
+                cutIn = true
+                voice.stop()
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
             trackReps(in: transcript)
         }
         .onChange(of: voiceInput.isListening) { _, listening in
@@ -498,7 +523,11 @@ struct CoachStageView: View {
     /// you're talking, while Coach thinks, or while Coach speaks.
     private func talkTapped() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if conversationActive {
+        if conversationActive, phase == .speaking {
+            cutIn = true
+            voice.stop()
+            voiceInput.listen()
+        } else if conversationActive {
             endConversation()
         } else {
             conversationActive = true
@@ -676,6 +705,7 @@ struct CoachStageView: View {
         awaitingReplyAfter = nil
         voiceInput.stop()
         voice.stop()
+        AudioHub.shared.stop()
     }
 
     /// Back to listening for the next thing you say, after a short breath so
@@ -702,7 +732,7 @@ struct CoachStageView: View {
             awaitingReplyAfter = Set(appModel.messages.map(\.id))
         }
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        Task { await appModel.sendCoachMessage(trimmed) }
+        Task { await appModel.sendCoachMessage(trimmed, spoken: spoken) }
     }
 
     /// Coach named a move in a new reply: step into it. Once per reply, and
@@ -724,6 +754,7 @@ struct CoachStageView: View {
         guard conversationActive, !voiceInput.isListening else { return }
         if speaksReplies {
             voice.speak(reply.content, messageId: reply.id)
+            voiceInput.listen()
         } else {
             // Muted: the reply is on screen; go straight back to listening.
             resumeListening()

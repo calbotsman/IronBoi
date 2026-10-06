@@ -89,8 +89,21 @@ final class MicAnalyzer {
         // vDSP's real FFT is 2× the DFT; Web Audio reports |X| / N.
         vDSP.multiply(1 / Float(2 * Self.size), magnitude, result: &magnitude)
 
-        // Syllable onsets: positive spectral flux, 100 Hz – 4 kHz
         let binHz = sampleRate / Float(Self.size)
+
+        // Bands → the body's 2/3/7 lobes (orb-lab's bandLevel, by Hz)
+        func band(_ lo: Float, _ hi: Float) -> Float {
+            let a = max(1, Int((lo / binHz).rounded())), b = min(magnitude.count, Int((hi / binHz).rounded()))
+            guard b > a else { return 0 }
+            var sum: Float = 0
+            for i in a..<b { sum += 20 * log10(magnitude[i] + 1e-9) }
+            return clamp((sum / Float(b - a) - (floorDb - 35)) / 50)
+        }
+        reading.bands.x = ease(reading.bands.x, band(80, 300), 0.3, dt)
+        reading.bands.y = ease(reading.bands.y, band(300, 2000), 0.25, dt)
+        reading.bands.z = ease(reading.bands.z, band(2000, 8000), 0.2, dt)
+
+        // Syllable onsets: positive spectral flux, 100 Hz – 4 kHz
         let low = max(1, Int((100 / binHz).rounded()))
         let high = min(magnitude.count, Int((4000 / binHz).rounded()))
         var flux: Float = 0
