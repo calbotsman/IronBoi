@@ -8,6 +8,19 @@ final class VoiceInputEngine: ObservableObject {
     @Published private(set) var transcript = ""
     @Published var errorMessage: String?
 
+    /// Live mic loudness and syllable onsets, for the orb.
+    let meter = VoiceMeter()
+    /// Called once with the final text when the speaker pauses — the user
+    /// talks, stops, and the message sends without a tap.
+    var onPause: ((String) -> Void)?
+    private var pauseTask: Task<Void, Never>?
+    /// While true, a pause doesn't end the utterance — set during a rep
+    /// count, where the gaps between reps are long and expected.
+    var holdOpen = false {
+        didSet { if holdOpen { pauseTask?.cancel() } else if isListening, !transcript.isEmpty { schedulePauseCheck() } }
+    }
+    private static let pauseSeconds: UInt64 = 1_400_000_000
+
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let audioEngine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -31,6 +44,9 @@ final class VoiceInputEngine: ObservableObject {
     }
 
     func stop() {
+        pauseTask?.cancel()
+        pauseTask = nil
+        meter.reset()
         if audioEngine.isRunning {
             audioEngine.stop()
         }
@@ -47,11 +63,20 @@ final class VoiceInputEngine: ObservableObject {
     }
 
     private func start() async throws {
+        #if DEBUG
+        if playFakeUtteranceIfAny() { return }
+        #endif
         try await requestPermissions()
         stop()
 
         let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+        // playAndRecord, not record: the coach answers out loud right after,
+        // and switching categories between turns clips the first word.
+        try audioSession.setCategory(
+            .playAndRecord,
+            mode: .default,
+            options: [.defaultToSpeaker, .duckOthers, .allowBluetooth]
+        )
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
         guard !audioSession.currentRoute.inputs.isEmpty else {
@@ -69,8 +94,9 @@ final class VoiceInputEngine: ObservableObject {
                 guard let self else { return }
 
                 if let text = result?.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !text.isEmpty {
+                   !text.isEmpty, text != self.transcript {
                     self.transcript = text
+                    self.schedulePauseCheck()
                 }
 
                 if error != nil || result?.isFinal == true {
@@ -86,14 +112,61 @@ final class VoiceInputEngine: ObservableObject {
             throw VoiceInputError.microphoneUnavailable
         }
 
+        let meter = self.meter
+        let analyzer = MicAnalyzer()
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
             request?.append(buffer)
+            analyzer.process(buffer, into: meter)
         }
         hasInstalledTap = true
 
         audioEngine.prepare()
         try audioEngine.start()
         isListening = true
+    }
+
+    #if DEBUG
+    /// Simulator testing: the simulator's mic often hears nothing, so
+    /// `MYO_FAKE_SPEECH="1 2 3 | went up to 165"` plays each `|`-separated
+    /// utterance word by word through the same transcript/pause path real
+    /// speech takes, one utterance per listen.
+    private static var fakeUtterances: [String] = ProcessInfo.processInfo.environment["MYO_FAKE_SPEECH"]?
+        .components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } ?? []
+
+    private func playFakeUtteranceIfAny() -> Bool {
+        guard !Self.fakeUtterances.isEmpty else { return false }
+        let words = Self.fakeUtterances.removeFirst().split(separator: " ").map(String.init)
+        isListening = true
+        transcript = ""
+        Task { @MainActor in
+            // "~" is a 3-second silence, like the gap between reps.
+            var said: [String] = []
+            for word in words {
+                try? await Task.sleep(nanoseconds: word == "~" ? 3_000_000_000 : 450_000_000)
+                guard self.isListening else { return }
+                if word == "~" { continue }
+                said.append(word)
+                self.transcript = said.joined(separator: " ")
+                self.schedulePauseCheck()
+            }
+        }
+        return true
+    }
+    #endif
+
+    /// Waits for a quiet stretch after the last new words, then hands the
+    /// transcript to `onPause`. Every new partial result restarts the wait.
+    private func schedulePauseCheck() {
+        pauseTask?.cancel()
+        guard !holdOpen else { return }
+        pauseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.pauseSeconds)
+            guard let self, !Task.isCancelled, self.isListening else { return }
+            let text = self.transcript
+            guard !text.isEmpty else { return }
+            self.stop()
+            self.onPause?(text)
+        }
     }
 
     private func requestPermissions() async throws {

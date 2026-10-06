@@ -13,7 +13,6 @@ final class AppModel: NSObject, ObservableObject {
         case coach
         case workout
         case progress
-        case you
     }
 
     @Published private(set) var user: User?
@@ -28,6 +27,9 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var activeWorkout: ActiveWorkoutSession?
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
     @Published private(set) var progressSummary: ProgressSummaryModel?
+    /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
+    /// otherwise — the memory screen groups proposed / active / ended.
+    @Published private(set) var memoryFacts: [MemoryFact] = []
     @Published private(set) var profile: UserProfile = .empty
     @Published private(set) var isSending = false
     @Published private(set) var isOnboardingBusy = false
@@ -41,6 +43,8 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var baselineSuggestionSessionId: String?
     @Published private(set) var isSwapBusy = false
     @Published var selectedTab: AppTab = .coach
+    /// The You screen, opened from the profile icon in each tab's corner.
+    @Published var showProfile = false
     @Published var errorMessage: String?
 
     private let sessionId = "general"
@@ -109,6 +113,7 @@ final class AppModel: NSObject, ObservableObject {
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
+    private var memoryFactListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
     // bakes in "today's" dailyOverride) can be recomputed when the calendar
     // date changes without a server round-trip.
@@ -128,6 +133,7 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkoutListener?.remove()
         workoutLogListener?.remove()
         progressListener?.remove()
+        memoryFactListener?.remove()
     }
 
     func start() {
@@ -151,6 +157,7 @@ final class AppModel: NSObject, ObservableObject {
                 self.listenForActiveWorkout(userId: user?.uid)
                 self.listenForWorkoutLogs(userId: user?.uid)
                 self.listenForProgressSummary(userId: user?.uid)
+                self.listenForMemoryFacts(userId: user?.uid)
             }
         }
     }
@@ -207,6 +214,7 @@ final class AppModel: NSObject, ObservableObject {
         currentWorkoutPlan = Self.previewPlan
         messages = Self.previewMessages
         workoutLogs = Self.previewLogs
+        memoryFacts = Self.previewMemoryFacts
     }
     #endif
 
@@ -277,6 +285,13 @@ final class AppModel: NSObject, ObservableObject {
     ) async {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        #if DEBUG
+        if isPreviewSession {
+            await sendPreviewCoachMessage(trimmed)
+            return
+        }
+        #endif
 
         isSending = true
         defer { isSending = false }
@@ -486,6 +501,40 @@ final class AppModel: NSObject, ObservableObject {
 
         let allSetsDone = workout.exercises[exerciseIndex].completedSets.allSatisfy(\.completed)
         workout.exercises[exerciseIndex].exerciseDone = allSetsDone
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// Marks the next open set of an exercise done with the reps actually
+    /// done (counted out loud) at the current working weight. Returns the
+    /// set number completed (1-based), or nil if every set was already done.
+    @discardableResult
+    func completeNextSet(exerciseIndex: Int, reps: Int) -> Int? {
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex),
+              let setIndex = workout.exercises[exerciseIndex].completedSets.firstIndex(where: { !$0.completed })
+        else { return nil }
+        let weight = workingWeight(for: workout.exercises[exerciseIndex])
+        workout.exercises[exerciseIndex].completedSets[setIndex].completed = true
+        workout.exercises[exerciseIndex].completedSets[setIndex].reps = max(1, reps)
+        workout.exercises[exerciseIndex].completedSets[setIndex].weight = weight
+        workout.exercises[exerciseIndex].exerciseDone =
+            workout.exercises[exerciseIndex].completedSets.allSatisfy(\.completed)
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        return setIndex + 1
+    }
+
+    /// Raises a completed set's rep count — you kept counting past the
+    /// target. The extra reps are logged as done, so Coach sees you're
+    /// outgrowing the weight.
+    func updateSetReps(exerciseIndex: Int, setNumber: Int, reps: Int) {
+        let setIndex = setNumber - 1
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex),
+              workout.exercises[exerciseIndex].completedSets.indices.contains(setIndex)
+        else { return }
+        workout.exercises[exerciseIndex].completedSets[setIndex].reps = reps
         workout.updatedAt = Self.isoString(from: Date())
         activeWorkout = workout
     }
@@ -1150,6 +1199,71 @@ final class AppModel: NSObject, ObservableObject {
                     self?.progressSummary = Self.makeProgressSummary(from: data)
                 }
             }
+    }
+
+    private func listenForMemoryFacts(userId: String?) {
+        memoryFactListener?.remove()
+        memoryFacts = []
+
+        guard let userId else { return }
+
+        // The live cap is 100 facts; soft-deleted ones stay in the collection,
+        // so read past the cap and filter client-side.
+        memoryFactListener = db
+            .collection("users")
+            .document(userId)
+            .collection("memoryFacts")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 250)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        // Advisory surface, like progress: keep the last list.
+                        NSLog("[IronBoi] Memory facts listener error: \(error.localizedDescription)")
+                        return
+                    }
+                    self?.memoryFacts = (snapshot?.documents ?? [])
+                        .compactMap { MemoryFact.make(id: $0.documentID, data: $0.data()) }
+                }
+            }
+    }
+
+    /// The user's calendar date, YYYY-MM-DD — what a fact's `until` is
+    /// compared against.
+    var todayISO: String { Self.currentDateISO() }
+
+    /// Keeps a proposed fact. The listener picks up the new state.
+    func confirmMemoryFact(_ factId: String) async -> Bool {
+        await mutateMemoryFact(callable: "confirmMemoryFact", factId: factId) { fact in
+            MemoryFact(id: fact.id, category: fact.category, content: fact.content,
+                       source: fact.source, state: "confirmed", happenedOn: fact.happenedOn,
+                       until: fact.until, createdAt: fact.createdAt, expiresAt: nil)
+        }
+    }
+
+    /// Soft-deletes a fact; Coach stops seeing it on the next reply.
+    func deleteMemoryFact(_ factId: String) async -> Bool {
+        await mutateMemoryFact(callable: "deleteMemoryFact", factId: factId) { _ in nil }
+    }
+
+    private func mutateMemoryFact(
+        callable: String,
+        factId: String,
+        preview: (MemoryFact) -> MemoryFact?
+    ) async -> Bool {
+        #if DEBUG
+        if isPreviewSession {
+            memoryFacts = memoryFacts.compactMap { $0.id == factId ? preview($0) : $0 }
+            return true
+        }
+        #endif
+        do {
+            let _: EmptyFunctionResponse = try await callCallable(callable, data: ["factId": factId])
+            return true
+        } catch {
+            errorMessage = "Couldn't update Coach's memory. \(error.localizedDescription)"
+            return false
+        }
     }
 
     private static func makeProgressSummary(from data: [String: Any]) -> ProgressSummaryModel? {
@@ -1834,6 +1948,20 @@ extension AppModel {
         )
     }
 
+    /// Preview has no backend, so the coach answers locally — enough to
+    /// exercise the voice loop (listen → think → speak) on the simulator.
+    private func sendPreviewCoachMessage(_ content: String) async {
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        messages.append(CoachMessage(id: "pu\(stamp)", messageId: "pu\(stamp)", role: .user,
+            content: content, status: .complete, timestamp: Date(), riskLevel: nil))
+        isSending = true
+        try? await Task.sleep(nanoseconds: 1_400_000_000)
+        isSending = false
+        messages.append(CoachMessage(id: "pc\(stamp)", messageId: "pc\(stamp)", role: .coach,
+            content: "Got it. You said \u{201C}\(content)\u{201D}. In the real app I'd answer that with your plan in front of me. This is the preview, so I'm just showing you how talking to me feels.",
+            status: .complete, timestamp: Date(), riskLevel: nil))
+    }
+
     static var previewMessages: [CoachMessage] {
         let now = Date()
         return [
@@ -1865,6 +1993,32 @@ extension AppModel {
                         title: "Pain and injury workout adjustment rule",
                         url: nil),
                 ]),
+        ]
+    }
+
+    static var previewMemoryFacts: [MemoryFact] {
+        let now = Date()
+        return [
+            MemoryFact(id: "pf1", category: "safety_note",
+                       content: "Tweaked my left shoulder last Tuesday, sore on overhead presses",
+                       source: "user_stated", state: "confirmed", happenedOn: "2026-06-16", until: nil,
+                       createdAt: now.addingTimeInterval(-86_400 * 4), expiresAt: nil),
+            MemoryFact(id: "pf2", category: "equipment",
+                       content: "Hotel gym with dumbbells only until the 30th",
+                       source: "coach_inferred", state: "confirmed", happenedOn: nil, until: "2026-06-30",
+                       createdAt: now.addingTimeInterval(-86_400 * 2), expiresAt: nil),
+            MemoryFact(id: "pf3", category: "exercise_response",
+                       content: "Seems to recover slowly from heavy deadlifts — RPE climbs on day 2",
+                       source: "log_derived", state: "proposed", happenedOn: nil, until: nil,
+                       createdAt: now.addingTimeInterval(-86_400), expiresAt: now.addingTimeInterval(86_400 * 13)),
+            MemoryFact(id: "pf4", category: "preference",
+                       content: "Prefers morning sessions before work",
+                       source: "user_stated", state: "confirmed", happenedOn: nil, until: nil,
+                       createdAt: now.addingTimeInterval(-86_400 * 9), expiresAt: nil),
+            MemoryFact(id: "pf5", category: "plan_change",
+                       content: "Swapped overhead press for landmine press for the rest of the week (shoulder)",
+                       source: "coach_inferred", state: "confirmed", happenedOn: nil, until: nil,
+                       createdAt: now.addingTimeInterval(-86_400 * 3), expiresAt: nil),
         ]
     }
 

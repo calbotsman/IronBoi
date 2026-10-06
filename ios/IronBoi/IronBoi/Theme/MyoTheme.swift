@@ -25,6 +25,9 @@ enum MyoTheme {
         static let brick = Color(red: 0xA0 / 255, green: 0x40 / 255, blue: 0x30 / 255)
         /// #C06040 — caution, still in the red-pen family
         static let brickLight = Color(red: 0xC0 / 255, green: 0x60 / 255, blue: 0x40 / 255)
+        /// #F6A609 — the coach's body (orb-lab's agent amber). The warm half
+        /// of the pair; you are the cool half, blue by default.
+        static let coachAmber = Color(red: 0xF6 / 255, green: 0xA6 / 255, blue: 0x09 / 255)
         /// #5A8C6E — success on paper; never iOS system green
         static let sage = Color(red: 0x5A / 255, green: 0x8C / 255, blue: 0x6E / 255)
         /// rgba(26,20,16,0.06)
@@ -161,5 +164,44 @@ struct MyoCardModifier: ViewModifier {
 extension View {
     func myoCard() -> some View {
         modifier(MyoCardModifier())
+    }
+}
+
+/// Your colour in the conversation — what your words turn the coach's body
+/// as they arrive. Yours to choose; Coach stays warm ochre. Stored on this
+/// device as a hex string.
+enum YouColor {
+    static let storageKey = "youColorHex"
+    static let defaultHex = "4285F4"
+
+    /// Cool presets: they contrast with the coach's warm ochre. The custom
+    /// picker allows anything, warm included.
+    static let presets: [(name: String, hex: String)] = [
+        ("Blue", "4285F4"),
+        ("Sky", "2BA6E8"),
+        ("Teal", "12A5A0"),
+        ("Indigo", "5B5BF0"),
+        ("Violet", "9B5CF0"),
+    ]
+}
+
+extension Color {
+    /// From "RRGGBB" (a leading # is fine). Falls back to the default blue.
+    init(hex: String) {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let value = UInt32(cleaned, radix: 16) ?? UInt32(YouColor.defaultHex, radix: 16)!
+        self.init(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
+    /// "RRGGBB" in sRGB.
+    var hexString: String {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
+        let clamp = { (v: CGFloat) in Int((min(max(v, 0), 1) * 255).rounded()) }
+        return String(format: "%02X%02X%02X", clamp(r), clamp(g), clamp(b))
     }
 }

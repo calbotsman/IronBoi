@@ -3,10 +3,15 @@ import SwiftUI
 struct CoachView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var voiceInput = VoiceInputEngine()
+    @StateObject private var coachVoice = CoachVoice()
+    @StateObject private var bodyDirector = BodyDirector()
+    @AppStorage("coachSpeaksReplies") private var speaksReplies = true
+    @State private var showTranscript = false
+    @State private var showKeyboard = false
+    /// Bumped when a typed message asks for today's workout; the stage shows the card.
+    @State private var askedForWorkout = 0
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
-    @State private var showDeleteAccountConfirm = false
-    @State private var showDeleteAccountFinalConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -14,57 +19,33 @@ struct CoachView: View {
                 if !appModel.hasSession {
                     signedOutView
                 } else {
-                    if appModel.profile.preferences.coachingLens != .none {
-                        protocolBar
+                    CoachStageView(
+                        voiceInput: voiceInput,
+                        voice: coachVoice,
+                        director: bodyDirector,
+                        askedForWorkout: askedForWorkout,
+                        showTranscript: $showTranscript,
+                        showKeyboard: $showKeyboard
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        ProfileButton()
+                            .padding(.trailing, MyoTheme.Spacing.sm)
                     }
-                    messageList
-                    composer
+                    // The full conversation: a card floating over the coach,
+                    // not a drawer. Tap outside or × to put it away.
+                    .overlay {
+                        if showTranscript {
+                            transcriptCard
+                                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                        }
+                    }
+                    .animation(MyoTheme.Motion.fade, value: showTranscript)
                 }
             }
             .background(PaperBackground())
-            .navigationTitle("Coach")
-            .toolbar {
-                if appModel.hasSession {
-                    Menu {
-                        Button {
-                            appModel.signOut()
-                        } label: {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            showDeleteAccountConfirm = true
-                        } label: {
-                            Label("Delete Account…", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "person.crop.circle")
-                            .accessibilityLabel("Account")
-                    }
-                }
-            }
-            // Phase 3 Task 3.1 — two-step confirmation for account deletion.
-            // Apple's guideline 5.1.1(v) requires deletion to be
-            // discoverable; we keep the two-step pattern so accidental
-            // taps don't wipe data.
-            .alert("Delete account?", isPresented: $showDeleteAccountConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Continue", role: .destructive) {
-                    showDeleteAccountFinalConfirm = true
-                }
-            } message: {
-                Text("This will permanently delete your MYO account, all your workouts, daily checks, coach history, and memory facts the coach has saved about you. This cannot be undone.")
-            }
-            .alert("Are you sure?", isPresented: $showDeleteAccountFinalConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete forever", role: .destructive) {
-                    Task { await appModel.deleteAccount() }
-                }
-            } message: {
-                Text("Last chance. Tapping \"Delete forever\" signs you out and wipes everything within the next few minutes.")
-            }
+            // No title or toolbar: the coach's body is the screen. Account
+            // actions live on the You tab; the voice toggle in Conversation.
+            .toolbar(.hidden, for: .navigationBar)
             .alert("MYO", isPresented: Binding(
                 get: { appModel.errorMessage != nil || voiceInput.errorMessage != nil },
                 set: {
@@ -81,48 +62,64 @@ struct CoachView: View {
             } message: {
                 Text(appModel.errorMessage ?? voiceInput.errorMessage ?? "")
             }
-            .onChange(of: voiceInput.transcript) { _, transcript in
-                guard voiceInput.isListening else { return }
-                draft = transcript
+            // Typing is still here, one tap away — just not the default.
+            .sheet(isPresented: $showKeyboard) {
+                composer
+                    .presentationDetents([.height(96)])
+                    .presentationBackground(MyoTheme.Colors.cream)
+                    .onAppear { composerFocused = true }
             }
         }
     }
 
-    /// The active coaching protocol, surfaced as a hook. Tapping jumps to You
-    /// to change it. Hidden when the protocol is the default.
-    private var protocolBar: some View {
-        let lens = appModel.profile.preferences.coachingLens
-        return Button {
-            composerFocused = false
-            appModel.selectedTab = .you
-        } label: {
-            HStack(spacing: MyoTheme.Spacing.sm) {
-                Text("PROTOCOL")
-                    .myoStyle(.label)
-                    .foregroundStyle(MyoColor.redPen)
-                Text(lens.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(MyoColor.Text.primary.color)
-                if !lens.attribution.isEmpty {
-                    Text(lens.attribution)
-                        .myoStyle(.label)
-                        .foregroundStyle(MyoColor.Text.tertiary.color)
+    private var transcriptCard: some View {
+        ZStack {
+            // Paper scrim — the coach stays visible behind, dimmed.
+            MyoTheme.Colors.cream.opacity(0.72)
+                .ignoresSafeArea()
+                .onTapGesture { showTranscript = false }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Close conversation")
+
+            VStack(spacing: 0) {
+                HStack(spacing: MyoTheme.Spacing.sm) {
+                    MyoSectionLabel(text: "Conversation")
+                    Spacer()
+                    Button {
+                        speaksReplies.toggle()
+                        if !speaksReplies { coachVoice.stop() }
+                    } label: {
+                        Image(systemName: speaksReplies ? "speaker.wave.2" : "speaker.slash")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(speaksReplies ? "Mute Coach's voice" : "Unmute Coach's voice")
+                    Button {
+                        showTranscript = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close conversation")
                 }
-                Spacer()
-                Image(systemName: "slider.horizontal.3")
-                    .font(.footnote)
-                    .foregroundStyle(MyoColor.Text.tertiary.color)
+                .padding(.leading, MyoTheme.Spacing.md)
+                .padding(.trailing, MyoTheme.Spacing.xs)
+
+                MyoHairline()
+
+                messageList
             }
+            .frame(maxWidth: .infinity)
+            .myoCard()
+            .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 24, y: 8)
             .padding(.horizontal, MyoTheme.Spacing.md)
-            .padding(.vertical, MyoTheme.Spacing.sm)
-            .contentShape(Rectangle())
+            .padding(.vertical, MyoTheme.Spacing.xxl)
         }
-        .buttonStyle(.plain)
-        .background(MyoColor.Surface.selected.color.opacity(0.35))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(MyoColor.hairline).frame(height: 1)
-        }
-        .accessibilityHint("Change your coaching protocol in You")
     }
 
     private var signedOutView: some View {
@@ -232,7 +229,10 @@ struct CoachView: View {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            .background(MyoTheme.Colors.cream)
+            // Open on the newest message.
+            .onAppear {
+                if let last = appModel.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
         }
     }
 
@@ -245,17 +245,6 @@ struct CoachView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
                 .focused($composerFocused)
-
-            Button {
-                voiceInput.toggle()
-            } label: {
-                Image(systemName: voiceInput.isListening ? "mic.circle.fill" : "mic.circle")
-                    .font(.system(size: 30))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(voiceInput.isListening ? MyoTheme.Colors.brick : MyoTheme.Colors.ink)
-            }
-            .disabled(appModel.isSending)
-            .accessibilityLabel(voiceInput.isListening ? "Stop voice input" : "Start voice input")
 
             Button {
                 sendDraft()
@@ -279,8 +268,11 @@ struct CoachView: View {
 
     private func sendDraft() {
         let content = draft
-        voiceInput.stop()
         draft = ""
+        showKeyboard = false
+        // You named a move: the body steps into it while Coach answers.
+        if let move = MoveCue.move(in: content) { bodyDirector.perform(move) }
+        if WorkoutAsk.matches(content) { askedForWorkout += 1 }
         Task {
             await appModel.sendCoachMessage(content)
         }
@@ -332,7 +324,7 @@ struct CoachMessageBubble: View {
 
 /// The grounding made visible: a red-pen "Informed by" line under a coach
 /// reply, naming the reviewed sources that were in context for the turn.
-private struct CoachSourcesLine: View {
+struct CoachSourcesLine: View {
     let sources: [CoachSource]
 
     private var firstURL: URL? { sources.first(where: { $0.url != nil })?.url }

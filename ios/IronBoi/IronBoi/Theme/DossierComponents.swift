@@ -148,3 +148,29 @@ struct MyoValueRow<Trailing: View>: View {
         .frame(minHeight: 44)
     }
 }
+
+/// Opens the You screen. Sits in the top-right corner of every tab — an icon
+/// only, no label — so profile and settings stay one tap away without taking
+/// a tab.
+struct ProfileButton: View {
+    @EnvironmentObject private var appModel: AppModel
+
+    var body: some View {
+        if appModel.hasSession { button }
+    }
+
+    private var button: some View {
+        Button {
+            appModel.showProfile = true
+        } label: {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("You")
+        .accessibilityHint("Your profile, goals, memory and account")
+    }
+}
