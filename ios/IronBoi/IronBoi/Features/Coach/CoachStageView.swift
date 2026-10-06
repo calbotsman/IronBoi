@@ -304,12 +304,9 @@ struct CoachStageView: View {
             }
 
             if let proposal = appModel.pendingPlanAdjustmentProposal {
-                ScrollView {
-                    PlanAdjustmentProposalCard(proposal: proposal, isApplying: appModel.isSending) { scope in
-                        Task { await appModel.acceptPendingPlanAdjustmentProposal(scope: scope) }
-                    }
-                }
-                .scrollIndicators(.hidden)
+                PlanReviewCard(proposal: proposal)
+                    .padding(.horizontal, -MyoTheme.Spacing.sm)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             } else {
                 captionText
             }

@@ -220,6 +220,23 @@ final class AppModel: NSObject, ObservableObject {
         messages = Self.previewMessages
         workoutLogs = Self.previewLogs
         memoryFacts = Self.previewMemoryFacts
+        // MYO_DEMO_PROPOSAL=1: a sample plan change, to check the review card.
+        if ProcessInfo.processInfo.environment["MYO_DEMO_PROPOSAL"] == "1" {
+            pendingPlanAdjustmentProposal = PlanAdjustmentProposalSummary(
+                id: "demo", proposalId: "demo", category: "pain", riskLevel: "low",
+                summary: "Swap overhead pressing for a shoulder-friendly push",
+                rationale: "Your left shoulder is still sore on presses. Landmine press and push-ups keep the work without the overhead angle.",
+                dayKey: "Wed", patchTitle: "Adjusted sessions", patchType: "day_patch", changes: [],
+                dayPatchDetails: [
+                    ProposalDayPatchDetail(dayKey: "Wed", name: "Upper Push", exerciseLines: [
+                        "Landmine Press 4×8 @ 45 lb", "Incline DB Press 4×10 @ 50 lb", "Push-up 3×12",
+                        "Cable Fly 3×12 @ 25 lb", "Triceps Pushdown 3×12 @ 40 lb"]),
+                    ProposalDayPatchDetail(dayKey: "Fri", name: "Full Body", exerciseLines: [
+                        "Goblet Squat 4×8 @ 50 lb", "Landmine Press 3×8 @ 45 lb", "Seated Row 3×10 @ 110 lb"]),
+                ],
+                safetyNotes: ["Stop if pain gets sharp or travels down the arm."],
+                sourceCorpusEntryIds: [], requiresFollowUp: false, createdAt: "", scope: nil)
+        }
     }
     #endif
 
@@ -438,6 +455,24 @@ final class AppModel: NSObject, ObservableObject {
     // nil to use whatever scope the proposal already carries (e.g. legacy
     // proposals with a single implicit target day, and every ramp — a ramp
     // pins its own scope server-side).
+    /// "Not now": marks Coach's pending plan change declined. Rules allow the
+    /// owner to move a proposal from pending to rejected and nothing else.
+    func declinePendingPlanAdjustmentProposal() async {
+        guard let proposal = pendingPlanAdjustmentProposal else { return }
+        #if DEBUG
+        if isPreviewSession { pendingPlanAdjustmentProposal = nil; return }
+        #endif
+        guard let userId = user?.uid else { return }
+        do {
+            try await db.collection("users").document(userId)
+                .collection("planAdjustmentProposals").document(proposal.id)
+                .updateData(["decision": "rejected", "decidedAt": Self.isoString(from: Date())])
+            pendingPlanAdjustmentProposal = nil
+        } catch {
+            errorMessage = "Couldn't dismiss that. \(error.localizedDescription)"
+        }
+    }
+
     func acceptPendingPlanAdjustmentProposal(scope: String? = nil) async {
         guard !isSending, let pendingPlanAdjustmentProposal else { return }
 
