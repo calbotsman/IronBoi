@@ -122,60 +122,79 @@ struct CoachView: View {
         }
     }
 
+    /// Static meters for the intro orb — nobody's talking yet.
+    private static let quietYou = VoiceMeter()
+    private static let quietCoach = VoiceMeter()
+    @StateObject private var introBody = BodyDirector()
+
+    /// The intro: the coach's body, alive before you've said a word — it
+    /// rests, now and then takes shape and moves, and goes back to a blob.
     private var signedOutView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 56, weight: .bold))
-                .foregroundStyle(MyoTheme.Colors.ochre)
-
-            VStack(spacing: 8) {
-                Text("MYO Coach")
-                    .font(.largeTitle.bold())
-
-                Text("Sign in to start your private training thread.")
-                    .font(.body)
-                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
-                    .multilineTextAlignment(.center)
+        ZStack {
+            GeometryReader { geo in
+                OrbView(
+                    phase: .rest,
+                    you: Self.quietYou,
+                    agent: Self.quietCoach,
+                    focus: CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.36),
+                    director: introBody,
+                    scale: 0.9,
+                    loop: .squat,
+                    inWorkout: true
+                )
             }
+            .ignoresSafeArea()
 
-            Button {
-                appModel.signInWithApple()
-            } label: {
-                Label("Sign in with Apple", systemImage: "apple.logo")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(MyoTheme.Colors.ink)
-            .padding(.horizontal, 28)
+            VStack(spacing: 0) {
+                Spacer()
 
-            #if DEBUG
-            VStack(spacing: 10) {
-                Button {
-                    appModel.startPreviewSession()
-                } label: {
-                    Label("Preview the app (no backend)", systemImage: "eye")
-                        .font(.subheadline.weight(.semibold))
+                VStack(spacing: MyoTheme.Spacing.sm) {
+                    Text("MYO")
+                        .font(.system(size: 44, weight: .bold))
+                        .kerning(6)
+                        .foregroundStyle(MyoColor.Text.primary.color)
+                    Text("A strength coach you can talk to.")
+                        .myoStyle(.title)
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                        .multilineTextAlignment(.center)
+                    Text("It writes your plan, explains the why,\nand remembers what you tell it.")
+                        .myoStyle(.body)
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .tint(MyoColor.Action.primary.color)
-                .foregroundStyle(MyoColor.Text.primary.color)
+                .padding(.horizontal, MyoTheme.Spacing.lg)
 
-                Button("Dev sign-in (anonymous)") {
-                    Task { await appModel.signInAsDeveloper() }
+                Button {
+                    appModel.signInWithApple()
+                } label: {
+                    Label("Sign in with Apple", systemImage: "apple.logo")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MyoTheme.Colors.cream)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .background(MyoTheme.Colors.ink, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, MyoTheme.Spacing.lg)
+                .padding(.top, MyoTheme.Spacing.xl)
+
+                Text("Private by default. Your training stays yours.")
+                    .font(.caption)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+                    .padding(.top, MyoTheme.Spacing.md)
+
+                #if DEBUG
+                HStack(spacing: MyoTheme.Spacing.lg) {
+                    Button("Preview (no backend)") { appModel.startPreviewSession() }
+                    Button("Dev sign-in") { Task { await appModel.signInAsDeveloper() } }
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(MyoColor.Text.secondary.color)
+                .padding(.top, MyoTheme.Spacing.lg)
+                #endif
             }
-            .padding(.top, 4)
-            #endif
-
-            Spacer()
+            .padding(.bottom, MyoTheme.Spacing.lg)
         }
-        .padding()
     }
 
     private var messageList: some View {
