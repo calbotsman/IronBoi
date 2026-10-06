@@ -963,6 +963,8 @@ final class AppModel: NSObject, ObservableObject {
                 Task { @MainActor in
                     if let error {
                         self?.errorMessage = error.localizedDescription
+                        // Don't strand them on the blank loading screen; the alert says what failed.
+                        self?.profileLoaded = true
                         return
                     }
 
