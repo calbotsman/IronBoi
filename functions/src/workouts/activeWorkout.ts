@@ -135,6 +135,39 @@ export async function startWorkoutSession(
   return activeWorkout;
 }
 
+export const AbandonWorkoutSessionRequest = z.object({
+  sessionId: z.string().min(1),
+});
+export type AbandonWorkoutSessionRequest = z.infer<typeof AbandonWorkoutSessionRequest>;
+
+/**
+ * Throws away an unfinished session — a workout started and never finished,
+ * often days ago. Marks it abandoned (the app treats only `active` as live)
+ * and writes no workout log, so it never counts toward history or progress.
+ * A session that already finished is left alone.
+ */
+export async function abandonWorkoutSession(
+  db: Firestore,
+  userId: string,
+  request: AbandonWorkoutSessionRequest,
+) {
+  const activeRef = db.doc(activeWorkoutPath(userId));
+  const sessionRef = db.doc(workoutSessionPath(userId, request.sessionId));
+  const activeSnap = await activeRef.get();
+  const now = new Date().toISOString();
+  const patch = { status: "abandoned", updatedAt: now, serverUpdatedAt: FieldValue.serverTimestamp() };
+  const writes: Promise<unknown>[] = [];
+  if (activeSnap.get("sessionId") === request.sessionId && activeSnap.get("status") === "active") {
+    writes.push(activeRef.set(patch, { merge: true }));
+  }
+  const sessionSnap = await sessionRef.get();
+  if (sessionSnap.exists && sessionSnap.get("status") === "active") {
+    writes.push(sessionRef.set(patch, { merge: true }));
+  }
+  await Promise.all(writes);
+  return { abandoned: writes.length > 0 };
+}
+
 export async function finishWorkoutSession(
   db: Firestore,
   userId: string,

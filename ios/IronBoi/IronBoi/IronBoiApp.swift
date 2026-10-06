@@ -47,7 +47,10 @@ struct AppRootView: View {
 
     var body: some View {
         Group {
-            if appModel.user != nil && appModel.onboardingStatus != .complete {
+            if appModel.user != nil && !appModel.profileLoaded {
+                // Signed in, profile still loading: plain paper, no guessing.
+                PaperBackground().ignoresSafeArea()
+            } else if appModel.user != nil && appModel.onboardingStatus != .complete {
                 OnboardingView()
             } else {
                 // One screen: the coach. Plan, History and You live behind

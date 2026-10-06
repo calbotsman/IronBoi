@@ -45,6 +45,8 @@ import {
 } from "./paths.js";
 import {
   FinishWorkoutSessionRequest,
+  AbandonWorkoutSessionRequest,
+  abandonWorkoutSession,
   StartWorkoutSessionRequest,
   finishWorkoutSession,
   startWorkoutSession,
@@ -615,6 +617,14 @@ export const finishWorkoutSessionCallable = onCall(
     return { ok: true, ...result };
   },
 );
+
+// Throw away an unfinished session (started, never finished). No log written.
+export const abandonWorkoutSessionCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = AbandonWorkoutSessionRequest.parse(request.data ?? {});
+  const result = await abandonWorkoutSession(db, userId, parsed);
+  return { ok: true, ...result };
+});
 
 // --- Exercise swaps & weight rebaselining ------------------------------
 //

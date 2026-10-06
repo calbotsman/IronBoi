@@ -19,6 +19,10 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var messages: [CoachMessage] = []
     @Published private(set) var onboardingMessages: [CoachMessage] = []
     @Published private(set) var onboardingStatus: OnboardingStatus = .notStarted
+    /// False until the first profile snapshot lands. Until then the app
+    /// can't know whether to show onboarding or the coach, and guessing
+    /// flashed the onboarding screen at every launch.
+    @Published private(set) var profileLoaded = false
     @Published private(set) var onboardingStep: String = "goals"
     @Published private(set) var onboardingMissingFields: [String] = []
     @Published private(set) var pendingProgramProposal: ProgramProposalSummary?
@@ -210,6 +214,7 @@ final class AppModel: NSObject, ObservableObject {
     func startPreviewSession() {
         isPreviewSession = true
         onboardingStatus = .complete
+        profileLoaded = true
         profile = Self.previewProfile
         currentWorkoutPlan = Self.previewPlan
         messages = Self.previewMessages
@@ -587,6 +592,23 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
     }
 
+    /// Throws away the unfinished workout — nothing is logged.
+    func discardActiveWorkout() async {
+        guard !isWorkoutBusy, let workout = activeWorkout else { return }
+        isWorkoutBusy = true
+        defer { isWorkoutBusy = false }
+        #if DEBUG
+        if isPreviewSession { activeWorkout = nil; return }
+        #endif
+        do {
+            let _: EmptyFunctionResponse = try await callCallable(
+                "abandonWorkoutSessionCallable", data: ["sessionId": workout.sessionId])
+            activeWorkout = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func finishActiveWorkout() async {
         guard !isWorkoutBusy, let activeWorkout else { return }
         isWorkoutBusy = true
@@ -926,6 +948,7 @@ final class AppModel: NSObject, ObservableObject {
     private func listenForOnboardingState(userId: String?) {
         profileListener?.remove()
         onboardingStatus = .notStarted
+        profileLoaded = false
         onboardingStep = "goals"
         onboardingMissingFields = []
 
@@ -946,6 +969,7 @@ final class AppModel: NSObject, ObservableObject {
                     let data = snapshot?.data() ?? [:]
                     let rawStatus = data["onboardingStatus"] as? String ?? "not_started"
                     self?.onboardingStatus = OnboardingStatus(rawValue: rawStatus) ?? .notStarted
+                    self?.profileLoaded = true
                     self?.onboardingStep = data["onboardingStep"] as? String ?? "goals"
                     self?.onboardingMissingFields = data["onboardingMissingFields"] as? [String] ?? []
                     // Full profile struct — Preferences view reads from this

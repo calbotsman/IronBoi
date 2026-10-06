@@ -12,6 +12,20 @@ struct LiveWorkoutCard: View {
     private var doneSets: Int { workout.exercises.reduce(0) { $0 + $1.completedSetCount } }
     private var progress: Double { totalSets == 0 ? 0 : Double(doneSets) / Double(totalSets) }
     private var currentIndex: Int? { workout.exercises.firstIndex { !$0.exerciseDone } }
+    @State private var confirmDiscard = false
+
+    /// Started on an earlier day: it's a leftover, not today's session.
+    private var startedDay: String? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = f.date(from: workout.startedAt) ?? ISO8601DateFormatter().date(from: workout.startedAt),
+              !Calendar.current.isDateInToday(date) else { return nil }
+        return date.formatted(.dateTime.weekday(.abbreviated))
+    }
+
+    private var statusLabel: String {
+        startedDay.map { "Unfinished · \($0)" } ?? "In progress"
+    }
 
     var body: some View {
         Group {
@@ -34,13 +48,15 @@ struct LiveWorkoutCard: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("In progress")
+                        Text(statusLabel)
                             .myoStyle(.label)
                             .textCase(.uppercase)
                             .foregroundStyle(MyoColor.redPen)
-                        ElapsedText(startedAt: workout.startedAt)
-                            .myoStyle(.label)
-                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                        if startedDay == nil {
+                            ElapsedText(startedAt: workout.startedAt)
+                                .myoStyle(.label)
+                                .foregroundStyle(MyoColor.Text.tertiary.color)
+                        }
                     }
                     if let i = currentIndex {
                         let exercise = workout.exercises[i]
@@ -82,13 +98,15 @@ struct LiveWorkoutCard: View {
             VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
                 HStack(alignment: .firstTextBaseline) {
                     HStack(spacing: 6) {
-                        Text("In progress")
+                        Text(statusLabel)
                             .myoStyle(.label)
                             .textCase(.uppercase)
                             .foregroundStyle(MyoColor.redPen)
-                        ElapsedText(startedAt: workout.startedAt)
-                            .myoStyle(.label)
-                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                        if startedDay == nil {
+                            ElapsedText(startedAt: workout.startedAt)
+                                .myoStyle(.label)
+                                .foregroundStyle(MyoColor.Text.tertiary.color)
+                        }
                     }
                     Spacer()
                     Button {
@@ -164,7 +182,26 @@ struct LiveWorkoutCard: View {
             .buttonStyle(.plain)
             .disabled(appModel.isWorkoutBusy || doneSets == 0)
             .opacity(doneSets == 0 ? 0.4 : 1)
-            .padding(MyoTheme.Spacing.md)
+            .padding(.horizontal, MyoTheme.Spacing.md)
+            .padding(.top, MyoTheme.Spacing.md)
+
+            Button("Discard workout") { confirmDiscard = true }
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.tertiary.color)
+                .frame(minHeight: 44)
+                .padding(.bottom, MyoTheme.Spacing.xs)
+                .disabled(appModel.isWorkoutBusy)
+        }
+        .alert("Discard this workout?", isPresented: $confirmDiscard) {
+            Button("Keep it", role: .cancel) {}
+            Button("Discard", role: .destructive) {
+                Task {
+                    await appModel.discardActiveWorkout()
+                    expanded = false
+                }
+            }
+        } message: {
+            Text("Nothing from it will be saved to your history.")
         }
     }
 
