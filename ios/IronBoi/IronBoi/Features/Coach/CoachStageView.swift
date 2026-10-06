@@ -352,8 +352,20 @@ struct CoachStageView: View {
             guard !listening, conversationActive, awaitingReplyAfter == nil, !voice.isSpeaking else { return }
             let now = Date()
             silentRestarts = silentRestarts.filter { now.timeIntervalSince($0) < 10 } + [now]
-            if voiceInput.errorMessage != nil || silentRestarts.count >= 3 {
+            if voiceInput.errorMessage != nil {
                 endConversation()
+            } else if silentRestarts.count >= 3 {
+                // Mid-workout the mic stays on — quiet is normal between
+                // sets — just back off a moment before listening again.
+                // Outside one, a run of silence ends the conversation.
+                if appModel.activeWorkout != nil {
+                    Task {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        resumeListening()
+                    }
+                } else {
+                    endConversation()
+                }
             } else {
                 resumeListening()
             }
@@ -552,12 +564,33 @@ struct CoachStageView: View {
             }
             // Scrolled pills slide under the keyboard's glass, not over it.
             .zIndex(1)
+            micButton.zIndex(1)
             if phase == .rest {
                 quickTaps.transition(.opacity)
             } else {
                 Spacer()
             }
         }
+    }
+
+    /// The mic, on or off at a glance. On means hands-free: MYO listens
+    /// until you turn it off (it stays on through a workout).
+    private var micButton: some View {
+        let on = conversationActive
+        return Button {
+            talkTapped(fromMic: true)
+        } label: {
+            Image(systemName: on ? "mic.fill" : "mic.slash")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.secondary.color)
+                .symbolEffect(.pulse, isActive: on && phase == .listening)
+                .frame(width: 52, height: 52)
+                .contentShape(Circle())
+                .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(on ? "Mic on" : "Mic off")
+        .accessibilityHint(on ? "Turns the mic off" : "Turns the mic on so you can talk to MYO")
     }
 
     private func sideButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
@@ -593,9 +626,9 @@ struct CoachStageView: View {
 
     /// One tap starts a hands-free conversation; any tap ends it — while
     /// you're talking, while Coach thinks, or while Coach speaks.
-    private func talkTapped() {
+    private func talkTapped(fromMic: Bool = false) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if conversationActive, phase == .speaking {
+        if conversationActive, phase == .speaking, !fromMic {
             cutIn = true
             voice.stop()
             voiceInput.listen()

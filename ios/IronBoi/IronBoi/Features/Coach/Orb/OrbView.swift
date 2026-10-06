@@ -1,4 +1,5 @@
 import SwiftUI
+import simd
 import QuartzCore
 
 /// One voice's readings for a frame. Written from audio/speech callbacks,
@@ -107,7 +108,7 @@ final class OrbModel {
     private var lift: Float = 0.05
     private(set) var squash: Float = 1
     private var squashVelocity: Float = 0
-    /// The person is folded up inside the blob, ready to unfold.
+    /// The person is gathered into the blob's shape, ready to grow out of it.
     private var folded = false
     private(set) var lobes = SIMD3<Float>(0, 0, 0)
     private(set) var think: Float = 0
@@ -259,14 +260,42 @@ final class OrbModel {
                 pose = alive
             }
         }
-        let motionEase = reduceMotion ? 1 : 1 - exp(-dt * 7)
-        // Fully a blob: fold the person up inside it.
-        if form < 0.03, pose.form == 0, !reduceMotion, !folded {
-            joints = OneBodyMotion.tucked().map { Joint($0.x * 0.6, $0.y * 0.6, $0.z * 0.7) }
-            jointVelocity = jointVelocity.map { _ in .zero }
-            folded = true
+        // The blob, as a person: every joint at its centre, as wide as it
+        // is. A person in this pose has exactly the blob's outline, so the
+        // two trade places without a visible crossfade.
+        let sphereRadius = radius / max(bodyScale * Self.size, 0.01)
+        let sphere = [Joint](repeating: Joint(0, 0, sphereRadius), count: joints.count)
+        if reduceMotion {
+            form += (pose.form - form)
+            moveJoints(toward: pose.joints, dt: dt, reduceMotion: true)
+        } else if pose.form < 0.01 {
+            if form > 0 {
+                // Becoming the blob: gather into its shape first, then hand
+                // over — with a little plop.
+                moveJoints(toward: sphere, dt: dt, reduceMotion: false, stiffness: 1.5)
+                let spread = joints.map { simd_length(SIMD2($0.x, $0.y)) + abs($0.z - sphereRadius) }.max() ?? 0
+                if spread < 0.09 {
+                    form = max(0, form - dt * 7)
+                    if form == 0 {
+                        squashVelocity -= 2.4
+                        folded = true
+                    }
+                }
+            } else {
+                joints = sphere
+                jointVelocity = jointVelocity.map { _ in .zero }
+                folded = true
+            }
+        } else {
+            // Taking shape: start as the blob's exact outline and grow out of it.
+            if folded {
+                joints = sphere
+                jointVelocity = jointVelocity.map { _ in .zero }
+                folded = false
+            }
+            form += (pose.form - form) * (1 - exp(-dt * 14))
+            moveJoints(toward: pose.joints, dt: dt, reduceMotion: false)
         }
-        form += (pose.form - form) * motionEase
         // The blob's squash is a loose spring: a landing presses it flat and
         // it wobbles back round.
         let squashTarget = pose.squash ?? squashBase
@@ -276,10 +305,6 @@ final class OrbModel {
             squashVelocity += (-(13 * 13) * (squash - squashTarget) - 2 * 0.35 * 13 * squashVelocity) * dt
             squash = min(max(squash + squashVelocity * dt, 0.55), 1.4)
         }
-        // Folded up inside the blob, the person waits there (unseen) and
-        // unfolds out of a ball the next time it takes shape.
-        if folded, pose.form > 0 { folded = false }
-        if !folded { moveJoints(toward: pose.joints, dt: dt, reduceMotion: reduceMotion) }
         updateGear(for: pose, dt: dt, reduceMotion: reduceMotion)
         // Eased: acts switch between side-on and front-on.
         armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * 6))
@@ -348,7 +373,7 @@ extension OrbModel {
         gearArray = flat
     }
 
-    fileprivate func moveJoints(toward targets: [Joint], dt: Float, reduceMotion: Bool) {
+    fileprivate func moveJoints(toward targets: [Joint], dt: Float, reduceMotion: Bool, stiffness: Float = 1) {
         guard !reduceMotion else {
             joints = targets
             jointVelocity = jointVelocity.map { _ in .zero }
@@ -361,7 +386,8 @@ extension OrbModel {
         for i in joints.indices {
             let target = targets[i]
             let planted = [5, 8].contains(i) && target.y <= floor + 0.01
-            let (w, z) = Self.spring(i, planted: planted)
+            let (base, z) = Self.spring(i, planted: planted)
+            let w = base * stiffness
             var position = SIMD2(joints[i].x, joints[i].y)
             var velocity = jointVelocity[i]
             let goal = SIMD2(target.x, target.y)

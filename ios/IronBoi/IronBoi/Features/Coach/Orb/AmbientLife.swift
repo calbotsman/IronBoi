@@ -74,9 +74,11 @@ struct AmbientLife {
             return t - start >= duration
         case .cheer(let start, _): return t - start >= WorkoutLife.cheerSeconds
         case .wave(let start): return t - start >= 1.8
-        case .somersault(let start, _), .cannonball(let start, _), .melt(let start, _):
-            return t - start >= 1.9
-        case .dive(let start, _): return t - start >= 1.7
+        // Each ends where the body gathers itself into the blob.
+        case .somersault(let start, _): return t - start >= 1.35
+        case .cannonball(let start, _): return t - start >= 1.05
+        case .dive(let start, _): return t - start >= 1.0
+        case .melt(let start, _): return t - start >= 1.25
         }
     }
 
@@ -103,11 +105,11 @@ struct AmbientLife {
         #if DEBUG
         // MYO_AMBIENT=dive: always pick this act, to tune it.
         if let forced = ProcessInfo.processInfo.environment["MYO_AMBIENT"], !forced.isEmpty {
-            kind = forced == "dive" && abs(x) < 0.2 ? "walk" : forced
+            kind = forced == "dive" && abs(x) < 0.15 ? "walk" : forced
         }
         #endif
         if kind == "exit" {
-            kind = (["somersault", "cannonball", "melt"] + (abs(x) >= 0.2 ? ["dive", "dive"] : [])).randomElement()!
+            kind = (["somersault", "cannonball", "melt"] + (abs(x) >= 0.15 ? ["dive", "dive"] : [])).randomElement()!
             // Head for the middle — that's where the blob is.
             facing = abs(x) > 0.05 ? (x > 0 ? -1 : 1) : (Bool.random() ? 1 : -1)
         } else if Bool.random() {
@@ -117,8 +119,9 @@ struct AmbientLife {
 
         switch kind {
         case "walk":
-            var to = Float.random(in: -0.3...0.3)
-            if abs(to - x) < 0.18 { to = x > 0 ? x - 0.3 : x + 0.3 }
+            // Stays well inside the screen, so a dive from the edge fits too.
+            var to = Float.random(in: -0.25...0.25)
+            if abs(to - x) < 0.15 { to = x > 0 ? x - 0.25 : x + 0.25 }
             facing = to > x ? 1 : -1
             return .walk(start: t, from: x, to: to, duration: max(1.4, abs(to - x) / 0.22 + 0.5))
         case "squats": return .squats(start: t, reps: Int.random(in: 2...3))
@@ -221,57 +224,49 @@ struct AmbientLife {
         return pose
     }
 
-    /// Tuck, roll forward to the middle, unroll into the blob.
+    /// Tuck and roll forward into the middle; the body then gathers into
+    /// the blob from wherever the roll ends.
     private static func somersault(_ t: Float, travel: Float, time: Float) -> ExitFrame {
         let stand = Rig.side(hip: SIMD2(0, 0.005), tilt: 0.05,
                              arms: [(-Float.pi / 2 + 0.1, -Float.pi / 2 + 0.25), (-Float.pi / 2 + 0.15, -Float.pi / 2 + 0.3)],
                              feet: [SIMD2(-0.02, Rig.floor), SIMD2(0.03, Rig.floor)])
         let ball = OneBodyMotion.tucked()
-        let ground: Float = -0.24
+        let ground: Float = -0.22
         if t < 0.45 {
             let u = smooth(t / 0.45)
             let tuck = OneBodyMotion.turned(ball, by: 0, offset: SIMD2(0, ground))
             return ExitFrame(joints: zip(stand, tuck).map { $0 + ($1 - $0) * u }, form: 1)
         }
-        if t < 1.35 {
-            let u = (t - 0.45) / 0.9
-            let eased = u * u * (3 - 2 * u)
-            let center = SIMD2<Float>(travel * eased, ground + 0.035 * sin(u * .pi))
-            return ExitFrame(joints: OneBodyMotion.turned(ball, by: -2 * .pi * eased, offset: center), form: 1)
-        }
-        let u = smooth((t - 1.35) / 0.4)
-        let center = SIMD2<Float>(travel, ground + 0.2 * u)
-        return ExitFrame(joints: OneBodyMotion.turned(ball, by: 0, offset: center),
-                         form: 1 - u, squash: t < 1.6 ? 0.82 : nil)
+        let u = min((t - 0.45) / 0.9, 1)
+        let eased = u * u * (3 - 2 * u)
+        // Rolls up off the floor into the middle as it comes round.
+        let center = SIMD2<Float>(travel * eased, ground + 0.22 * eased * eased)
+        return ExitFrame(joints: OneBodyMotion.turned(ball, by: -2 * .pi * eased, offset: center), form: 1)
     }
 
-    /// Load, spring up into a tuck, drop into the middle with a splash.
+    /// Load, spring up into a tuck, and drop into the middle.
     private static func cannonball(_ t: Float, travel: Float, time: Float) -> ExitFrame {
         let crouch = ExerciseMotion(.squat, .none).frame(holding: 0.7, time: time).joints
         let ball = OneBodyMotion.tucked()
         if t < 0.3 {
             return ExitFrame(joints: crouch, form: 1)
         }
-        if t < 0.95 {
-            let u = (t - 0.3) / 0.65
-            let curl = smooth(u / 0.35)
-            let center = SIMD2<Float>(travel * u, -0.15 + sin(u * .pi) * 0.42)
-            let tuck = OneBodyMotion.turned(ball, by: -0.8 * u, offset: center)
-            return ExitFrame(joints: zip(crouch, tuck).map { $0 + ($1 - $0) * curl }, form: 1)
-        }
-        let u = smooth((t - 0.95) / 0.25)
-        let center = SIMD2<Float>(travel, -0.15 + 0.1 * u)
-        return ExitFrame(joints: OneBodyMotion.turned(ball, by: -0.8, offset: center),
-                         form: 1 - u, squash: t < 1.22 ? 0.66 : nil)
+        let u = min((t - 0.3) / 0.75, 1)
+        let curl = smooth(u / 0.35)
+        // Up and over, falling into the blob's centre.
+        let center = SIMD2<Float>(travel * smooth(u), -0.15 * (1 - u) + sin(u * .pi) * 0.38)
+        let tuck = OneBodyMotion.turned(ball, by: -0.9 * u, offset: center)
+        return ExitFrame(joints: zip(crouch, tuck).map { $0 + ($1 - $0) * curl }, form: 1)
     }
 
-    /// Wind up, then a head-first dive across into the middle.
+    /// Wind up, then a head-first dive into the middle — kept steep and
+    /// short so it never leaves the screen.
     private static func dive(_ t: Float, travel: Float) -> ExitFrame {
         if t < 0.35 {
             let u = smooth(t / 0.35)
             return ExitFrame(joints: Rig.side(hip: SIMD2(0, -0.08 * u), tilt: 0.35 * u,
-                                              arms: [(-.pi / 2 - 0.8 * u, -.pi / 2 - 0.7 * u),
-                                                     (-.pi / 2 - 0.75 * u, -.pi / 2 - 0.65 * u)],
+                                              arms: [(-Float.pi / 2 - 0.8 * u, -Float.pi / 2 - 0.7 * u),
+                                                     (-Float.pi / 2 - 0.75 * u, -Float.pi / 2 - 0.65 * u)],
                                               feet: [SIMD2(-0.06, Rig.floor), SIMD2(0.05, Rig.floor)]), form: 1)
         }
         // Long and straight, arms reaching past the head.
@@ -279,16 +274,14 @@ struct AmbientLife {
                                 arms: [(Float.pi / 2 - 0.05, Float.pi / 2 - 0.05), (Float.pi / 2 - 0.12, Float.pi / 2 - 0.12)],
                                 feet: [SIMD2(-0.02, -0.39), SIMD2(0.02, -0.39)])
         let u = min((t - 0.35) / 0.65, 1)
-        let angle = -(0.5 + 1.25 * u)
-        let center = SIMD2<Float>(travel * u, 0.02 + 0.3 * sin(u * .pi * 0.85))
-        let joints = OneBodyMotion.turned(superman, by: angle, offset: center)
-        if t < 1.0 { return ExitFrame(joints: joints, form: 1) }
-        let enter = smooth((t - 1.0) / 0.25)
-        return ExitFrame(joints: joints, form: 1 - enter, squash: t < 1.25 ? 0.74 : nil)
+        let eased = smooth(u)
+        let angle = -(0.35 + 0.95 * eased)
+        let center = SIMD2<Float>(travel * 0.8 * eased, -0.04 + 0.16 * sin(u * .pi))
+        return ExitFrame(joints: OneBodyMotion.turned(superman, by: angle, offset: center), form: 1)
     }
 
-    /// Knees go, then everything slumps into a puddle that puffs back up
-    /// as the blob.
+    /// Knees go, then everything slumps into a puddle — which then pulls
+    /// itself up into the blob.
     private static func melt(_ t: Float, time: Float) -> ExitFrame {
         var j = OneBodyMotion.standing(time)
         if t < 0.35 {
@@ -296,13 +289,12 @@ struct AmbientLife {
             for i in 0...8 { j[i].y -= 0.05 * smooth(t / 0.35); j[i].x += wobble }
             return ExitFrame(joints: j, form: 1)
         }
-        let u = smooth((t - 0.35) / 0.95)
+        let u = smooth((t - 0.35) / 0.9)
         for i in j.indices {
             let floorY = -0.32 + (j[i].y - Rig.floor) * 0.22
             j[i] = Joint(j[i].x * (1 + 0.6 * u), j[i].y + (floorY - j[i].y) * u, j[i].z * (1 + 0.35 * u))
         }
-        let gone = smooth((t - 0.85) / 0.55)
-        return ExitFrame(joints: j, form: 1 - gone, squash: t > 0.9 && t < 1.45 ? 0.6 : nil, across: u)
+        return ExitFrame(joints: j, form: 1, across: u)
     }
 
     /// Side-on, facing +x. Steps come from distance covered, so the legs
