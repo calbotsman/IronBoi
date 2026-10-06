@@ -106,6 +106,9 @@ final class OrbModel {
     private(set) var center = SIMD2<Float>(0, 0.05)
     private var lift: Float = 0.05
     private(set) var squash: Float = 1
+    private var squashVelocity: Float = 0
+    /// The person is folded up inside the blob, ready to unfold.
+    private var folded = false
     private(set) var lobes = SIMD3<Float>(0, 0, 0)
     private(set) var think: Float = 0
     /// The lobes' rotation angle, accumulated so a change in speed never
@@ -179,7 +182,7 @@ final class OrbModel {
         lift += ((0.05 - you.presence * lean) * scale - lift) * k
         center = anchor + SIMD2(0, lift)
         let pitch: Float = 0.5 + (agent.bands.y - 0.5) * 0.4
-        squash += (1 - you.presence * squashGain + agentPresence * (pitch - 0.5) * 0.2 - squash) * k
+        let squashBase = 1 - you.presence * squashGain + agentPresence * (pitch - 0.5) * 0.2
         let lobeTarget = agent.bands * lobeGains * agentPresence + SIMD3(repeating: agent.peak * agentPresence * 0.02)
         lobes += (lobeTarget - lobes) * k
         think += (((phase == .thinking) ? 1 : 0) - think) * k * 0.5
@@ -257,8 +260,26 @@ final class OrbModel {
             }
         }
         let motionEase = reduceMotion ? 1 : 1 - exp(-dt * 7)
+        // Fully a blob: fold the person up inside it.
+        if form < 0.03, pose.form == 0, !reduceMotion, !folded {
+            joints = OneBodyMotion.tucked().map { Joint($0.x * 0.6, $0.y * 0.6, $0.z * 0.7) }
+            jointVelocity = jointVelocity.map { _ in .zero }
+            folded = true
+        }
         form += (pose.form - form) * motionEase
-        moveJoints(toward: pose.joints, dt: dt, reduceMotion: reduceMotion)
+        // The blob's squash is a loose spring: a landing presses it flat and
+        // it wobbles back round.
+        let squashTarget = pose.squash ?? squashBase
+        if reduceMotion {
+            squash += (squashTarget - squash) * k
+        } else {
+            squashVelocity += (-(13 * 13) * (squash - squashTarget) - 2 * 0.35 * 13 * squashVelocity) * dt
+            squash = min(max(squash + squashVelocity * dt, 0.55), 1.4)
+        }
+        // Folded up inside the blob, the person waits there (unseen) and
+        // unfolds out of a ball the next time it takes shape.
+        if folded, pose.form > 0 { folded = false }
+        if !folded { moveJoints(toward: pose.joints, dt: dt, reduceMotion: reduceMotion) }
         updateGear(for: pose, dt: dt, reduceMotion: reduceMotion)
         // Eased: acts switch between side-on and front-on.
         armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * 6))

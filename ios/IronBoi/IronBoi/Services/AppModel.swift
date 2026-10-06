@@ -355,6 +355,9 @@ final class AppModel: NSObject, ObservableObject {
                 "structuredAnswer": structuredAnswer ?? [:],
                 // Spoken turns get short, list-free replies made for the ear.
                 "inputMode": spoken ? "live_voice" : "text",
+                // How you've asked Coach to talk ("no tips", "calm down").
+                "coachTips": UserDefaults.standard.string(forKey: CoachingStyle.tipsKey) ?? CoachingStyle.Tips.full.rawValue,
+                "coachTone": UserDefaults.standard.string(forKey: CoachingStyle.toneKey) ?? CoachingStyle.Tone.hype.rawValue,
                 // Local calendar date — a chat-driven "yes, just today" keys
                 // its override to the user's day, not the server timezone.
                 "clientDate": Self.currentDateISO(),

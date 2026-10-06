@@ -47,6 +47,9 @@ struct BodyPose {
     /// What's held, and whether there's a bench underneath.
     var gear: Gear = .none
     var bench = false
+    /// Squash the blob toward this (1 = round) — a landing. It springs back
+    /// with a wobble on its own.
+    var squash: Float? = nil
 }
 
 enum OneBodyMotion {
@@ -122,6 +125,27 @@ enum OneBodyMotion {
     static func variation(_ rep: Float) -> Float {
         let s = sin(rep * 12.9898 + 78.233) * 43758.5453
         return s - floor(s)
+    }
+
+    /// Curled into a ball, side-on facing +x, centred on the origin —
+    /// rolling, falling, and what the body unfolds from when it takes shape.
+    static func tucked() -> [Joint] {
+        [
+            Joint(0.10, 0.10, 0.15), Joint(0.0, 0.07, 0.17), Joint(-0.10, -0.04, 0.16),
+            Joint(0.02, 0.07, 0.10), Joint(0.10, -0.02, 0.08), Joint(0.12, -0.10, 0.09),
+            Joint(0.04, 0.07, 0.10), Joint(0.12, -0.02, 0.08), Joint(0.14, -0.10, 0.09),
+            Joint(0.10, 0.0, 0.11), Joint(-0.02, -0.14, 0.10), Joint(0.12, 0.0, 0.11), Joint(0.0, -0.14, 0.10),
+        ]
+    }
+
+    /// Every joint turned `angle` radians about `pivot` and moved by `offset`.
+    static func turned(_ joints: [Joint], by angle: Float, about pivot: SIMD2<Float> = .zero,
+                       offset: SIMD2<Float> = .zero) -> [Joint] {
+        let c = cos(angle), s = sin(angle)
+        return joints.map { j in
+            let x = j.x - pivot.x, y = j.y - pivot.y
+            return Joint(pivot.x + x * c - y * s + offset.x, pivot.y + x * s + y * c + offset.y, j.z)
+        }
     }
 
     static func crouching() -> [Joint] {
