@@ -594,20 +594,42 @@ final class AppModel: NSObject, ObservableObject {
         return index
     }
 
-    /// Replaces a lift with another, keeping its sets and reps. Sets already
-    /// done on the old lift stay with it, so it's only swapped if none were.
-    func swapWorkoutExercise(_ index: Int, to name: String, weight: Double) {
-        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+    /// Replaces a lift with another, keeping its sets and reps. If sets were
+    /// already done on the old lift they stay logged with it, and the new
+    /// lift takes over only the sets left. Returns the new lift's index.
+    @discardableResult
+    func swapWorkoutExercise(_ index: Int, to name: String, weight: Double) -> Int? {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return nil }
         let old = workout.exercises[index]
-        workout.exercises[index].name = name
-        workout.exercises[index].targetWeight = weight
-        workout.exercises[index].completedSets = (0..<old.targetSets).map {
-            ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+        let done = old.completedSets.filter(\.completed)
+        let wasCurrent = currentExerciseIndex == index
+        let target: Int
+        if done.isEmpty {
+            workout.exercises[index].name = name
+            workout.exercises[index].targetWeight = weight
+            workout.exercises[index].completedSets = (0..<old.targetSets).map {
+                ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+            }
+            workout.exercises[index].exerciseDone = false
+            target = index
+        } else {
+            workout.exercises[index].completedSets = done
+            workout.exercises[index].targetSets = done.count
+            workout.exercises[index].exerciseDone = true
+            // Every set already done: the swap is a fresh lift at full sets.
+            let left = old.targetSets > done.count ? old.targetSets - done.count : old.targetSets
+            target = workout.exercises.count
+            workout.exercises.append(ActiveWorkoutExercise(
+                exerciseIndex: target, name: name, targetSets: left, targetReps: old.targetReps,
+                targetWeight: weight,
+                completedSets: (0..<left).map { ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil) },
+                exerciseDone: false, notes: nil))
+            if wasCurrent { focusedExerciseIndex = target }
         }
-        workout.exercises[index].exerciseDone = false
         workout.updatedAt = Self.isoString(from: Date())
         activeWorkout = workout
         sessionChanges.append("Swapped \(old.name) for \(name)")
+        return target
     }
 
     /// Skips a lift today: it's crossed off and left out of the log.

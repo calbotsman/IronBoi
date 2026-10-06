@@ -817,8 +817,13 @@ struct CoachStageView: View {
             }
         case .swap(let index, let name):
             let old = workout.exercises[index].name
-            appModel.swapWorkoutExercise(index, to: name, weight: 0)
-            if index == currentExerciseIndex {
+            let wasCurrent = index == currentExerciseIndex
+            let swapped = appModel.swapWorkoutExercise(index, to: name, weight: 0)
+            if swapped != index, wasCurrent {
+                // Sets were done on the old lift; the new one is now current
+                // and gets introduced (see onChange).
+                resumeListening()
+            } else if swapped == index, wasCurrent {
                 introduce(exercise: index, first: false)
             } else {
                 confirm("Swapped \(Self.short(old)) for \(name).")
