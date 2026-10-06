@@ -365,6 +365,18 @@ type OpenRouterResponsePayload = {
   error?: { code?: number | string; message?: string };
 };
 
+/**
+ * The vendor refused the request for account reasons — out of credits (402),
+ * key spend limit (403) or a bad key (401). Not transient and not the user's
+ * fault; split out so it alerts as billing instead of a generic turn error.
+ */
+export class ModelBillingError extends Error {
+  constructor(readonly status: number) {
+    super(`OpenRouter refused the request for billing/auth reasons (HTTP ${status})`);
+    this.name = "ModelBillingError";
+  }
+}
+
 export class OpenRouterCoachProvider implements CoachModelProvider {
   provider = "openrouter" as const;
   // Deliberately a SEPARATE env var from IRONBOI_COACH_MODEL. Model ids are
@@ -412,6 +424,11 @@ export class OpenRouterCoachProvider implements CoachModelProvider {
         // JSON surfaces as a malformed call rather than an obvious error.
         max_tokens: tools && tools.length > 0 ? 2048 : 900,
         temperature: 0.4,
+        // Route only to upstream providers that don't store or train on
+        // request content. OpenRouter's default ("allow") may pick ones that
+        // do, and the privacy policy (legal/privacy-policy.md §3) promises
+        // users their chats aren't used for training.
+        provider: { data_collection: "deny" },
       }),
     });
   }
@@ -453,6 +470,9 @@ export class OpenRouterCoachProvider implements CoachModelProvider {
         outcome: `http_${response.status}`,
         errorDetail: bodySnippet,
       });
+      if ([401, 402, 403].includes(response.status)) {
+        throw new ModelBillingError(response.status);
+      }
       throw new Error(`OpenRouter request failed with HTTP ${response.status}`);
     }
 
@@ -463,6 +483,10 @@ export class OpenRouterCoachProvider implements CoachModelProvider {
         outcome: `code_${payload.error.code ?? "unknown"}`,
         errorDetail: String(payload.error.message ?? "").slice(0, 200),
       });
+      const code = Number(payload.error.code);
+      if ([401, 402, 403].includes(code)) {
+        throw new ModelBillingError(code);
+      }
       throw new Error("OpenRouter returned an error response");
     }
     return payload;

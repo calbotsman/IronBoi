@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  ModelBillingError,
   OpenRouterCoachProvider,
   selectCoachModelProvider,
 } from "../../../src/coach/modelProvider.js";
@@ -74,6 +75,8 @@ describe("OpenRouterCoachProvider", () => {
     expect(body.model).toBe("google/gemini-2.5-flash");
     expect(body.messages[0]).toEqual({ role: "system", content: "system" });
     expect(body.messages[1]).toEqual({ role: "user", content: "hello" });
+    // The privacy policy promises no training on chats.
+    expect(body.provider).toEqual({ data_collection: "deny" });
   });
 
   it("gives zero-arg tools an explicit empty object, not an omitted field", async () => {
@@ -247,11 +250,37 @@ describe("OpenRouterCoachProvider", () => {
   it("treats a 200 body carrying an error as a failure, not an empty reply", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(jsonResponse({ error: { code: 402, message: "Insufficient credits" } })),
+      vi.fn().mockResolvedValue(jsonResponse({ error: { code: 400, message: "Bad request" } })),
     );
     await expect(
       new OpenRouterCoachProvider("k").generateCoachReply({ system: "s", userContent: "u" }),
     ).rejects.toThrow("OpenRouter returned an error response");
+  });
+
+  // Out of credits / key spend limit: fail once, fast, as a billing error —
+  // the nightly E2E outages on 09-22, 09-23 and 10-04 looked like this.
+  it("surfaces an out-of-credits 402 as a billing error without retrying", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 402,
+      headers: { get: () => null },
+      text: async () => "Insufficient credits",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      new OpenRouterCoachProvider("k").generateCoachReply({ system: "s", userContent: "u" }),
+    ).rejects.toBeInstanceOf(ModelBillingError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces a 402 carried in a 200 error body as a billing error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: { code: 402, message: "Insufficient credits" } })),
+    );
+    await expect(
+      new OpenRouterCoachProvider("k").generateCoachReply({ system: "s", userContent: "u" }),
+    ).rejects.toBeInstanceOf(ModelBillingError);
   });
 
   it("honours IRONBOI_OPENROUTER_MODEL", () => {

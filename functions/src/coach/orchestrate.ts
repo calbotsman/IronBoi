@@ -12,7 +12,7 @@ import {
 import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
-import { selectCoachModelProvider, type CoachToolExecutor } from "./modelProvider.js";
+import { ModelBillingError, selectCoachModelProvider, type CoachToolExecutor } from "./modelProvider.js";
 import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import {
   classifyUserMessage,
@@ -370,10 +370,15 @@ export async function orchestrateCoachTurn({
     );
   } catch (error) {
     const aborted = isAbortError(error);
-    const errorCode = aborted ? "model_timeout" : "coach_orchestration_error";
+    const billing = error instanceof ModelBillingError;
+    const errorCode = aborted
+      ? "model_timeout"
+      : billing
+        ? "model_billing_error"
+        : "coach_orchestration_error";
 
     safeLogger.error("Coach turn error", {
-      event: aborted ? "coach_model_timeout" : "coach_turn_error",
+      event: aborted ? "coach_model_timeout" : billing ? "coach_model_billing_error" : "coach_turn_error",
       userId,
       sessionId,
       messageId,
