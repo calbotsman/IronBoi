@@ -177,7 +177,8 @@ struct CoachStageView: View {
                 VStack(spacing: 0) {
                     Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
                     caption.padding(.horizontal, MyoTheme.Spacing.lg)
-                    if phase == .rest, appModel.activeWorkout == nil {
+                    // A leftover from an earlier day doesn't block today's start.
+                    if phase == .rest, appModel.activeWorkout == nil || appModel.activeWorkoutIsLeftover {
                         startButton
                             .padding(.top, MyoTheme.Spacing.lg)
                             .transition(.opacity)
@@ -688,6 +689,7 @@ struct CoachStageView: View {
     /// its place and can keep talking.
     private func beginWorkout() {
         Task {
+            if appModel.activeWorkoutIsLeftover { await appModel.discardActiveWorkout() }
             if appModel.activeWorkout == nil { await appModel.startTodaysWorkout() }
             guard appModel.activeWorkout != nil else { return }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()

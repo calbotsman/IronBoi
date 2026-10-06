@@ -603,6 +603,15 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
     }
 
+    /// A workout started on an earlier day and never finished.
+    var activeWorkoutIsLeftover: Bool {
+        guard let started = activeWorkout?.startedAt else { return false }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = f.date(from: started) ?? ISO8601DateFormatter().date(from: started) else { return false }
+        return !Calendar.current.isDateInToday(date)
+    }
+
     /// Throws away the unfinished workout — nothing is logged.
     func discardActiveWorkout() async {
         guard !isWorkoutBusy, let workout = activeWorkout else { return }
