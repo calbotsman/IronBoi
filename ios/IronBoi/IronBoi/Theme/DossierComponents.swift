@@ -174,3 +174,18 @@ struct ProfileButton: View {
         .accessibilityHint("Your profile, goals, memory and account")
     }
 }
+
+extension View {
+    /// Liquid Glass on iOS 26 (interactive: it lights up and flexes under
+    /// your finger); frosted material on older systems. `tint` warms it.
+    @ViewBuilder
+    func myoGlass(tint: Color? = nil, in shape: some Shape = Capsule()) -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(tint.map { Glass.regular.tint($0).interactive() } ?? Glass.regular.interactive(), in: shape)
+        } else {
+            background(.ultraThinMaterial, in: shape)
+                .background((tint ?? .clear).opacity(0.35), in: shape)
+                .overlay(shape.stroke(Color.white.opacity(0.5), lineWidth: 0.75))
+        }
+    }
+}

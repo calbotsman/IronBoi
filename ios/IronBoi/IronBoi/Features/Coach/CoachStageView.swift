@@ -376,8 +376,10 @@ struct CoachStageView: View {
                 }
             }
             .padding(.trailing, MyoTheme.Spacing.lg)
+            .padding(.vertical, 6)
         }
         .scrollIndicators(.hidden)
+        .scrollClipDisabled()
     }
 
     /// Says it for you, then keeps listening so you can answer out loud.
@@ -395,16 +397,18 @@ struct CoachStageView: View {
         } label: {
             HStack(spacing: MyoTheme.Spacing.sm) {
                 if appModel.isWorkoutBusy {
-                    ProgressView().tint(MyoTheme.Colors.cream)
+                    ProgressView().tint(MyoTheme.Colors.ink)
                 } else {
                     Image(systemName: "play.fill").font(.footnote.weight(.bold))
                 }
                 Text("Start my workout").font(.body.weight(.semibold))
             }
-            .foregroundStyle(MyoTheme.Colors.cream)
-            .padding(.horizontal, 26)
-            .frame(height: 52)
-            .background(MyoTheme.Colors.ink, in: Capsule())
+            .foregroundStyle(MyoTheme.Colors.ink)
+            .padding(.horizontal, 28)
+            .frame(height: 54)
+            .contentShape(Capsule())
+            .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.55))
+            .shadow(color: MyoTheme.Colors.coachAmber.opacity(0.35), radius: 18, y: 6)
         }
         .buttonStyle(.plain)
         .disabled(appModel.isWorkoutBusy)
@@ -425,10 +429,10 @@ struct CoachStageView: View {
                     .fixedSize()
                     .foregroundStyle(MyoColor.Text.primary.color)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 36)
-            .background(MyoColor.Surface.elevated.color, in: Capsule())
-            .overlay(Capsule().stroke(MyoColor.hairline, lineWidth: 1))
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .contentShape(Capsule())
+            .myoGlass()
         }
         .buttonStyle(.plain)
     }
@@ -453,8 +457,8 @@ struct CoachStageView: View {
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(MyoColor.Text.secondary.color)
                 .frame(width: 52, height: 52)
-                .background(MyoColor.Surface.elevated.color, in: Circle())
-                .overlay(Circle().stroke(MyoColor.hairline, lineWidth: 1))
+                .contentShape(Circle())
+                .myoGlass(in: Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
