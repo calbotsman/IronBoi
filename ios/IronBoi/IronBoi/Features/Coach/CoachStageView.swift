@@ -48,6 +48,14 @@ struct CoachStageView: View {
     @State private var notice: String?
     /// The message being handled was typed, not said.
     @State private var typedTurn = false
+    /// "Swap the bench": alternatives on offer for one lift.
+    @State private var swapChoice: SwapChoice?
+
+    struct SwapChoice {
+        let index: Int
+        let from: String
+        let options: [ExerciseSwapOption]
+    }
     @AppStorage("voiceIsolationTipsShown") private var isolationTipsShown = 0
     /// When Coach last asked you something — mid-workout, an answer
     /// doesn't need "MYO" in front of it.
@@ -363,7 +371,11 @@ struct CoachStageView: View {
                     Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
                     // The rest-day question replaces the caption, so the card
                     // never pushes down over the controls.
-                    if !askingSkipRestDay {
+                    if let choice = swapChoice {
+                        swapCard(choice)
+                            .padding(.horizontal, MyoTheme.Spacing.lg)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else if !askingSkipRestDay {
                         caption.padding(.horizontal, MyoTheme.Spacing.lg)
                     }
                     // A leftover from an earlier day doesn't block today's start.
@@ -556,6 +568,109 @@ struct CoachStageView: View {
         guard phase == .rest || phase == .listening else { return false }
         if appModel.activeWorkout == nil || appModel.activeWorkoutIsLeftover { return true }
         return !appModel.activeWorkoutHasProgress && appModel.currentExerciseIndex == nil
+    }
+
+    /// Real alternatives for a lift (same muscles, the server's ranking),
+    /// offered as a card and out loud; the body shows the first.
+    private func offerSwaps(for index: Int) {
+        guard let workout = appModel.activeWorkout, workout.exercises.indices.contains(index) else { return }
+        let name = workout.exercises[index].name
+        Task {
+            let outcome = await appModel.fetchSwapOptions(
+                exerciseName: name, dayKey: workout.dayKey, sessionId: workout.sessionId, availableEquipment: nil)
+            guard case .loaded(let options) = outcome, !options.isEmpty else {
+                confirm("I couldn't pull up swaps right now. Tell me what you'd like instead.")
+                return
+            }
+            let top = Array(options.prefix(3))
+            swapChoice = SwapChoice(index: index, from: name, options: top)
+            askedAt = Date()
+            demo(top[0].name)
+            let names = top.map(\.name)
+            let list = names.count > 1
+                ? names.dropLast().joined(separator: ", ") + ", or " + names.last!
+                : names[0]
+            confirm("Instead of \(Self.short(name)), how about \(list)?")
+        }
+    }
+
+    private func chooseSwap(_ option: ExerciseSwapOption?) {
+        guard let choice = swapChoice else { return }
+        swapChoice = nil
+        guard let option else {
+            confirm("Keeping \(Self.short(choice.from)).")
+            return
+        }
+        let wasCurrent = choice.index == currentExerciseIndex
+        let swapped = appModel.swapWorkoutExercise(choice.index, to: option.name, weight: option.suggestedWeightLb)
+        if wasCurrent, swapped == choice.index {
+            introduce(exercise: choice.index, first: false)
+        } else if !wasCurrent {
+            confirm("Swapped \(Self.short(choice.from)) for \(option.name).")
+        }
+        // (Sets already done on the old lift: the new one is added and
+        // becomes current, which introduces it.)
+    }
+
+    /// Which offered swap you meant: "the first one", "two", a name, "yes".
+    private static func pickSwap(_ text: String, from options: [ExerciseSwapOption]) -> ExerciseSwapOption?? {
+        let t = text.lowercased()
+        func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        if says(#"\b(keep it|keep (the )?(original|same)|never ?mind|no thanks|nope|nah|cancel)\b"#) { return .some(nil) }
+        // Ordinals, most specific first — "the second one" isn't "one".
+        let bare = t.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        let ordinals = [(2, #"\b(third|3rd|number three)\b"#, "three"), (1, #"\b(second|2nd|number two)\b"#, "two"),
+                        (0, #"\b(first|1st|number one)\b"#, "one")]
+        for (i, pattern, word) in ordinals where i < options.count && (says(pattern) || bare == word) { return options[i] }
+        let words = Set(t.components(separatedBy: CharacterSet.letters.inverted).filter { $0.count > 3 })
+        if let named = options.first(where: { option in
+            !Set(option.name.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { $0.count > 3 })
+                .isDisjoint(with: words)
+        }) { return named }
+        if says(#"\b(yes|yeah|yep|sure|ok|okay|sounds good|do it|let's do it)\b"#) { return options.first }
+        return nil
+    }
+
+    /// The body shows a lift for a few reps — something just suggested.
+    private func demo(_ name: String) {
+        guard let motion = ExerciseMotion.match(name) else { return }
+        let cue = LessonCue(motion: motion, body: .reps, from: 0, startedAt: CACurrentMediaTime())
+        lessonCue = cue
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(motion.repDuration * 2.5 * 1_000_000_000))
+            if lessonCue == cue, lessonPlan == nil { lessonCue = nil }
+        }
+    }
+
+    /// Alternatives for a lift, tap one or say it.
+    private func swapCard(_ choice: SwapChoice) -> some View {
+        VStack(spacing: MyoTheme.Spacing.sm) {
+            Text("Swap \(Self.short(choice.from)) for…")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(MyoColor.Text.primary.color)
+            ForEach(choice.options) { option in
+                Button { chooseSwap(option) } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(option.name).font(.body.weight(.semibold)).foregroundStyle(MyoColor.Text.primary.color)
+                        Text(option.reason).font(.caption).foregroundStyle(MyoColor.Text.secondary.color).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, MyoTheme.Spacing.md)
+                    .padding(.vertical, 10)
+                    .contentShape(RoundedRectangle(cornerRadius: 16))
+                    .myoGlass(in: RoundedRectangle(cornerRadius: 16))
+                }
+                .buttonStyle(.plain)
+                .simultaneousGesture(TapGesture().onEnded { demo(option.name) })
+            }
+            Button("Keep \(Self.short(choice.from))") { chooseSwap(nil) }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.tertiary.color)
+                .frame(minHeight: 40)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .frame(maxWidth: .infinity)
+        .myoCard()
     }
 
     /// "Skip your rest day?" — right where Start was, two clear answers.
@@ -825,6 +940,10 @@ struct CoachStageView: View {
         let addressed = typedTurn || Self.addressesCoach(heard)
         let text = Self.addressesCoach(heard) ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
+        if let choice = swapChoice, let pick = Self.pickSwap(text, from: choice.options) {
+            chooseSwap(pick)
+            return
+        }
         if askingSkipRestDay, let yes = Self.skipRestDayAnswer(text) {
             answerSkipRestDay(yes)
             return
@@ -901,7 +1020,9 @@ struct CoachStageView: View {
             // the coach; everything else is ignored, with a hint if it
             // sounded like it was meant for MYO.
             let justAsked = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
-            if currentExerciseIndex != nil, !(addressed || justAsked) {
+            // Only long run-ons (music, people nearby) are dropped now;
+            // anything you say to it gets through, "MYO" or not.
+            if currentExerciseIndex != nil, !(addressed || justAsked), !short {
                 if short, text.split(separator: " ").count >= 3 {
                     let until = Date().addingTimeInterval(5)
                     ignoredHintUntil = until
@@ -919,7 +1040,7 @@ struct CoachStageView: View {
         send(text, spoken: !typedTurn)
     }
 
-    private static let addressPattern = #"^\W*(hey |hi |ok |okay |yo )?(myo|my o|my oh|mayo|mio|meo|miyo|coach)\b[\s,.!?]*"#
+    private static let addressPattern = #"^\W*(hey |hi |ok |okay |yo )?(myo|my o|my oh|mayo|mio|meo|miyo|maya|mya|mia|myah|meya|maia|coach)\b[\s,.!?]*"#
 
     /// Starts with MYO's name (as the recognizer tends to hear it) or "coach".
     private static func addressesCoach(_ text: String) -> Bool {
@@ -1044,6 +1165,8 @@ struct CoachStageView: View {
             } else {
                 confirm("Swapped \(Self.short(old)) for \(name).")
             }
+        case .swapForSomething(let index):
+            offerSwaps(for: index)
         case .skip(let index):
             let name = workout.exercises[index].name
             appModel.skipWorkoutExercise(index)
@@ -1444,7 +1567,12 @@ struct CoachStageView: View {
         guard let reply = lastCoachMessage, reply.id != lastCueCheckedReplyId,
               [.complete, .blocked].contains(reply.status) else { return }
         lastCueCheckedReplyId = reply.id
-        if let move = MoveCue.move(in: reply.content) { director.perform(move) }
+        if let move = MoveCue.move(in: reply.content) {
+            director.perform(move)
+        } else if lessonPlan == nil {
+            // Coach suggested a lift: show it.
+            demo(reply.content)
+        }
     }
 
     private func speakReplyIfReady(_ messages: [CoachMessage]) {

@@ -7,6 +7,9 @@ import Foundation
 enum WorkoutEdit: Equatable {
     case add(name: String, sets: Int?, reps: Int?, weight: Double?, now: Bool)
     case swap(Int, to: String)
+    /// "Swap the bench", "something else instead of curls" — no
+    /// replacement named: offer some.
+    case swapForSomething(Int)
     case skip(Int)
     case jump(Int)
     case targets(Int, sets: Int?, reps: Int?)
@@ -31,9 +34,20 @@ enum WorkoutEdit: Equatable {
             || first(#"\bi'm done for (the day|today)\b"#) != nil {
             return .finish
         }
-        if let m = first(#"\b(?:swap|switch|replace|sub|substitute|trade)(?: out)? (?:the )?(.+?) (?:for|with) (.+)$"#),
+        let vague = #"^(?:something|anything|another|an alternative|alternative|a different|different|an easier|something easier|something different|something else|another one|something lighter)(?: one| exercise| lift| movement| move| else| option)?$"#
+        if let m = first(#"\b(?:swap|switch|replace|sub|substitute|trade|change)(?: out)? (?:the )?(.+?) (?:for|with) (.+)$"#),
            let index = find(m[0]) {
-            return .swap(index, to: cleanName(m[1]))
+            let target = m[1].trimmingCharacters(in: .whitespaces)
+            if target.range(of: vague, options: .regularExpression) != nil { return .swapForSomething(index) }
+            return .swap(index, to: cleanName(target))
+        }
+        if let m = first(#"\b(?:something else|an alternative|another (?:exercise|lift|option)) (?:instead of|for|than) (?:the )?(.+)$"#),
+           let index = find(m[0]) {
+            return .swapForSomething(index)
+        }
+        if let m = first(#"^(?:can (?:we|i|you) |let's |lets |i want to |i'd like to )?(?:swap|switch|replace|sub|change)(?: out)? (?:the |this |that )?(.+?)(?: please)?$"#),
+           !m[0].contains(" for "), !m[0].contains(" with "), let index = find(m[0]) {
+            return .swapForSomething(index)
         }
         if let m = first(#"\b(?:do|let's do|lets do|i'll do|ill do) (.+?) instead of (?:the )?(.+)$"#),
            let index = find(m[1]) {
@@ -78,6 +92,9 @@ enum WorkoutEdit: Equatable {
     static func resolve(_ phrase: String, in exercises: [ActiveWorkoutExercise], current: Int?) -> Int? {
         let p = phrase.trimmingCharacters(in: .whitespaces)
         let open = exercises.indices.filter { !exercises[$0].exerciseDone }
+        if p.range(of: #"^(it|this|that|this one|that one|this exercise|this lift|the current one)$"#, options: .regularExpression) != nil {
+            return current
+        }
         if p.range(of: #"^(the )?last( one| exercise| lift)?$"#, options: .regularExpression) != nil {
             return open.last ?? exercises.indices.last
         }
