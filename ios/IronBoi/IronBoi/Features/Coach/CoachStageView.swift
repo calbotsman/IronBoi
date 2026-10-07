@@ -41,8 +41,6 @@ struct CoachStageView: View {
     @State private var askingSkipRestDay = false
     /// Start is swapping out a stale session; that's not the workout ending.
     @State private var restartingWorkout = false
-    /// Mid-workout speech was ignored because it wasn't said to MYO — say so.
-    @State private var ignoredHintUntil: Date?
     /// A short on-screen note under the coach ("Your workout's ready…"),
     /// for when it isn't spoken, or as well as.
     @State private var notice: String?
@@ -470,13 +468,6 @@ struct CoachStageView: View {
                 .multilineTextAlignment(.center)
                 .frame(minHeight: 88, alignment: .top)
                 .transition(.opacity)
-        case .listening where voiceInput.transcript.isEmpty && ignoredHintUntil != nil,
-             .rest where ignoredHintUntil != nil:
-            Text("Mid-workout, start with “MYO” to ask me something.")
-                .myoStyle(.body)
-                .foregroundStyle(MyoColor.Text.secondary.color)
-                .multilineTextAlignment(.center)
-                .frame(minHeight: 88, alignment: .top)
         case .listening:
             Text(voiceInput.transcript.isEmpty ? " " : voiceInput.transcript)
                 .myoStyle(.title)
@@ -1047,15 +1038,8 @@ struct CoachStageView: View {
             let justAsked = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
             // Only long run-ons (music, people nearby) are dropped now;
             // anything you say to it gets through, "MYO" or not.
+            // No hint for these: they're music or other people, not you.
             if currentExerciseIndex != nil, !(addressed || justAsked), !short {
-                if short, text.split(separator: " ").count >= 3 {
-                    let until = Date().addingTimeInterval(5)
-                    ignoredHintUntil = until
-                    Task {
-                        try? await Task.sleep(nanoseconds: 5_000_000_000)
-                        if ignoredHintUntil == until { ignoredHintUntil = nil }
-                    }
-                }
                 restartHandledLocally = true
                 resumeListening()
                 return
