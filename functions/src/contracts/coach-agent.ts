@@ -67,6 +67,12 @@ export const DataCategory = z.enum([
 
 export const RiskLevel = z.enum(["low", "medium", "high", "blocked"]);
 export const CoachInputMode = z.enum(["text", "tap", "dictation", "live_voice"]);
+/** How much the coach should talk ("full" = default, no style block). */
+export const CoachTips = z.enum(["full", "brief", "quiet"]);
+export type CoachTips = z.infer<typeof CoachTips>;
+/** The coach's voice/energy; absent = default tone. */
+export const CoachTone = z.enum(["hype", "calm"]);
+export type CoachTone = z.infer<typeof CoachTone>;
 export const OnboardingStatus = z.enum([
   "not_started",
   "collecting",
@@ -760,6 +766,8 @@ export const CoachMessage = z.object({
   timestamp: ISODateTime,
   riskLevel: RiskLevel.optional(),
   inputMode: CoachInputMode.optional(),
+  coachTips: CoachTips.optional(),
+  coachTone: CoachTone.optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().optional(),
   toolCallIds: z.array(z.string()).default([]),

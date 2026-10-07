@@ -10,6 +10,42 @@ The roadmap (`docs/plans/ironboi-phase-plan.md`) tracks the engineering work. **
 
 Each item is either ⬜ open or ✅ done. Date the done items so future-you knows when. Last updated by Claude 2026-06-02.
 
+## Status as of 2026-10-05 (read this first — the boxes below are from June)
+
+Audited from the repo; console-only items marked "check" could not be verified (Firebase and gcloud CLI logins had expired).
+
+**Done (implied by TestFlight build 13 existing):** Apple Developer enrollment and team, App ID, Sign in with Apple and App Attest capabilities (both in `IronBoi.entitlements`), App Store Connect record, distribution signing. Staging backend is live and the nightly E2E passes. Plist switching, CI, build-number script, brand decision (display name MYO, bundle stays `ironboi`).
+
+**Done in the repo on 2026-10-05:**
+- Memory review screen (You → What Coach remembers) — the old soft blocker.
+- Privacy policy brought up to date: OpenRouter named as a processor (staging has routed coach turns through it since 2026-07-26), and the memory section now matches how facts are actually saved and removed. **Not hosted yet.**
+- `ITSAppUsesNonExemptEncryption = NO`, so export compliance isn't asked on every upload.
+- `functions/.env.ironboi-prod` created so a prod deploy runs the same config as staging (tool loop on, OpenRouter pinned). Without it a prod deploy would have run with the tool loop off.
+- Listing draft: `docs/plans/app-store-listing.md` (name, subtitle, promo, description, keywords, App Privacy answers, screenshot plan).
+- OpenRouter requests now send `provider.data_collection: "deny"`, so they only route to model providers that don't store or train on chats. This backs the privacy-policy promise.
+- An out-of-credits or key-limit response from OpenRouter (401/402/403) now logs as `model_billing_error` instead of the generic `coach_orchestration_error`.
+
+**Still open — Josh, in a web console:**
+1. `firebase login --reauth` and `gcloud auth login` (both expired).
+2. Create the `ironboi-prod` Firebase project → add the iOS app → replace `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` with the real download → set `OPENROUTER_API_KEY` and `GEMINI_API_KEY` secrets → deploy.
+3. Register App Attest for the prod app in Firebase App Check.
+4. Host the privacy policy and pick a support URL (both required).
+5. In App Store Connect: paste the listing, answer App Privacy (declare OpenRouter's processing), age rating, category, contacts.
+6. A GCP budget alert on the prod project.
+6b. **Separate OpenRouter keys for MYO**: one for staging, one for prod, each with a credit limit, plus auto top-up and a low-balance email. Today's key is shared with the studio. The staging outages on 09-22, 09-23 and 10-04 (every turn failing in about 3s) fit a drained balance. Set each with `firebase functions:secrets:set OPENROUTER_API_KEY --project <project>`, then redeploy.
+7. Confirm OpenRouter and the Gemini API are on terms that don't train on user content (the policy now says so).
+
+**Still open — repo work:**
+- App icon. A kettlebell-stamp draft was rejected (2026-10-05); Zara recommends direction A — an M drawn in one ink stroke that reads as shoulders. Awaiting Josh's pick.
+- Screenshots. The Coach screen was redesigned around the voice blob on 2026-10-05, so retake all five from a real account.
+- Proposed memory facts aren't swept after 14 days. They're hidden from the app and never used, and the policy now says only that; a scheduled cleanup (`decayProposedMemory`) is still a nice-to-have.
+- Safety evals aren't run in CI (`functions/src/evals/safety-evals.json` has `releaseGate: true`, nothing runs it).
+- Then run `scripts/preflight-appstore.sh` — it must exit 0 before a public submission.
+
+**Deferred to v1.1 (fine for launch):** embeddings for the evidence corpus (today it's a 20-entry keyword-matched corpus with a cite-or-refuse prompt rule), HealthKit.
+
+**Watch:** of the five nightly E2E failures (Sep 30 – Oct 4), only Oct 4 was an outage, and it looks like OpenRouter billing (see 6b). The other four were the harness's strict checks on what the model chose to do ("ramp reaches beyond a single week", "ramp proposal was never accepted"). Those checks should be soft or retried so they stop reading as outages.
+
 ---
 
 ## A. Apple side

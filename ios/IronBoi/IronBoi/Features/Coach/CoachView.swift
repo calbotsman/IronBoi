@@ -3,10 +3,16 @@ import SwiftUI
 struct CoachView: View {
     @EnvironmentObject private var appModel: AppModel
     @StateObject private var voiceInput = VoiceInputEngine()
+    @StateObject private var coachVoice = CoachVoice()
+    @StateObject private var bodyDirector = BodyDirector()
+    @AppStorage("coachSpeaksReplies") private var speaksReplies = true
+    @State private var showKeyboard = false
+    /// The last typed message, handed to the coach screen.
+    @State private var typed: TypedLine?
+    /// Bumped when a typed message asks for today's workout; the stage shows the card.
+    @State private var askedForWorkout = 0
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
-    @State private var showDeleteAccountConfirm = false
-    @State private var showDeleteAccountFinalConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -14,57 +20,24 @@ struct CoachView: View {
                 if !appModel.hasSession {
                     signedOutView
                 } else {
-                    if appModel.profile.preferences.coachingLens != .none {
-                        protocolBar
+                    CoachStageView(
+                        voiceInput: voiceInput,
+                        voice: coachVoice,
+                        director: bodyDirector,
+                        askedForWorkout: askedForWorkout,
+                        typed: typed,
+                        showKeyboard: $showKeyboard
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        ProfileButton()
+                            .padding(.trailing, MyoTheme.Spacing.sm)
                     }
-                    messageList
-                    composer
                 }
             }
             .background(PaperBackground())
-            .navigationTitle("Coach")
-            .toolbar {
-                if appModel.hasSession {
-                    Menu {
-                        Button {
-                            appModel.signOut()
-                        } label: {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-
-                        Divider()
-
-                        Button(role: .destructive) {
-                            showDeleteAccountConfirm = true
-                        } label: {
-                            Label("Delete Account…", systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "person.crop.circle")
-                            .accessibilityLabel("Account")
-                    }
-                }
-            }
-            // Phase 3 Task 3.1 — two-step confirmation for account deletion.
-            // Apple's guideline 5.1.1(v) requires deletion to be
-            // discoverable; we keep the two-step pattern so accidental
-            // taps don't wipe data.
-            .alert("Delete account?", isPresented: $showDeleteAccountConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Continue", role: .destructive) {
-                    showDeleteAccountFinalConfirm = true
-                }
-            } message: {
-                Text("This will permanently delete your MYO account, all your workouts, daily checks, coach history, and memory facts the coach has saved about you. This cannot be undone.")
-            }
-            .alert("Are you sure?", isPresented: $showDeleteAccountFinalConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete forever", role: .destructive) {
-                    Task { await appModel.deleteAccount() }
-                }
-            } message: {
-                Text("Last chance. Tapping \"Delete forever\" signs you out and wipes everything within the next few minutes.")
-            }
+            // No title or toolbar: the coach's body is the screen. Account
+            // actions live on the You tab; the voice toggle in Conversation.
+            .toolbar(.hidden, for: .navigationBar)
             .alert("MYO", isPresented: Binding(
                 get: { appModel.errorMessage != nil || voiceInput.errorMessage != nil },
                 set: {
@@ -81,104 +54,97 @@ struct CoachView: View {
             } message: {
                 Text(appModel.errorMessage ?? voiceInput.errorMessage ?? "")
             }
-            .onChange(of: voiceInput.transcript) { _, transcript in
-                guard voiceInput.isListening else { return }
-                draft = transcript
+            // Typing is still here, one tap away — just not the default: a
+            // slim bar that rises out of the keyboard button, above the keys.
+            .safeAreaInset(edge: .bottom) {
+                if showKeyboard {
+                    TypeBar(isPresented: $showKeyboard, onSend: sendTyped)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .padding(.bottom, MyoTheme.Spacing.sm)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.9, anchor: .bottomLeading).combined(with: .opacity),
+                            removal: .opacity.combined(with: .move(edge: .bottom))))
+                }
             }
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showKeyboard)
         }
     }
 
-    /// The active coaching protocol, surfaced as a hook. Tapping jumps to You
-    /// to change it. Hidden when the protocol is the default.
-    private var protocolBar: some View {
-        let lens = appModel.profile.preferences.coachingLens
-        return Button {
-            composerFocused = false
-            appModel.selectedTab = .you
-        } label: {
-            HStack(spacing: MyoTheme.Spacing.sm) {
-                Text("PROTOCOL")
-                    .myoStyle(.label)
-                    .foregroundStyle(MyoColor.redPen)
-                Text(lens.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(MyoColor.Text.primary.color)
-                if !lens.attribution.isEmpty {
-                    Text(lens.attribution)
-                        .myoStyle(.label)
-                        .foregroundStyle(MyoColor.Text.tertiary.color)
-                }
-                Spacer()
-                Image(systemName: "slider.horizontal.3")
-                    .font(.footnote)
-                    .foregroundStyle(MyoColor.Text.tertiary.color)
-            }
-            .padding(.horizontal, MyoTheme.Spacing.md)
-            .padding(.vertical, MyoTheme.Spacing.sm)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(MyoColor.Surface.selected.color.opacity(0.35))
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(MyoColor.hairline).frame(height: 1)
-        }
-        .accessibilityHint("Change your coaching protocol in You")
-    }
+    /// Static meter for the intro orb's coach side — it never speaks there.
+    private static let quietCoach = VoiceMeter()
+    @StateObject private var introBody = BodyDirector()
+    @StateObject private var intro = IntroChoreography()
 
     private var signedOutView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 56, weight: .bold))
-                .foregroundStyle(MyoTheme.Colors.ochre)
-
-            VStack(spacing: 8) {
-                Text("MYO Coach")
-                    .font(.largeTitle.bold())
-
-                Text("Sign in to start your private training thread.")
-                    .font(.body)
-                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
-                    .multilineTextAlignment(.center)
+        ZStack {
+            GeometryReader { geo in
+                OrbView(
+                    phase: .rest,
+                    you: intro.you,
+                    agent: Self.quietCoach,
+                    focus: CGPoint(x: geo.size.width / 2, y: geo.size.height * 0.36),
+                    director: introBody,
+                    scale: 0.9,
+                    demo: intro.demo,
+                    // Rise from just above the wordmark, not through the text.
+                    bloopStart: geo.size.height * 0.56
+                )
             }
+            .ignoresSafeArea()
+            .onAppear { intro.start() }
+            .onDisappear { intro.stop() }
 
-            Button {
-                appModel.signInWithApple()
-            } label: {
-                Label("Sign in with Apple", systemImage: "apple.logo")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(MyoTheme.Colors.ink)
-            .padding(.horizontal, 28)
+            VStack(spacing: 0) {
+                Spacer()
 
-            #if DEBUG
-            VStack(spacing: 10) {
-                Button {
-                    appModel.startPreviewSession()
-                } label: {
-                    Label("Preview the app (no backend)", systemImage: "eye")
-                        .font(.subheadline.weight(.semibold))
+                VStack(spacing: MyoTheme.Spacing.sm) {
+                    Image("MYOWordmark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 46)
+                        .accessibilityLabel("MYO")
+                    Text("Your new personal trainer.")
+                        .myoStyle(.title)
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                        .multilineTextAlignment(.center)
+                    Text("It writes your plan, explains the why,\nand remembers what you tell it.")
+                        .myoStyle(.body)
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 2)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .tint(MyoColor.Action.primary.color)
-                .foregroundStyle(MyoColor.Text.primary.color)
+                .padding(.horizontal, MyoTheme.Spacing.lg)
 
-                Button("Dev sign-in (anonymous)") {
-                    Task { await appModel.signInAsDeveloper() }
+                Button {
+                    appModel.signInWithApple()
+                } label: {
+                    Label("Sign in with Apple", systemImage: "apple.logo")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MyoTheme.Colors.cream)
+                        .frame(maxWidth: .infinity, minHeight: 54)
+                        .background(MyoTheme.Colors.ink, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, MyoTheme.Spacing.lg)
+                .padding(.top, MyoTheme.Spacing.xl)
+
+                Text("Private by default. Your training stays yours.")
+                    .font(.caption)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+                    .padding(.top, MyoTheme.Spacing.md)
+
+                #if DEBUG
+                HStack(spacing: MyoTheme.Spacing.lg) {
+                    Button("Preview (no backend)") { appModel.startPreviewSession() }
+                    Button("Dev sign-in") { Task { await appModel.signInAsDeveloper() } }
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(MyoColor.Text.secondary.color)
+                .padding(.top, MyoTheme.Spacing.lg)
+                #endif
             }
-            .padding(.top, 4)
-            #endif
-
-            Spacer()
+            .padding(.bottom, MyoTheme.Spacing.lg)
         }
-        .padding()
     }
 
     private var messageList: some View {
@@ -232,7 +198,10 @@ struct CoachView: View {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
-            .background(MyoTheme.Colors.cream)
+            // Open on the newest message.
+            .onAppear {
+                if let last = appModel.messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+            }
         }
     }
 
@@ -245,17 +214,6 @@ struct CoachView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...4)
                 .focused($composerFocused)
-
-            Button {
-                voiceInput.toggle()
-            } label: {
-                Image(systemName: voiceInput.isListening ? "mic.circle.fill" : "mic.circle")
-                    .font(.system(size: 30))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(voiceInput.isListening ? MyoTheme.Colors.brick : MyoTheme.Colors.ink)
-            }
-            .disabled(appModel.isSending)
-            .accessibilityLabel(voiceInput.isListening ? "Stop voice input" : "Start voice input")
 
             Button {
                 sendDraft()
@@ -277,12 +235,37 @@ struct CoachView: View {
         }
     }
 
+    /// Typed messages go through the coach screen, which handles them just
+    /// like spoken ones — "set 2 done" logs the set either way.
     private func sendDraft() {
-        let content = draft
-        voiceInput.stop()
+        let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
-        Task {
-            await appModel.sendCoachMessage(content)
+        showKeyboard = false
+        guard !content.isEmpty else { return }
+        sendTyped(content)
+    }
+
+    /// What you typed goes to the coach — and, like talking, arrives as a
+    /// little run of your-colour bloops the body takes in, a word or two each.
+    private func sendTyped(_ text: String) {
+        typed = TypedLine(text: text)
+        let meter = voiceInput.meter
+        let bloops = min(8, max(2, text.split(separator: " ").count / 2 + 1))
+        Task { @MainActor in
+            var reading = VoiceReading()
+            reading.active = true
+            reading.level = 0.5
+            for _ in 0..<bloops {
+                // The mic owns the meter while it's listening.
+                if voiceInput.isListening { break }
+                reading.onsets += 1
+                reading.peak = Float.random(in: 0.4...0.85)
+                meter.set(reading)
+                try? await Task.sleep(nanoseconds: UInt64.random(in: 70_000_000...140_000_000))
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            // Hand the meter back, unless the mic has taken it meanwhile.
+            if !voiceInput.isListening { meter.reset() }
         }
     }
 }
@@ -332,7 +315,7 @@ struct CoachMessageBubble: View {
 
 /// The grounding made visible: a red-pen "Informed by" line under a coach
 /// reply, naming the reviewed sources that were in context for the turn.
-private struct CoachSourcesLine: View {
+struct CoachSourcesLine: View {
     let sources: [CoachSource]
 
     private var firstURL: URL? { sources.first(where: { $0.url != nil })?.url }

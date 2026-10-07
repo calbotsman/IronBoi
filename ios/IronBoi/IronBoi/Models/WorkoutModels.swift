@@ -94,10 +94,11 @@ struct ActiveWorkoutExercise: Codable, Equatable, Identifiable {
     var id: Int { exerciseIndex }
 
     let exerciseIndex: Int
-    let name: String
-    let targetSets: Int
-    let targetReps: Int
-    let targetWeight: Double
+    // `var`: you can swap a lift or change its sets and reps mid-workout.
+    var name: String
+    var targetSets: Int
+    var targetReps: Int
+    var targetWeight: Double
     var completedSets: [ActiveWorkoutSet]
     var exerciseDone: Bool
     var notes: String?
