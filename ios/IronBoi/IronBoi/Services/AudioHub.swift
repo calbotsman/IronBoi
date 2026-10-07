@@ -36,6 +36,9 @@ final class AudioHub {
 
     private func routeChanged(_ reason: AVAudioSession.RouteChangeReason?, previous: AVAudioSessionRouteDescription?) {
         let current = AVAudioSession.sharedInstance().currentRoute
+        defer {
+            Self.log("route change \(reason.map { String($0.rawValue) } ?? "?") from [\(previous.map(Self.describe) ?? "-")] to [\(Self.describe(current))] headphones=\(headphonesConnected)")
+        }
         switch reason {
         case .oldDeviceUnavailable:
             if let previous, Self.headphones(in: previous) { headphonesConnected = Self.headphones(in: current) }
@@ -64,7 +67,10 @@ final class AudioHub {
         let session = AVAudioSession.sharedInstance()
         // Before we take the session, the route is the system's own — if
         // headphones are on, it shows them.
-        if !sessionActive { headphonesConnected = Self.headphones(in: session.currentRoute) }
+        if !sessionActive {
+            headphonesConnected = Self.headphones(in: session.currentRoute)
+            Self.log("start: system route [\(Self.describe(session.currentRoute))] headphones=\(headphonesConnected) otherAudio=\(session.isOtherAudioPlaying)")
+        }
         if session.category != .playAndRecord {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
         }
@@ -99,6 +105,7 @@ final class AudioHub {
             }
         }
         echoCancelling = engine.inputNode.isVoiceProcessingEnabled
+        Self.log("start(reconfigure: \(reconfigure)): route [\(Self.describe(session.currentRoute))] headphones=\(headphonesConnected) wantedEcho=\(wanted) echo=\(echoCancelling)")
         if !engine.isRunning {
             engine.prepare()
             try engine.start()
@@ -110,6 +117,32 @@ final class AudioHub {
     /// cancelled from the mic, or it's in your ears.
     var canTalkOver: Bool {
         echoCancelling || headphonesConnected
+    }
+
+    /// Audio decisions, for testing on a phone over the Xcode console.
+    static func log(_ message: String) {
+        #if DEBUG
+        let line = "\(Date().formatted(date: .omitted, time: .standard)) [audio] \(message)"
+        print(line)
+        // Also to a file in the app's Documents, so it can be pulled off a
+        // phone after a test even when the console connection drops.
+        if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("audio-log.txt"),
+           let data = (line + "\n").data(using: .utf8) {
+            if let handle = try? FileHandle(forWritingTo: url) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                try? handle.close()
+            } else {
+                try? data.write(to: url)
+            }
+        }
+        #endif
+    }
+
+    private static func describe(_ route: AVAudioSessionRouteDescription) -> String {
+        "out: " + route.outputs.map { "\($0.portName) (\($0.portType.rawValue))" }.joined(separator: ", ")
+            + " / in: " + route.inputs.map { "\($0.portName) (\($0.portType.rawValue))" }.joined(separator: ", ")
     }
 
     private static func headphones(in route: AVAudioSessionRouteDescription) -> Bool {
@@ -145,6 +178,7 @@ final class AudioHub {
         if engine.isRunning { engine.stop() }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         sessionActive = false
+        Self.log("stop: session released")
     }
 
     /// Decodes Cloud TTS WAV bytes into a buffer the player can schedule.

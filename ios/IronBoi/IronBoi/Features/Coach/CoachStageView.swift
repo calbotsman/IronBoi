@@ -33,6 +33,16 @@ struct CoachStageView: View {
     /// The "noisy? turn on Voice Isolation" tip, shown the first couple of
     /// workouts unless it's already on.
     @State private var showIsolationTip = false
+    /// "Skip your rest day?" — asked on screen, and out loud when it was
+    /// asked for out loud.
+    @State private var askingSkipRestDay = false
+    /// Start is swapping out a stale session; that's not the workout ending.
+    @State private var restartingWorkout = false
+    /// Mid-workout speech was ignored because it wasn't said to MYO — say so.
+    @State private var ignoredHintUntil: Date?
+    /// A short on-screen note under the coach ("Your workout's ready…"),
+    /// for when it isn't spoken, or as well as.
+    @State private var notice: String?
     @AppStorage("voiceIsolationTipsShown") private var isolationTipsShown = 0
     /// When Coach last asked you something — mid-workout, an answer
     /// doesn't need "MYO" in front of it.
@@ -122,117 +132,7 @@ struct CoachStageView: View {
     #endif
 
     var body: some View {
-        ZStack {
-            // The body's layer runs edge to edge, past the safe area, so your
-            // droplets can enter from outside the screen. It draws nothing
-            // but the body; the paper shows through everywhere else.
-            GeometryReader { geo in
-                let origin = geo.frame(in: .named(Self.space)).origin
-                OrbView(
-                    phase: phase,
-                    you: voiceInput.meter,
-                    agent: voice.meter,
-                    focus: centered
-                        ? CGPoint(x: restFocus.x - origin.x, y: restFocus.y - origin.y)
-                        : orbSlot.map { CGPoint(x: $0.midX - origin.x, y: $0.midY - origin.y) },
-                    director: director,
-                    // Fit the body to its slot when a card squeezes it.
-                    scale: centered ? 1 : orbSlot.map { min(1, max(0.4, $0.height / 460)) } ?? 1,
-                    loop: currentMotion,
-                    inWorkout: appModel.activeWorkout != nil,
-                    demo: debugLift,
-                    ambient: true,
-                    lesson: lessonCue,
-                    counting: repCount > 0,
-                    youTalking: !voiceInput.transcript.isEmpty,
-                    setsDone: appModel.activeWorkout?.exercises.reduce(0) { $0 + $1.completedSetCount } ?? 0
-                )
-            }
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                // Where the body rests, and the thing you tap to talk.
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 150, maxHeight: cardOpen ? 190 : appModel.pendingPlanAdjustmentProposal == nil ? .infinity : 220)
-                    .background {
-                        GeometryReader { slot in
-                            Color.clear.preference(key: OrbSlotKey.self, value: slot.frame(in: .named(Self.space)))
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { talkTapped() }
-                    .accessibilityElement()
-                    .accessibilityLabel("Coach")
-                    .accessibilityValue(statusLine)
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityHint(hint)
-                    .accessibilityAction { talkTapped() }
-
-                if !appModel.pendingSessionChanges.isEmpty {
-                    SessionChangesCard(changes: appModel.pendingSessionChanges)
-                        .padding(.horizontal, MyoTheme.Spacing.md)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else if !appModel.pendingBaselineSuggestions.isEmpty {
-                    WeightFollowUpCard(suggestions: appModel.pendingBaselineSuggestions)
-                        .padding(.horizontal, MyoTheme.Spacing.md)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else if let workout = appModel.activeWorkout, workoutExpanded {
-                    LiveWorkoutCard(workout: workout, expanded: $workoutExpanded)
-                        .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
-                        .padding(.horizontal, MyoTheme.Spacing.md)
-                } else if showTodayCard, appModel.activeWorkout == nil {
-                    TodayWorkoutCard(
-                        onClose: { showTodayCard = false },
-                        onBegin: beginWorkout
-                    )
-                    .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
-                    .padding(.horizontal, MyoTheme.Spacing.md)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else {
-                    if !centered {
-                        caption
-                            .padding(.horizontal, MyoTheme.Spacing.lg)
-                    }
-                    Spacer(minLength: 0)
-                    if let workout = appModel.activeWorkout {
-                        // Begin workout drops the card down to this bar.
-                        LiveWorkoutCard(workout: workout, expanded: $workoutExpanded)
-                            .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
-                            .padding(.horizontal, MyoTheme.Spacing.md)
-                            .padding(.top, MyoTheme.Spacing.md)
-                    }
-                }
-
-                controls
-                    .padding(.leading, MyoTheme.Spacing.lg)
-                    .padding(.top, MyoTheme.Spacing.md)
-                    .padding(.bottom, MyoTheme.Spacing.sm)
-            }
-        }
-        .overlay {
-            if centered {
-                // Pinned just under the body (radius ≈ 0.45 of half the short side).
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
-                    caption.padding(.horizontal, MyoTheme.Spacing.lg)
-                    // A leftover from an earlier day doesn't block today's start.
-                    if phase == .rest, appModel.activeWorkout == nil || appModel.activeWorkoutIsLeftover {
-                        startButton
-                            .padding(.top, MyoTheme.Spacing.lg)
-                            .transition(.opacity)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-        .background {
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { stageSize = geo.size }
-                    .onChange(of: geo.size) { _, size in stageSize = size }
-            }
-        }
+        stage
         .coordinateSpace(name: Self.space)
         .animation(MyoTheme.Motion.fade, value: showTodayCard)
         .animation(.easeInOut(duration: 0.35), value: workoutExpanded)
@@ -240,11 +140,12 @@ struct CoachStageView: View {
         .animation(.easeInOut(duration: 0.35), value: appModel.activeWorkout?.sessionId)
         .onChange(of: askedForWorkout) { _, _ in askedForWorkoutCard() }
         .onPreferenceChange(OrbSlotKey.self) { orbSlot = $0 }
+        .animation(MyoTheme.Motion.fade, value: askingSkipRestDay)
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
         .onAppear {
             voiceInput.onPause = { text in
                 if voice.isSpeaking {
-                    voiceInput.listen()
+                    if conversationActive { voiceInput.listen() }
                     return
                 }
                 handleUtterance(text)
@@ -290,33 +191,11 @@ struct CoachStageView: View {
         // The body acts out each line of a lesson as it's spoken.
         .onChange(of: voice.lineIndex) { _, line in actOutLesson(line: line) }
         // Finished an exercise: introduce the next one.
-        .onChange(of: currentExerciseIndex) { previous, next in
-            guard previous != nil, let next, appModel.activeWorkout != nil else { return }
-            // Let "set three done" finish first.
-            Task {
-                for _ in 0..<40 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
-                guard currentExerciseIndex == next else { return }
-                introduce(exercise: next, first: false)
-            }
-        }
+        .onChange(of: currentExerciseIndex) { previous, next in exerciseChanged(from: previous, to: next) }
+        // A plan change went through: say what to do next.
+        .onChange(of: appModel.planChangesAccepted) { _, _ in planChangeAccepted() }
         // The workout ended: the mic goes off with it.
-        .onChange(of: appModel.activeWorkout == nil) { _, ended in
-            guard ended else { return }
-            endLesson()
-            if !appModel.pendingSessionChanges.isEmpty, conversationActive {
-                // Ask out loud too; "yes" / "just today" answers it.
-                let line = (tone == .hype ? "Great work! " : "Nice work. ")
-                    + "You changed a few things today. Want to keep them for next time?"
-                askedAt = Date()
-                if speaksReplies, tips != .quiet {
-                    voice.speak(line, messageId: "local-\(UUID().uuidString)")
-                } else {
-                    resumeListening()
-                }
-            } else {
-                endConversation()
-            }
-        }
+        .onChange(of: appModel.activeWorkout == nil) { _, ended in if ended, !restartingWorkout { workoutEnded() } }
         .onChange(of: voice.isSpeaking) { _, speaking in
             if !speaking { voiceStoppedAt = Date() }
             if !speaking, let plan = lessonPlan {
@@ -377,6 +256,134 @@ struct CoachStageView: View {
         }
     }
 
+    /// The body, the cards and the controls; `body` adds the behaviour.
+    private var stage: some View {
+        ZStack {
+            // The body's layer runs edge to edge, past the safe area, so your
+            // droplets can enter from outside the screen. It draws nothing
+            // but the body; the paper shows through everywhere else.
+            GeometryReader { geo in
+                let origin = geo.frame(in: .named(Self.space)).origin
+                OrbView(
+                    phase: phase,
+                    you: voiceInput.meter,
+                    agent: voice.meter,
+                    focus: centered
+                        ? CGPoint(x: restFocus.x - origin.x, y: restFocus.y - origin.y)
+                        : orbSlot.map { CGPoint(x: $0.midX - origin.x, y: $0.midY - origin.y) },
+                    director: director,
+                    // Fit the body to its slot when a card squeezes it.
+                    scale: centered ? 1 : orbSlot.map { min(1, max(0.4, $0.height / 460)) } ?? 1,
+                    loop: currentMotion,
+                    inWorkout: appModel.activeWorkout != nil,
+                    demo: debugLift,
+                    ambient: true,
+                    lesson: lessonCue,
+                    counting: repCount > 0,
+                    youTalking: !voiceInput.transcript.isEmpty,
+                    setsDone: appModel.activeWorkout?.exercises.reduce(0) { $0 + $1.completedSetCount } ?? 0
+                )
+            }
+            .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Where the body rests, and the thing you tap to talk.
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 150, maxHeight: cardOpen ? 190 : appModel.pendingPlanAdjustmentProposal == nil ? .infinity : 220)
+                    .background {
+                        GeometryReader { slot in
+                            Color.clear.preference(key: OrbSlotKey.self, value: slot.frame(in: .named(Self.space)))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    // Only a tap on the coach itself — the empty space around
+                    // it (where Start and cards sit) never turns the mic on.
+                    .onTapGesture(coordinateSpace: .named(Self.space)) { location in
+                        if tapIsOnCoach(location) { talkTapped() }
+                    }
+                    .accessibilityElement()
+                    .accessibilityLabel("Coach")
+                    .accessibilityValue(statusLine)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityHint(hint)
+                    .accessibilityAction { talkTapped() }
+
+                if !appModel.pendingSessionChanges.isEmpty {
+                    SessionChangesCard(changes: appModel.pendingSessionChanges)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if !appModel.pendingBaselineSuggestions.isEmpty {
+                    WeightFollowUpCard(suggestions: appModel.pendingBaselineSuggestions)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if let workout = appModel.activeWorkout, workoutExpanded {
+                    LiveWorkoutCard(workout: workout, expanded: $workoutExpanded)
+                        .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                } else if showTodayCard, appModel.activeWorkout == nil {
+                    TodayWorkoutCard(
+                        onClose: { showTodayCard = false },
+                        onBegin: { beginWorkout() }
+                    )
+                    .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
+                    .padding(.horizontal, MyoTheme.Spacing.md)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else {
+                    if !centered {
+                        caption
+                            .padding(.horizontal, MyoTheme.Spacing.lg)
+                    }
+                    Spacer(minLength: 0)
+                    if let workout = appModel.activeWorkout {
+                        // Begin workout drops the card down to this bar.
+                        LiveWorkoutCard(workout: workout, expanded: $workoutExpanded)
+                            .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
+                            .padding(.horizontal, MyoTheme.Spacing.md)
+                            .padding(.top, MyoTheme.Spacing.md)
+                    }
+                }
+
+                controls
+                    .padding(.leading, MyoTheme.Spacing.lg)
+                    .padding(.top, MyoTheme.Spacing.md)
+                    .padding(.bottom, MyoTheme.Spacing.sm)
+            }
+        }
+        .overlay {
+            if centered {
+                // Pinned just under the body (radius ≈ 0.45 of half the short side).
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
+                    // The rest-day question replaces the caption, so the card
+                    // never pushes down over the controls.
+                    if !askingSkipRestDay {
+                        caption.padding(.horizontal, MyoTheme.Spacing.lg)
+                    }
+                    // A leftover from an earlier day doesn't block today's start.
+                    if askingSkipRestDay {
+                        skipRestDayCard
+                            .padding(.top, MyoTheme.Spacing.lg)
+                            .padding(.horizontal, MyoTheme.Spacing.lg)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else if showsStartButton {
+                        startButton
+                            .padding(.top, MyoTheme.Spacing.lg)
+                            .transition(.opacity)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { stageSize = geo.size }
+                    .onChange(of: geo.size) { _, size in stageSize = size }
+            }
+        }
+    }
+
     // MARK: - Caption
 
     @ViewBuilder
@@ -422,6 +429,20 @@ struct CoachStageView: View {
                     .foregroundStyle(MyoColor.Text.tertiary.color)
             }
             .frame(minHeight: 88, alignment: .top)
+        case .rest where notice != nil, .listening where notice != nil && voiceInput.transcript.isEmpty:
+            Text(notice ?? "")
+                .myoStyle(.title)
+                .foregroundStyle(MyoColor.Text.primary.color)
+                .multilineTextAlignment(.center)
+                .frame(minHeight: 88, alignment: .top)
+                .transition(.opacity)
+        case .listening where voiceInput.transcript.isEmpty && ignoredHintUntil != nil,
+             .rest where ignoredHintUntil != nil:
+            Text("Mid-workout, start with “MYO” to ask me something.")
+                .myoStyle(.body)
+                .foregroundStyle(MyoColor.Text.secondary.color)
+                .multilineTextAlignment(.center)
+                .frame(minHeight: 88, alignment: .top)
         case .listening:
             Text(voiceInput.transcript.isEmpty ? " " : voiceInput.transcript)
                 .myoStyle(.title)
@@ -430,12 +451,17 @@ struct CoachStageView: View {
                 .lineLimit(5)
                 .frame(minHeight: 88, alignment: .top)
         case .thinking:
-            Text(lastSpokenText.isEmpty ? " " : "\u{201C}\(lastSpokenText)\u{201D}")
-                .myoStyle(.body)
-                .foregroundStyle(MyoColor.Text.tertiary.color)
-                .multilineTextAlignment(.center)
-                .lineLimit(4)
-                .frame(minHeight: 88, alignment: .top)
+            // What you said, so you know it was heard, and a pulse so you
+            // know it's working on it.
+            VStack(spacing: MyoTheme.Spacing.sm) {
+                Text(lastSpokenText.isEmpty ? " " : "\u{201C}\(lastSpokenText)\u{201D}")
+                    .myoStyle(.body)
+                    .foregroundStyle(MyoColor.Text.secondary.color)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                ThinkingDots()
+            }
+            .frame(minHeight: 88, alignment: .top)
         case .speaking:
             // A subtitle: only the sentence being said, gone when it's done.
             // The whole reply lives in Conversation.
@@ -503,6 +529,64 @@ struct CoachStageView: View {
         send(line, spoken: true)
     }
 
+    /// Within the coach's body (with a little slack), wherever it rests.
+    private func tapIsOnCoach(_ location: CGPoint) -> Bool {
+        let center = centered ? restFocus : orbSlot.map { CGPoint(x: $0.midX, y: $0.midY) } ?? restFocus
+        let reach = max(80, min(stageSize.width, stageSize.height) * 0.32)
+        return hypot(location.x - center.x, location.y - center.y) <= reach
+    }
+
+    /// Start shows while nothing's in progress — no workout, an old one,
+    /// or an empty one — at rest or while listening.
+    private var showsStartButton: Bool {
+        guard phase == .rest || phase == .listening else { return false }
+        if appModel.activeWorkout == nil || appModel.activeWorkoutIsLeftover { return true }
+        return !appModel.activeWorkoutHasProgress && appModel.currentExerciseIndex == nil
+    }
+
+    /// "Skip your rest day?" — right where Start was, two clear answers.
+    private var skipRestDayCard: some View {
+        VStack(spacing: MyoTheme.Spacing.md) {
+            VStack(spacing: 4) {
+                Text("Skip your rest day?")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                Text(appModel.nextPlannedDay.map { "You'd do \($0.name) today instead." }
+                     ?? "Coach will put together a workout for today.")
+                    .font(.subheadline)
+                    .foregroundStyle(MyoColor.Text.secondary.color)
+                    .multilineTextAlignment(.center)
+            }
+            HStack(spacing: MyoTheme.Spacing.sm) {
+                Button { answerSkipRestDay(false) } label: {
+                    Text("Not today")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .contentShape(Capsule())
+                        .myoGlass()
+                }
+                .buttonStyle(.plain)
+                do {
+                    Button { answerSkipRestDay(true) } label: {
+                        Text(appModel.nextPlannedDay.map { "Yes, do \($0.name)" } ?? "Yes, build one")
+                            .font(.body.weight(.semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(MyoTheme.Colors.ink)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .contentShape(Capsule())
+                            .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.35))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .frame(maxWidth: .infinity)
+        .myoCard()
+    }
+
     /// The one big action, right under the coach: jump into today's session.
     private var startButton: some View {
         Button {
@@ -513,9 +597,9 @@ struct CoachStageView: View {
                 if appModel.isWorkoutBusy {
                     ProgressView().tint(MyoTheme.Colors.ink)
                 } else {
-                    Image(systemName: "play.fill").font(.footnote.weight(.bold))
+                    Image(systemName: appModel.isRestDay ? "moon.zzz.fill" : "play.fill").font(.footnote.weight(.bold))
                 }
-                Text("Start my workout").font(.body.weight(.semibold))
+                Text(appModel.isRestDay ? "Rest day · train anyway?" : "Start my workout").font(.body.weight(.semibold))
             }
             .foregroundStyle(MyoTheme.Colors.ink)
             .padding(.horizontal, 28)
@@ -679,6 +763,7 @@ struct CoachStageView: View {
     /// One tap starts a hands-free conversation; any tap ends it — while
     /// you're talking, while Coach thinks, or while Coach speaks.
     private func talkTapped(fromMic: Bool = false) {
+        AudioHub.log("talk tapped (mic button: \(fromMic))")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if conversationActive, phase == .speaking, !fromMic {
             cutIn = true
@@ -719,6 +804,10 @@ struct CoachStageView: View {
         let addressed = Self.addressesCoach(heard)
         let text = addressed ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
+        if askingSkipRestDay, let yes = Self.skipRestDayAnswer(text) {
+            answerSkipRestDay(yes)
+            return
+        }
         if !appModel.pendingSessionChanges.isEmpty, let keep = Self.yesOrNo(text) {
             if keep {
                 confirm("Done. I'll send it over to update your plan.")
@@ -732,6 +821,14 @@ struct CoachStageView: View {
         // A long run of words with no pause is music or a conversation
         // nearby, not a command.
         let short = text.split(separator: " ").count <= 14
+        // "Start my workout" / "let's go" — unless it's an answer to
+        // something Coach just asked.
+        let justAskedSomething = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
+        if !justAskedSomething, !appModel.activeWorkoutHasProgress, currentExerciseIndex == nil || appModel.activeWorkout == nil,
+           Self.asksToStart(text) {
+            if appModel.isRestDay { askSkipRestDay(spoken: true) } else { beginWorkout() }
+            return
+        }
         if let workout = appModel.activeWorkout, repCount == 0, short,
            let edit = WorkoutEdit.parse(text, exercises: workout.exercises, current: currentExerciseIndex) {
             apply(edit)
@@ -776,9 +873,18 @@ struct CoachStageView: View {
             }
             // Mid-workout the mic hears the whole gym — music, other people.
             // Only what's said to MYO (or an answer to its question) goes to
-            // the coach; everything else is ignored.
+            // the coach; everything else is ignored, with a hint if it
+            // sounded like it was meant for MYO.
             let justAsked = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
-            guard addressed || justAsked else {
+            if currentExerciseIndex != nil, !(addressed || justAsked) {
+                if short, text.split(separator: " ").count >= 3 {
+                    let until = Date().addingTimeInterval(5)
+                    ignoredHintUntil = until
+                    Task {
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        if ignoredHintUntil == until { ignoredHintUntil = nil }
+                    }
+                }
                 restartHandledLocally = true
                 resumeListening()
                 return
@@ -987,10 +1093,35 @@ struct CoachStageView: View {
 
     /// The plan card drops down into the minimized live bar; the coach keeps
     /// its place and can keep talking.
-    private func beginWorkout() {
+    /// `dayKey`: a different day's session to do today (skipping a rest
+    /// day); nil for today's own.
+    private func beginWorkout(dayKey: String? = nil) {
+        // A rest day asks first.
+        if dayKey == nil, appModel.isRestDay, !appModel.activeWorkoutHasProgress {
+            askSkipRestDay(spoken: false)
+            return
+        }
         Task {
-            if appModel.activeWorkoutIsLeftover { await appModel.discardActiveWorkout() }
-            if appModel.activeWorkout == nil { await appModel.startTodaysWorkout() }
+            restartingWorkout = true
+            defer { restartingWorkout = false }
+            if appModel.activeWorkout != nil {
+                if appModel.activeWorkoutHasProgress {
+                    // An old session with sets in it is logged, not lost.
+                    if appModel.activeWorkoutIsLeftover { await appModel.finishActiveWorkout() }
+                } else {
+                    // Nothing logged yet: start fresh, so it's always the
+                    // latest plan (a session started before a plan change
+                    // would be stale).
+                    await appModel.discardActiveWorkout()
+                }
+                // Couldn't clear it (offline, busy): don't pretend we started.
+                if appModel.activeWorkout != nil, appModel.activeWorkoutIsLeftover || !appModel.activeWorkoutHasProgress {
+                    return
+                }
+            }
+            if appModel.activeWorkout == nil {
+                if let dayKey { await appModel.startWorkout(dayKey: dayKey) } else { await appModel.startTodaysWorkout() }
+            }
             guard appModel.activeWorkout != nil else { return }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             workoutExpanded = false
@@ -1005,6 +1136,114 @@ struct CoachStageView: View {
             if let first = currentExerciseIndex { introduce(exercise: first, first: true) }
             offerVoiceIsolation()
         }
+    }
+
+    /// A plan change went through: say what to do next.
+    private func planChangeAccepted() {
+        guard appModel.activeWorkout == nil || !appModel.activeWorkoutHasProgress else { return }
+        // A session started before this change is stale: clear it so Start
+        // (and "let's go") loads the new plan.
+        if appModel.activeWorkout != nil {
+            Task {
+                restartingWorkout = true
+                await appModel.discardActiveWorkout()
+                restartingWorkout = false
+            }
+        }
+        let line = appModel.isRestDay
+            ? "Done. Today's still a rest day."
+            : "Done. Your workout's ready. Tap Start, or say let's go."
+        if conversationActive, speaksReplies {
+            restartHandledLocally = true
+            voice.speak(line, messageId: "local-\(UUID().uuidString)")
+        }
+        show(notice: appModel.isRestDay ? "Today's still a rest day." : "Your workout's ready. Tap Start.")
+    }
+
+    /// Puts a note under the coach for a few seconds.
+    private func show(notice text: String) {
+        notice = text
+        Task {
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
+            if notice == text { notice = nil }
+        }
+    }
+
+    private func exerciseChanged(from previous: Int?, to next: Int?) {
+        guard previous != nil, let next, appModel.activeWorkout != nil else { return }
+        // Let "set three done" finish first.
+        Task {
+            for _ in 0..<40 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
+            guard currentExerciseIndex == next else { return }
+            introduce(exercise: next, first: false)
+        }
+    }
+
+    /// The workout ended: ask about keeping changes, else the mic goes off.
+    private func workoutEnded() {
+        endLesson()
+        if !appModel.pendingSessionChanges.isEmpty, conversationActive {
+            // Ask out loud too; "yes" / "just today" answers it.
+            let line = (tone == .hype ? "Great work! " : "Nice work. ")
+                + "You changed a few things today. Want to keep them for next time?"
+            askedAt = Date()
+            if speaksReplies, tips != .quiet {
+                voice.speak(line, messageId: "local-\(UUID().uuidString)")
+            } else {
+                resumeListening()
+            }
+        } else {
+            endConversation()
+        }
+    }
+
+    /// "Today's a rest day. Want to skip it?" — yes starts your next
+    /// planned session today.
+    private func askSkipRestDay(spoken: Bool) {
+        askingSkipRestDay = true
+        askedAt = Date()
+        if spoken, speaksReplies {
+            let offer = appModel.nextPlannedDay.map { "do \($0.name) instead" } ?? "have me build you a workout"
+            restartHandledLocally = true
+            voice.speak("Today's a rest day. Want to skip it and \(offer)?", messageId: "local-\(UUID().uuidString)")
+        }
+    }
+
+    private func answerSkipRestDay(_ yes: Bool) {
+        guard askingSkipRestDay else { return }
+        askingSkipRestDay = false
+        if yes, let next = appModel.nextPlannedDay {
+            beginWorkout(dayKey: next.dayKey)
+        } else if yes {
+            // Nothing in the plan to pull forward: have Coach build one.
+            conversationActive = true
+            send("It's a rest day but I want to train today. Give me a sensible workout for today.", spoken: true)
+        } else {
+            confirm(tone == .hype ? "Rest up. Back at it tomorrow!" : "Rest up.")
+        }
+    }
+
+    /// The answer to "skip your rest day?" — "skip it" means yes here.
+    private static func skipRestDayAnswer(_ text: String) -> Bool? {
+        let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        guard t.split(separator: " ").count <= 10 else { return nil }
+        if t.range(of: #"\b(skip it|skip|yes|yeah|yep|sure|let'?s (go|do it|train)|do it|train|i'?m (good|fresh|ready))\b"#,
+                   options: .regularExpression) != nil,
+           t.range(of: #"\b(don't|do not|no skip)\b"#, options: .regularExpression) == nil {
+            return true
+        }
+        if t.range(of: #"\b(no|nope|nah|rest|not today|i'?ll rest)\b"#, options: .regularExpression) != nil {
+            return false
+        }
+        return nil
+    }
+
+    /// "Start my workout", "let's go", "I want to work out".
+    private static func asksToStart(_ text: String) -> Bool {
+        let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        guard t.split(separator: " ").count <= 10 else { return false }
+        return t.range(of: #"\b(start|begin)( my| a| the| today's)? (workout|session|training)\b|\blet'?s (go|work ?out|train|do (it|this))\b|\bi (want|wanna|need) to (work ?out|train|lift)\b|\bstart (it|now)\b"#,
+                       options: .regularExpression) != nil
     }
 
     // MARK: - Teaching
@@ -1057,7 +1296,8 @@ struct CoachStageView: View {
         if speaksReplies {
             voice.speak(lines: lines, messageId: plan.id)
             try? AudioHub.shared.start()
-            if AudioHub.shared.canTalkOver { voiceInput.listen() }
+            // Only in talk mode — typing means the mic stays off.
+            if AudioHub.shared.canTalkOver, conversationActive { voiceInput.listen() }
         } else {
             // Muted: the body still walks through it, a beat every few seconds.
             Task {
@@ -1193,3 +1433,24 @@ private struct OrbSlotKey: PreferenceKey {
         value = nextValue() ?? value
     }
 }
+
+
+/// Three dots breathing in turn — Coach is working on a reply.
+private struct ThinkingDots: View {
+    var body: some View {
+        TimelineView(.animation) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 6) {
+                ForEach(0..<3) { i in
+                    Circle()
+                        .fill(MyoTheme.Colors.coachAmber)
+                        .frame(width: 8, height: 8)
+                        .opacity(0.3 + 0.7 * max(0, sin(t * 4 - Double(i) * 0.7)))
+                }
+            }
+        }
+        .accessibilityLabel("Thinking")
+    }
+}
+
+

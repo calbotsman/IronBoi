@@ -34,6 +34,19 @@ final class AppModel: NSObject, ObservableObject {
                 focusedExerciseIndex = nil
                 sessionChanges = []
                 skippedExercises = []
+                // An old workout you never logged a set in isn't one you're
+                // in the middle of — clear it rather than open on it. Nor is
+                // one with nothing in it (started on a rest day).
+                if let workout = activeWorkout, workout.status == .active,
+                   workout.exercises.isEmpty
+                    || (activeWorkoutIsLeftover && !workout.exercises.contains { $0.completedSets.contains(where: \.completed) }) {
+                    let id = workout.sessionId
+                    Task {
+                        // Only the session that prompted this — not one started since.
+                        guard self.activeWorkout?.sessionId == id else { return }
+                        await self.discardActiveWorkout()
+                    }
+                }
             }
         }
     }
@@ -233,10 +246,23 @@ final class AppModel: NSObject, ObservableObject {
         profileLoaded = true
         profile = Self.previewProfile
         currentWorkoutPlan = Self.previewPlan
+        // MYO_REST_DAY=1: today has nothing planned (as the backend stores a
+        // rest day: the day, with no exercises).
+        if ProcessInfo.processInfo.environment["MYO_REST_DAY"] == "1" {
+            currentWorkoutPlan = Self.previewPlan(restingToday: true)
+        }
         messages = Self.previewMessages
         workoutLogs = Self.previewLogs
         memoryFacts = Self.previewMemoryFacts
         // MYO_DEMO_PROPOSAL=1: a sample plan change, to check the review card.
+        // MYO_EMPTY_WORKOUT=1: open on an empty session, like the one a rest
+        // day used to create.
+        if ProcessInfo.processInfo.environment["MYO_EMPTY_WORKOUT"] == "1" {
+            let now = Self.isoString(from: Date())
+            activeWorkout = ActiveWorkoutSession(
+                userId: "preview", sessionId: "preview-empty", planId: "preview", dayKey: Self.currentDayKey(),
+                workoutName: "Rest", status: .active, startedAt: now, updatedAt: now, completedAt: nil, exercises: [])
+        }
         if ProcessInfo.processInfo.environment["MYO_DEMO_PROPOSAL"] == "1" {
             pendingPlanAdjustmentProposal = PlanAdjustmentProposalSummary(
                 id: "demo", proposalId: "demo", category: "pain", riskLevel: "low",
@@ -497,6 +523,15 @@ final class AppModel: NSObject, ObservableObject {
 
         isSending = true
         defer { isSending = false }
+        #if DEBUG
+        // Preview: accepting puts a session back on today.
+        if isPreviewSession {
+            self.pendingPlanAdjustmentProposal = nil
+            currentWorkoutPlan = Self.previewPlan
+            planChangesAccepted += 1
+            return
+        }
+        #endif
 
         do {
             var data: [String: Any] = [
@@ -511,10 +546,44 @@ final class AppModel: NSObject, ObservableObject {
             }
             try await callBackend(httpName: "acceptPlanAdjustmentProposalHttp", callableName: "acceptPlanAdjustmentProposal", data: data)
             try await refreshCurrentWorkoutPlan()
+            planChangesAccepted += 1
         } catch {
             errorMessage = Self.planAdjustmentErrorMessage(from: error)
         }
     }
+
+    // MARK: - Today
+
+    /// Today's planned session (with any just-today adjustment folded in),
+    /// or nil on a rest day.
+    var todayPlanDay: PlannedWorkoutDay? {
+        currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() && !$0.exercises.isEmpty }
+    }
+
+    /// There's a plan, and nothing in it today.
+    var isRestDay: Bool {
+        currentWorkoutPlan != nil && todayPlanDay == nil
+    }
+
+    /// The next planned session after today — what "skip my rest day" does.
+    var nextPlannedDay: PlannedWorkoutDay? {
+        let order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        guard let days = currentWorkoutPlan?.days, let index = order.firstIndex(of: Self.currentDayKey()) else { return nil }
+        for offset in 1...7 {
+            let key = order[(index + offset) % 7]
+            if let day = days.first(where: { $0.dayKey == key && !$0.exercises.isEmpty }) { return day }
+        }
+        return nil
+    }
+
+    /// A logged set anywhere in the session in progress.
+    var activeWorkoutHasProgress: Bool {
+        activeWorkout?.exercises.contains { $0.completedSets.contains(where: \.completed) } ?? false
+    }
+
+    /// Bumped when you accept a plan change, so the coach screen can say
+    /// what to do next.
+    @Published private(set) var planChangesAccepted = 0
 
     func startTodaysWorkout() async {
         await startWorkout(dayKey: Self.currentDayKey())
@@ -529,12 +598,15 @@ final class AppModel: NSObject, ObservableObject {
         // through starting, teaching and counting.
         if isPreviewSession {
             let now = Self.isoString(from: Date())
-            let lifts: [(String, Int, Int, Double)] = [
-                ("Goblet Squat", 3, 10, 35), ("Barbell Bench Press", 3, 8, 135), ("KB Swing", 3, 15, 35),
-            ]
+            // The plan's own day when there is one — empty on a rest day,
+            // as the backend does.
+            let planned = currentWorkoutPlan?.days.first { $0.dayKey == dayKey }
+            let lifts: [(String, Int, Int, Double)] = planned.map { day in
+                day.exercises.map { ($0.name, $0.sets, $0.reps, $0.weight) }
+            } ?? [("Goblet Squat", 3, 10, 35), ("Barbell Bench Press", 3, 8, 135), ("KB Swing", 3, 15, 35)]
             activeWorkout = ActiveWorkoutSession(
                 userId: "preview", sessionId: "preview-\(UUID().uuidString)", planId: "preview", dayKey: dayKey,
-                workoutName: "Full Body", status: .active, startedAt: now, updatedAt: now, completedAt: nil,
+                workoutName: planned?.name ?? "Full Body", status: .active, startedAt: now, updatedAt: now, completedAt: nil,
                 exercises: lifts.enumerated().map { index, lift in
                     ActiveWorkoutExercise(exerciseIndex: index, name: lift.0, targetSets: lift.1, targetReps: lift.2,
                                           targetWeight: lift.3,
@@ -808,7 +880,10 @@ final class AppModel: NSObject, ObservableObject {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let date = f.date(from: started) ?? ISO8601DateFormatter().date(from: started) else { return false }
-        return !Calendar.current.isDateInToday(date)
+        // Started another day, or more than four hours ago and not touched
+        // since — you're not still in it.
+        let touched = activeWorkout.flatMap { f.date(from: $0.updatedAt) ?? ISO8601DateFormatter().date(from: $0.updatedAt) } ?? date
+        return !Calendar.current.isDateInToday(date) || Date().timeIntervalSince(max(date, touched)) > 4 * 3600
     }
 
     /// Throws away the unfinished workout — nothing is logged.
@@ -2180,7 +2255,24 @@ extension AppModel {
         return p
     }
 
-    static var previewPlan: WorkoutPlanSummary {
+    static var previewPlan: WorkoutPlanSummary { previewPlan(restingToday: false) }
+
+    /// `restingToday`: today's day is kept but emptied — a rest day.
+    static func previewPlan(restingToday: Bool) -> WorkoutPlanSummary {
+        let plan = basePreviewPlan
+        guard restingToday else { return plan }
+        let today = currentDayKey()
+        var days = plan.days.map { day in
+            day.dayKey == today ? PlannedWorkoutDay(dayKey: day.dayKey, name: "Rest", muscles: [], exercises: []) : day
+        }
+        if !days.contains(where: { $0.dayKey == today }) {
+            days.append(PlannedWorkoutDay(dayKey: today, name: "Rest", muscles: [], exercises: []))
+        }
+        return WorkoutPlanSummary(userId: plan.userId, planId: plan.planId, source: plan.source,
+                                  updatedAt: plan.updatedAt, days: days)
+    }
+
+    private static var basePreviewPlan: WorkoutPlanSummary {
         WorkoutPlanSummary(
             userId: "preview",
             planId: "current",

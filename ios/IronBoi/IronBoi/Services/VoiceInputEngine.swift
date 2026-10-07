@@ -52,6 +52,7 @@ final class VoiceInputEngine: ObservableObject {
                 try await start()
             } catch {
                 errorMessage = error.localizedDescription
+                AudioHub.log("listen failed: \(error.localizedDescription)")
                 stop()
             }
         }

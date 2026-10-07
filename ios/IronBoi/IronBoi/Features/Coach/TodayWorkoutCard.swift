@@ -13,9 +13,8 @@ struct TodayWorkoutCard: View {
         return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday - 1]
     }
 
-    private var today: PlannedWorkoutDay? {
-        appModel.currentWorkoutPlan?.days.first { $0.dayKey == Self.todayKey }
-    }
+    /// Today's session; nil on a rest day (a day with nothing in it counts).
+    private var today: PlannedWorkoutDay? { appModel.todayPlanDay }
 
     /// The next planned day after today, for the rest-day card.
     private var nextDay: PlannedWorkoutDay? {

@@ -82,6 +82,7 @@ final class CoachVoice: NSObject, ObservableObject {
                     buffer = try AudioHub.buffer(fromWAV: try await pending.value)
                 } catch {
                     guard gen == self.generation else { return }
+                    AudioHub.log("voice fetch failed, on-device fallback: \(error.localizedDescription)")
                     self.speakOnDevice(chunks[index...].joined(separator: " "))
                     return
                 }
@@ -90,6 +91,7 @@ final class CoachVoice: NSObject, ObservableObject {
                 guard gen == self.generation else { return }
                 self.caption = chunk
                 self.lineIndex = index
+                if index == 0 { AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))") }
                 await self.hub.play(buffer)
             }
             if gen == self.generation { self.finish() }
