@@ -637,6 +637,9 @@ struct CoachStageView: View {
             Button("Voice Isolation…", systemImage: "person.wave.2") {
                 AVCaptureDevice.showSystemUserInterface(.microphoneModes)
             }
+            Divider()
+            // Where audio is going right now — for telling us what happened.
+            ForEach(AudioHub.shared.routeLines, id: \.self) { Text($0) }
         }
         .accessibilityLabel(on ? "Mic on" : "Mic off")
         .accessibilityHint(on ? "Turns the mic off" : "Turns the mic on so you can talk to MYO")

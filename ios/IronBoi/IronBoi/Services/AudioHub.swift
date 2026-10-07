@@ -15,19 +15,62 @@ final class AudioHub {
 
     private var configured = false
     private var engineStarted = false
+    private var sessionActive = false
     private(set) var echoCancelling = false
+    /// Headphones (wired or Bluetooth) are connected. Tracked separately
+    /// from the current route: once voice processing has pulled audio onto
+    /// the speaker, the route no longer shows the headphones at all.
+    private(set) var headphonesConnected = false
 
-    private init() {}
+    private init() {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+            let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
+            MainActor.assumeIsolated {
+                self.routeChanged(raw.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)), previous: previous)
+            }
+        }
+    }
+
+    private func routeChanged(_ reason: AVAudioSession.RouteChangeReason?, previous: AVAudioSessionRouteDescription?) {
+        let current = AVAudioSession.sharedInstance().currentRoute
+        switch reason {
+        case .oldDeviceUnavailable:
+            if let previous, Self.headphones(in: previous) { headphonesConnected = Self.headphones(in: current) }
+        default:
+            if Self.headphones(in: current) { headphonesConnected = true }
+        }
+    }
+
+    /// Where audio is going right now, for the mic button's long-press —
+    /// so a tester can say exactly what happened.
+    var routeLines: [String] {
+        let route = AVAudioSession.sharedInstance().currentRoute
+        let out = route.outputs.map(\.portName).joined(separator: ", ")
+        let input = route.inputs.map(\.portName).joined(separator: ", ")
+        return [
+            "Sound out: \(out.isEmpty ? "none" : out)",
+            "Mic: \(input.isEmpty ? "none" : input)",
+            "Headphones: \(headphonesConnected ? "yes" : "no") · Echo cancel: \(echoCancelling ? "on" : "off")",
+        ]
+    }
 
     /// Session + graph, once; then makes sure the engine is running.
     /// `reconfigure`: the mic isn't tapped right now, so echo cancellation
     /// may be switched on or off to suit the current route.
     func start(reconfigure: Bool = false) throws {
         let session = AVAudioSession.sharedInstance()
+        // Before we take the session, the route is the system's own — if
+        // headphones are on, it shows them.
+        if !sessionActive { headphonesConnected = Self.headphones(in: session.currentRoute) }
         if session.category != .playAndRecord {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
+        sessionActive = true
+        if Self.headphones(in: session.currentRoute) { headphonesConnected = true }
 
         if !configured {
             engine.attach(player)
@@ -40,7 +83,7 @@ final class AudioHub {
         // run with Bluetooth headphones — iOS pulls the audio off them onto
         // the speaker — and with headphones the mic can't hear Coach
         // anyway. With music playing it fights the other app's audio.
-        let wanted = !Self.headphones(session) && !session.isOtherAudioPlaying
+        let wanted = !headphonesConnected && !session.isOtherAudioPlaying
         if (reconfigure || !engineStarted), wanted != engine.inputNode.isVoiceProcessingEnabled, !player.isPlaying {
             if engine.isRunning { engine.stop() }
             do {
@@ -66,13 +109,13 @@ final class AudioHub {
     /// You can talk over Coach without the mic hearing Coach: its voice is
     /// cancelled from the mic, or it's in your ears.
     var canTalkOver: Bool {
-        echoCancelling || Self.headphones(AVAudioSession.sharedInstance())
+        echoCancelling || headphonesConnected
     }
 
-    private static func headphones(_ session: AVAudioSession) -> Bool {
+    private static func headphones(in route: AVAudioSessionRouteDescription) -> Bool {
         let ports: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE,
                                                .usbAudio, .carAudio, .airPlay]
-        return session.currentRoute.outputs.contains { ports.contains($0.portType) }
+        return route.outputs.contains { ports.contains($0.portType) }
     }
 
     /// Plays alongside your music rather than stopping it. Bluetooth stays
@@ -101,6 +144,7 @@ final class AudioHub {
         player.stop()
         if engine.isRunning { engine.stop() }
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        sessionActive = false
     }
 
     /// Decodes Cloud TTS WAV bytes into a buffer the player can schedule.
