@@ -27,6 +27,11 @@ final class VoiceInputEngine: ObservableObject {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var hasInstalledTap = false
+    /// Bumped on every stop; callbacks and starts carry the value they began
+    /// with and drop out if it's moved on.
+    private var session = 0
+    /// Starting the mic failed (no input, a call, a route change).
+    var onFailure: (() -> Void)?
 
     /// Starts listening if it isn't already (safe to call while Coach talks).
     func listen() {
@@ -54,11 +59,14 @@ final class VoiceInputEngine: ObservableObject {
                 errorMessage = error.localizedDescription
                 AudioHub.log("listen failed: \(error.localizedDescription)")
                 stop()
+                onFailure?()
             }
         }
     }
 
     func stop() {
+        // Anything still in flight from this listen is now stale.
+        session += 1
         pauseTask?.cancel()
         pauseTask = nil
         meter.reset()
@@ -78,8 +86,13 @@ final class VoiceInputEngine: ObservableObject {
         #if DEBUG
         if playFakeUtteranceIfAny() { return }
         #endif
+        let before = session
         try await requestPermissions()
+        // Stopped (conversation ended) while we waited for permission: don't
+        // open the mic after all.
+        guard session == before else { return }
         stop()
+        let mine = session
 
         // Our tap is off (stop() above): the hub may retune echo
         // cancellation for whatever's plugged in now.
@@ -107,7 +120,8 @@ final class VoiceInputEngine: ObservableObject {
 
         recognitionTask = recognizer?.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
-                guard let self else { return }
+                // A late callback from an earlier listen must not touch this one.
+                guard let self, self.session == mine else { return }
 
                 if let text = result?.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
                    !text.isEmpty, text != self.transcript {

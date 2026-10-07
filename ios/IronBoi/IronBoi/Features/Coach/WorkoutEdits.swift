@@ -29,9 +29,15 @@ enum WorkoutEdit: Equatable {
         }
         func find(_ phrase: String) -> Int? { resolve(phrase, in: exercises, current: current) }
 
-        if first(#"\b(finish|end|wrap up|complete|close out)( my| the| this)? (workout|session)\b"#) != nil
-            || first(#"\b(workout|session)('s| is) (done|over|finished)\b"#) != nil
-            || first(#"\bi'm done for (the day|today)\b"#) != nil {
+        // A question or a "not" is never a command ("what should I eat
+        // after I finish my workout?", "don't skip curls").
+        let isQuestion = transcript.contains("?")
+            || t.range(of: #"^(what|how|when|why|where|which|who|should|can|could|would|is|are|do|does|did|will)\b"#,
+                       options: .regularExpression) != nil
+        if isQuestion || t.range(of: #"\b(don't|do not|never|not)\b"#, options: .regularExpression) != nil { return nil }
+        if first(#"^(?:ok |okay |alright |let's |lets |i want to |i'm gonna )?(?:finish|end|wrap up|complete|close out)( my| the| this)? (workout|session)\b"#) != nil
+            || first(#"^(?:my |the |this )?(workout|session)('s| is) (done|over|finished)\b"#) != nil
+            || first(#"^i'?m done for (the day|today)\b"#) != nil {
             return .finish
         }
         let vague = #"^(?:something|anything|another|an alternative|alternative|a different|different|an easier|something easier|something different|something else|another one|something lighter)(?: one| exercise| lift| movement| move| else| option)?$"#
@@ -54,11 +60,20 @@ enum WorkoutEdit: Equatable {
             return .swap(index, to: cleanName(m[0]))
         }
         if let m = first(#"^(?:let's |lets |can we |i want to |i'm gonna |gonna )?(?:skip|drop|remove|cut|ditch|forget) (?:the )?(.+?)(?: today| for today| this time)?$"#),
+           // "Forget it", "drop that" are about what was just said, not a lift.
+           m[0].range(of: #"^(it|that|this|about it|about that)$"#, options: .regularExpression) == nil,
            let index = find(m[0]) {
             return .skip(index)
         }
         if let m = first(#"\b(?:add|throw in|tack on|put in|add in|also do|squeeze in)(?: some| a few| a| an)? (.+)$"#) {
             let rest = m[0]
+            // "Add ten pounds", "add a plate", "add another set": weight or
+            // volume, not a new lift.
+            let amount = #"(?:a|an|another|some|more|one|two|three|four|five|ten|fifteen|twenty|\d+(?:\.\d+)?)"#
+            if rest.range(of: "^(?:" + amount + #"\s+)*(?:pounds?|lbs?|kilos?|kgs?|plates?|weight|sets?|reps?|rounds?|more)\b"#,
+                          options: .regularExpression) != nil {
+                return nil
+            }
             let (sets, reps) = setsAndReps(in: rest)
             let weight = first(#"\bat (\d+(?:\.\d+)?)"#).flatMap { Double($0[0]) }
             let now = rest.range(of: #"\b(now|next|first)\b"#, options: .regularExpression) != nil

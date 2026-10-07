@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { DocumentData, Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
@@ -57,8 +58,12 @@ export async function startWorkoutSession(
 ) {
   const now = new Date().toISOString();
   const startedAt = request.startedAt ?? now;
+  // A random tail: date + day alone collided (doing a day twice, or a
+  // late-evening session landing on the next UTC date), and the second
+  // finish overwrote the first workout's log.
   const sessionId =
-    request.sessionId ?? `${startedAt.slice(0, 10)}_${request.dayKey.toLowerCase()}`;
+    request.sessionId ??
+    `${startedAt.slice(0, 10)}_${request.dayKey.toLowerCase()}_${randomUUID().slice(0, 8)}`;
   const sessionDate = request.clientDate ?? startedAt.slice(0, 10);
   const { day: dayPlan, fromOverride, planDays } = await loadWorkoutDay(
     db,

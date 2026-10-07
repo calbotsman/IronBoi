@@ -85,6 +85,12 @@ enum WorkoutVoice {
     static func setsLogged(in transcript: String) -> SetsLogged? {
         let t = normalized(transcript)
         func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
+        // "How many sets did I do?", "two sets left" — questions and counts
+        // of what's to come aren't logging anything.
+        if transcript.contains("?") || says(#"^(how|what|which|when|is|are|should|can|did i|do i)\b"#)
+            || says(#"\b(left|to go|remaining|how many)\b"#) && !says(#"\b(all|every)( the| my)? remaining\b"#) {
+            return nil
+        }
         guard says(#"\bsets?\b"#),
               says(#"\b(done|finished|finish|complete|completed|did|that's|got|knocked out|logged)\b"#) else { return nil }
         let reps = number(before: #"\s*(reps?|times)\b"#, in: t) ?? number(after: #"\bsets? of\s+"#, in: t)
@@ -116,6 +122,8 @@ enum WorkoutVoice {
     static func weightChange(in transcript: String) -> WeightChange? {
         let t = normalized(transcript)
         guard let number = firstNumber(in: t), number >= 2.5, number <= 1000 else { return nil }
+        // "Go to 12 reps", "it's 5 sets" — that number is reps or sets.
+        if t.range(of: #"\b\d+\s*(reps?|sets?|times|rounds?)\b"#, options: .regularExpression) != nil { return nil }
         let isKilos = t.range(of: #"\b(kg|kgs|kilo|kilos|kilograms?)\b"#, options: .regularExpression) != nil
         let pounds = isKilos ? (number * 2.20462 / 2.5).rounded() * 2.5 : number
         let mentionsWeight = t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?|heavier|lighter)\b"#,

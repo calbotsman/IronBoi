@@ -30,6 +30,7 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
     @Published private(set) var activeWorkout: ActiveWorkoutSession? {
         didSet {
+            saveLocalWorkout()
             if activeWorkout?.sessionId != oldValue?.sessionId {
                 focusedExerciseIndex = nil
                 sessionChanges = []
@@ -53,9 +54,54 @@ final class AppModel: NSObject, ObservableObject {
     /// The lift you chose to do next, out of order ("let's do swings now").
     @Published private(set) var focusedExerciseIndex: Int?
     /// What you changed mid-workout, in words — asked about at the end.
-    @Published private(set) var sessionChanges: [String] = []
+    @Published private(set) var sessionChanges: [String] = [] { didSet { saveLocalWorkout() } }
     /// Lifts you skipped today; left out of the log.
-    private var skippedExercises: Set<Int> = []
+    private var skippedExercises: Set<Int> = [] { didSet { saveLocalWorkout() } }
+
+    // MARK: - The workout in progress, kept on the phone
+
+    /// Logged sets, added/swapped/skipped lifts live on the phone until you
+    /// finish; this keeps them through the app being killed or evicted.
+    private struct LocalWorkout: Codable {
+        let workout: ActiveWorkoutSession
+        let changes: [String]
+        let skipped: [Int]
+    }
+
+    private static let localWorkoutKey = "localActiveWorkout"
+
+    private func saveLocalWorkout() {
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        guard let workout = activeWorkout, workout.status == .active else {
+            UserDefaults.standard.removeObject(forKey: Self.localWorkoutKey)
+            return
+        }
+        let local = LocalWorkout(workout: workout, changes: sessionChanges, skipped: Array(skippedExercises))
+        if let data = try? JSONEncoder().encode(local) {
+            UserDefaults.standard.set(data, forKey: Self.localWorkoutKey)
+        }
+    }
+
+    /// The phone's copy of this session, if it's at least as new as the
+    /// server's (the server only hears about a session at start and finish).
+    private func localCopy(of server: ActiveWorkoutSession) -> LocalWorkout? {
+        guard let data = UserDefaults.standard.data(forKey: Self.localWorkoutKey),
+              let local = try? JSONDecoder().decode(LocalWorkout.self, from: data),
+              local.workout.sessionId == server.sessionId,
+              let localTime = Self.parseISO(local.workout.updatedAt),
+              let serverTime = Self.parseISO(server.updatedAt),
+              localTime >= serverTime
+        else { return nil }
+        return local
+    }
+
+    private static func parseISO(_ string: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: string) ?? ISO8601DateFormatter().date(from: string)
+    }
     /// After finishing: today's changes, waiting on "keep them?".
     @Published var pendingSessionChanges: [String] = []
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
@@ -688,7 +734,11 @@ final class AppModel: NSObject, ObservableObject {
             workout.exercises[index].exerciseDone = false
             target = index
         } else {
-            workout.exercises[index].completedSets = done
+            workout.exercises[index].completedSets = done.enumerated().map { position, set in
+                var kept = set
+                kept = ActiveWorkoutSet(setIndex: position, completed: kept.completed, reps: kept.reps, weight: kept.weight)
+                return kept
+            }
             workout.exercises[index].targetSets = done.count
             workout.exercises[index].exerciseDone = true
             // Every set already done: the swap is a fresh lift at full sets.
@@ -880,10 +930,10 @@ final class AppModel: NSObject, ObservableObject {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let date = f.date(from: started) ?? ISO8601DateFormatter().date(from: started) else { return false }
-        // Started another day, or more than four hours ago and not touched
-        // since — you're not still in it.
+        // Not touched for four hours — you're not still in it. (Not "started
+        // another day": a workout that runs past midnight is still going.)
         let touched = activeWorkout.flatMap { f.date(from: $0.updatedAt) ?? ISO8601DateFormatter().date(from: $0.updatedAt) } ?? date
-        return !Calendar.current.isDateInToday(date) || Date().timeIntervalSince(max(date, touched)) > 4 * 3600
+        return Date().timeIntervalSince(max(date, touched)) > 4 * 3600
     }
 
     /// Throws away the unfinished workout — nothing is logged.
@@ -1476,7 +1526,23 @@ final class AppModel: NSObject, ObservableObject {
                         return
                     }
 
-                    self?.activeWorkout = workout
+                    guard let self else { return }
+                    if self.activeWorkout?.sessionId == workout.sessionId,
+                       let mine = self.activeWorkout,
+                       let mineTime = Self.parseISO(mine.updatedAt),
+                       let serverTime = Self.parseISO(workout.updatedAt),
+                       mineTime > serverTime {
+                        // Our edits are newer than this snapshot; keep them.
+                        return
+                    }
+                    if self.activeWorkout == nil, let local = self.localCopy(of: workout) {
+                        // Relaunched mid-workout: pick up where you left off.
+                        self.activeWorkout = local.workout
+                        self.sessionChanges = local.changes
+                        self.skippedExercises = Set(local.skipped)
+                        return
+                    }
+                    self.activeWorkout = workout
                 }
             }
     }

@@ -108,6 +108,10 @@ final class CoachVoice: NSObject, ObservableObject {
     }
 
     private func finish() {
+        // A finished player still reads as playing, which stops the hub from
+        // retuning echo cancellation (headphones plugged in mid-workout).
+        if hub.player.isPlaying { hub.stopPlayback() }
+        speakingOnDevice = false
         isSpeaking = false
         caption = ""
         meter.reset()
@@ -157,7 +161,12 @@ final class CoachVoice: NSObject, ObservableObject {
 
     // MARK: - On-device fallback
 
+    /// The on-device voice is speaking. It doesn't go through the shared
+    /// engine, so echo cancellation can't remove it from the mic.
+    @Published private(set) var speakingOnDevice = false
+
     private func speakOnDevice(_ spoken: String) {
+        speakingOnDevice = true
         // The synthesizer plays on our session; set it up first, or it
         // would use the default one, which stops other apps' music.
         try? hub.start()

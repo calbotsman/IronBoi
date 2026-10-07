@@ -51,6 +51,11 @@ struct CoachStageView: View {
     @State private var typedReplyAfter: Set<String>?
     /// A typed-to reply, written out under the coach until you move on.
     @State private var textReply: CoachMessage?
+    /// When it started writing out, so it doesn't re-type when redrawn.
+    @State private var textReplyShownAt = Date()
+    /// When the open question (swap offer, rest day) was put to you; spoken
+    /// answers only count for a little while after. Taps always do.
+    @State private var questionAskedAt: Date?
     /// "Swap the bench": alternatives on offer for one lift.
     @State private var swapChoice: SwapChoice?
 
@@ -82,6 +87,7 @@ struct CoachStageView: View {
     /// Listening was stopped by a local workout command, which restarts it
     /// itself — the timeout handler shouldn't also restart it.
     @State private var restartHandledLocally = false
+    @State private var restartMarks = 0
     /// The count reached before the current transcript began; counting
     /// carries across the recognizer's restarts.
     @State private var countBase = 0
@@ -114,7 +120,7 @@ struct CoachStageView: View {
 
     /// Any card that needs the space below the body.
     private var cardOpen: Bool {
-        !appModel.pendingSessionChanges.isEmpty || !appModel.pendingBaselineSuggestions.isEmpty || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
+        swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || !appModel.pendingBaselineSuggestions.isEmpty || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
     }
     /// The newest coach reply already checked for a move, so history
     /// loading on launch never sets the body off.
@@ -167,6 +173,7 @@ struct CoachStageView: View {
                 handleUtterance(text)
             }
             voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+            voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
             #if DEBUG
             // MYO_BODY_MOVE=pushups|plank: start a move on launch, to tune
@@ -177,9 +184,14 @@ struct CoachStageView: View {
             }
             #endif
         }
-        .onDisappear {
+        .onDisappear { endConversation() }
+        // Audio was rebuilt (AirPods in/out, a call ended): listen again so
+        // the mic matches the new route.
+        .onReceive(NotificationCenter.default.publisher(for: AudioHub.resetNotification)) { _ in
+            guard conversationActive, voiceInput.isListening else { return }
+            markRestartHandled()
             voiceInput.stop()
-            voice.stop()
+            resumeListening()
         }
         .onChange(of: appModel.messages) { _, messages in
             showTypedReplyIfReady(messages)
@@ -235,7 +247,7 @@ struct CoachStageView: View {
             // it was echo or noise — start your turn clean. If you cut in,
             // keep what you're saying.
             if !cutIn, voiceInput.isListening {
-                restartHandledLocally = true
+                markRestartHandled()
                 voiceInput.stop()
             }
             cutIn = false
@@ -248,6 +260,7 @@ struct CoachStageView: View {
             // Only with echo cancellation on: without it the mic would hear
             // Coach and Coach would cut itself off.
             if voice.isSpeaking, conversationActive, AudioHub.shared.canTalkOver,
+               !voice.speakingOnDevice, !Self.echoes(transcript, of: voice.caption),
                transcript.split(separator: " ").count >= 2 {
                 // You started talking: Coach stops and listens.
                 cutIn = true
@@ -325,7 +338,8 @@ struct CoachStageView: View {
                     // Only a tap on the coach itself — the empty space around
                     // it (where Start and cards sit) never turns the mic on.
                     .onTapGesture(coordinateSpace: .named(Self.space)) { location in
-                        if tapIsOnCoach(location) { talkTapped() }
+                        // While typing, a tap on the stage just puts the keyboard away.
+                        if showKeyboard { showKeyboard = false } else if tapIsOnCoach(location) { talkTapped() }
                     }
                     .accessibilityElement()
                     .accessibilityLabel("Coach")
@@ -334,7 +348,11 @@ struct CoachStageView: View {
                     .accessibilityHint(hint)
                     .accessibilityAction { talkTapped() }
 
-                if !appModel.pendingSessionChanges.isEmpty {
+                if let choice = swapChoice {
+                    swapCard(choice)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if !appModel.pendingSessionChanges.isEmpty {
                     SessionChangesCard(changes: appModel.pendingSessionChanges)
                         .padding(.horizontal, MyoTheme.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -385,11 +403,7 @@ struct CoachStageView: View {
                     Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
                     // The rest-day question replaces the caption, so the card
                     // never pushes down over the controls.
-                    if let choice = swapChoice {
-                        swapCard(choice)
-                            .padding(.horizontal, MyoTheme.Spacing.lg)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    } else if !askingSkipRestDay {
+                    if !askingSkipRestDay {
                         caption.padding(.horizontal, MyoTheme.Spacing.lg)
                     }
                     // A leftover from an earlier day doesn't block today's start.
@@ -499,8 +513,9 @@ struct CoachStageView: View {
                 .id(voice.caption)
                 .transition(.opacity)
         case .rest where textReply != nil:
-            TypedReplyText(message: textReply!)
+            TypedReplyText(message: textReply!, shownAt: textReplyShownAt)
                 .onTapGesture { withAnimation(MyoTheme.Motion.fade) { textReply = nil } }
+                .accessibilityAction(named: "Dismiss") { textReply = nil }
         case .rest:
             if !speaksReplies, let message = lastCoachMessage {
                 // Muted: text is the only way the reply reaches you.
@@ -565,6 +580,18 @@ struct CoachStageView: View {
         send(line, spoken: true)
     }
 
+    /// The mic is hearing Coach's own sentence (a Bluetooth speaker, a car)
+    /// rather than you: most of what it heard is in what Coach is saying.
+    private static func echoes(_ heard: String, of spoken: String) -> Bool {
+        func words(_ s: String) -> [String] {
+            s.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { $0.count > 2 }
+        }
+        let said = Set(words(spoken))
+        let got = words(heard)
+        guard !said.isEmpty, !got.isEmpty else { return false }
+        return Double(got.filter(said.contains).count) / Double(got.count) >= 0.5
+    }
+
     /// Within the coach's body (with a little slack), wherever it rests.
     private func tapIsOnCoach(_ location: CGPoint) -> Bool {
         let center = centered ? restFocus : orbSlot.map { CGPoint(x: $0.midX, y: $0.midY) } ?? restFocus
@@ -594,6 +621,7 @@ struct CoachStageView: View {
             }
             let top = Array(options.prefix(3))
             swapChoice = SwapChoice(index: index, from: name, options: top)
+            questionAskedAt = Date()
             askedAt = Date()
             demo(top[0].name)
             let names = top.map(\.name)
@@ -775,7 +803,7 @@ struct CoachStageView: View {
                     .foregroundStyle(MyoColor.Text.primary.color)
             }
             .padding(.horizontal, 12)
-            .frame(height: 38)
+            .frame(height: 44)
             .contentShape(Capsule())
             .myoGlass()
         }
@@ -951,11 +979,11 @@ struct CoachStageView: View {
         let addressed = typedTurn || Self.addressesCoach(heard)
         let text = Self.addressesCoach(heard) ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
-        if let choice = swapChoice, let pick = Self.pickSwap(text, from: choice.options) {
+        if let choice = swapChoice, questionIsFresh, let pick = Self.pickSwap(text, from: choice.options) {
             chooseSwap(pick)
             return
         }
-        if askingSkipRestDay, let yes = Self.skipRestDayAnswer(text) {
+        if askingSkipRestDay, questionIsFresh, let yes = Self.skipRestDayAnswer(text) {
             answerSkipRestDay(yes)
             return
         }
@@ -977,7 +1005,7 @@ struct CoachStageView: View {
         let justAskedSomething = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
         if !justAskedSomething, !appModel.activeWorkoutHasProgress, currentExerciseIndex == nil || appModel.activeWorkout == nil,
            Self.asksToStart(text) {
-            if appModel.isRestDay { askSkipRestDay(spoken: true) } else { beginWorkout() }
+            if appModel.isRestDay { askSkipRestDay(spoken: !typedTurn) } else { beginWorkout() }
             return
         }
         if let workout = appModel.activeWorkout, repCount == 0, short,
@@ -1002,14 +1030,20 @@ struct CoachStageView: View {
                     finishCount()
                     return
                 }
-                restartHandledLocally = true
+                markRestartHandled()
                 resumeListening()
                 return
             } else if short, let logged = WorkoutVoice.setsLogged(in: text), let index = currentExerciseIndex,
                       let exercise = currentExercise {
                 // You didn't count — "set done", "two sets done".
-                let left = exercise.targetSets - exercise.completedSetCount
-                let count = min(logged.sets ?? left, left)
+                // Sets still open (not targetSets − done: those can disagree
+                // after sets are ticked out of order and the count changed).
+                let left = exercise.completedSets.filter { !$0.completed }.count
+                let count = max(0, min(logged.sets ?? left, left))
+                guard count > 0 else {
+                    confirm("\(Self.short(exercise.name)) is already done.")
+                    return
+                }
                 var last: Int?
                 for _ in 0..<count {
                     last = appModel.completeNextSet(exerciseIndex: index, reps: logged.reps ?? exercise.targetReps)
@@ -1040,7 +1074,7 @@ struct CoachStageView: View {
             // anything you say to it gets through, "MYO" or not.
             // No hint for these: they're music or other people, not you.
             if currentExerciseIndex != nil, !(addressed || justAsked), !short {
-                restartHandledLocally = true
+                markRestartHandled()
                 resumeListening()
                 return
             }
@@ -1115,7 +1149,15 @@ struct CoachStageView: View {
         countBase = 0
         countedSet = nil
         voiceInput.holdOpen = false
-        guard finalCount > 0 else { return }
+        // A stray "one, two" that never became a set: drop what was heard so
+        // it isn't sent to Coach as a message when the pause check fires.
+        func discardHeard() {
+            guard voiceInput.isListening else { return }
+            markRestartHandled()
+            voiceInput.stop()
+            resumeListening()
+        }
+        guard finalCount > 0 else { discardHeard(); return }
 
         let target: Int
         let setNumber: Int
@@ -1128,6 +1170,7 @@ struct CoachStageView: View {
             target = appModel.activeWorkout?.exercises[index].targetReps ?? finalCount
             setNumber = set
         } else {
+            discardHeard()
             return
         }
         let head: String
@@ -1141,7 +1184,7 @@ struct CoachStageView: View {
         let line = setDoneLine(head, exerciseIndex: countedIndex)
         // Clear the counted words before Coach speaks, so they don't carry
         // into the next utterance.
-        restartHandledLocally = true
+        markRestartHandled()
         voiceInput.stop()
         confirm(line)
     }
@@ -1189,6 +1232,9 @@ struct CoachStageView: View {
             if let updated = appModel.activeWorkout?.exercises[index] {
                 confirm("\(Self.short(updated.name)): \(updated.targetSets) sets of \(updated.targetReps).")
             }
+        case .finish where !appModel.activeWorkoutHasProgress:
+            // Nothing logged: ending would record an empty workout.
+            confirm("You haven't logged a set yet. Tap the workout card to end it, or say set done as you go.")
         case .finish:
             confirm(tone == .hype ? "Let's wrap it up!" : "Wrapping up.")
             Task { await appModel.finishActiveWorkout() }
@@ -1230,7 +1276,7 @@ struct CoachStageView: View {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             return
         }
-        restartHandledLocally = true
+        markRestartHandled()
         if tips == .quiet {
             // Quiet: a buzz says it was heard.
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -1265,6 +1311,7 @@ struct CoachStageView: View {
             askSkipRestDay(spoken: false)
             return
         }
+        textReply = nil
         Task {
             restartingWorkout = true
             defer { restartingWorkout = false }
@@ -1287,6 +1334,7 @@ struct CoachStageView: View {
                 if let dayKey { await appModel.startWorkout(dayKey: dayKey) } else { await appModel.startTodaysWorkout() }
             }
             guard appModel.activeWorkout != nil else { return }
+            askingSkipRestDay = false
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             workoutExpanded = false
             showTodayCard = false
@@ -1318,7 +1366,7 @@ struct CoachStageView: View {
             ? "Done. Today's still a rest day."
             : "Done. Your workout's ready. Tap Start, or say let's go."
         if conversationActive, speaksReplies {
-            restartHandledLocally = true
+            markRestartHandled()
             voice.speak(line, messageId: "local-\(UUID().uuidString)")
         }
         show(notice: appModel.isRestDay ? "Today's still a rest day." : "Your workout's ready. Tap Start.")
@@ -1334,6 +1382,8 @@ struct CoachStageView: View {
     }
 
     private func exerciseChanged(from previous: Int?, to next: Int?) {
+        // An offer was for the old lift.
+        if let choice = swapChoice, choice.index != next { swapChoice = nil }
         guard previous != nil, let next, appModel.activeWorkout != nil else { return }
         // Let "set three done" finish first.
         Task {
@@ -1346,6 +1396,7 @@ struct CoachStageView: View {
     /// The workout ended: ask about keeping changes, else the mic goes off.
     private func workoutEnded() {
         endLesson()
+        swapChoice = nil
         if !appModel.pendingSessionChanges.isEmpty, conversationActive {
             // Ask out loud too; "yes" / "just today" answers it.
             let line = (tone == .hype ? "Great work! " : "Nice work. ")
@@ -1366,9 +1417,10 @@ struct CoachStageView: View {
     private func askSkipRestDay(spoken: Bool) {
         askingSkipRestDay = true
         askedAt = Date()
+        questionAskedAt = Date()
         if spoken, speaksReplies {
             let offer = appModel.nextPlannedDay.map { "do \($0.name) instead" } ?? "have me build you a workout"
-            restartHandledLocally = true
+            markRestartHandled()
             voice.speak("Today's a rest day. Want to skip it and \(offer)?", messageId: "local-\(UUID().uuidString)")
         }
     }
@@ -1379,9 +1431,11 @@ struct CoachStageView: View {
         if yes, let next = appModel.nextPlannedDay {
             beginWorkout(dayKey: next.dayKey)
         } else if yes {
-            // Nothing in the plan to pull forward: have Coach build one.
-            conversationActive = true
-            send("It's a rest day but I want to train today. Give me a sensible workout for today.", spoken: true)
+            // Nothing in the plan to pull forward: have Coach build one —
+            // answered the way you asked (typed stays typed).
+            let spoken = !typedTurn
+            if spoken { conversationActive = true }
+            send("It's a rest day but I want to train today. Give me a sensible workout for today.", spoken: spoken)
         } else {
             confirm(tone == .hype ? "Rest up. Back at it tomorrow!" : "Rest up.")
         }
@@ -1464,7 +1518,7 @@ struct CoachStageView: View {
         lessonPlan = plan
         actOutLesson(line: 0)
         if voiceInput.isListening {
-            restartHandledLocally = true
+            markRestartHandled()
             voiceInput.stop()
         }
         if speaksReplies {
@@ -1520,7 +1574,7 @@ struct CoachStageView: View {
         voice.stop()
         UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         if let ack = CoachingStyle.acknowledgement(change), speaksReplies {
-            restartHandledLocally = true
+            markRestartHandled()
             voice.speak(ack, messageId: "local-\(UUID().uuidString)")
         } else {
             resumeListening()
@@ -1528,7 +1582,26 @@ struct CoachStageView: View {
         return true
     }
 
+    /// A spoken answer to the open question still counts (20 s).
+    private var questionIsFresh: Bool {
+        questionAskedAt.map { Date().timeIntervalSince($0) < 20 } ?? false
+    }
+
+    /// The next mic stop is ours (we're about to restart it), so the
+    /// silence handler should leave it alone. Expires on its own, so a stop
+    /// that never comes can't swallow a real one later.
+    private func markRestartHandled() {
+        restartHandledLocally = true
+        restartMarks += 1
+        let mark = restartMarks
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            if restartMarks == mark { restartHandledLocally = false }
+        }
+    }
+
     private func endConversation() {
+        swapChoice = nil
         closeCountTask?.cancel()
         closeCountTask = nil
         repCount = 0
@@ -1558,6 +1631,8 @@ struct CoachStageView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         if !spoken, applyStyleChange(in: trimmed) { return }
+        // A new turn: the old typed reply has had its moment.
+        textReply = nil
         lastSpokenText = trimmed
         // Asked for today's workout: show it as a card, not a recited list.
         if WorkoutAsk.matches(trimmed) { askedForWorkoutCard() }
@@ -1568,7 +1643,6 @@ struct CoachStageView: View {
         } else if !spoken {
             // Typed: the answer comes back as text, not voice.
             typedReplyAfter = Set(appModel.messages.map(\.id))
-            textReply = nil
         }
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
         Task { await appModel.sendCoachMessage(trimmed, spoken: spoken) }
@@ -1595,6 +1669,7 @@ struct CoachStageView: View {
             $0.role == .coach && !known.contains($0.id) && finished.contains($0.status) && !$0.content.isEmpty
         }) else { return }
         typedReplyAfter = nil
+        textReplyShownAt = Date()
         withAnimation(MyoTheme.Motion.fade) { textReply = reply }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
@@ -1661,7 +1736,7 @@ struct TypedLine: Equatable {
 /// MYO typing back. Scrolls if it's long; tap to put it away.
 private struct TypedReplyText: View {
     let message: CoachMessage
-    @State private var shownAt = Date()
+    let shownAt: Date
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { context in
@@ -1678,7 +1753,6 @@ private struct TypedReplyText: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         .id(message.id)
-        .onAppear { shownAt = Date() }
         .accessibilityLabel(message.content)
     }
 }

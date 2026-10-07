@@ -256,6 +256,8 @@ struct CoachView: View {
             reading.active = true
             reading.level = 0.5
             for _ in 0..<bloops {
+                // The mic owns the meter while it's listening.
+                if voiceInput.isListening { break }
                 reading.onsets += 1
                 reading.peak = Float.random(in: 0.4...0.85)
                 meter.set(reading)

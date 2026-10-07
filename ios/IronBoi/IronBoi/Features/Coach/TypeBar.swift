@@ -11,6 +11,9 @@ struct TypeBar: View {
     @State private var draft = ""
     @State private var lifted: String?
     @State private var liftedUp = false
+    /// Bumped on each send, so an earlier send's timers can't close the bar
+    /// on a follow-up you've started typing.
+    @State private var sends = 0
     @FocusState private var focused: Bool
 
     private var trimmed: String { draft.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -32,7 +35,7 @@ struct TypeBar: View {
             }
 
             HStack(spacing: 6) {
-                TextField("", text: $draft,
+                TextField("Message MYO", text: $draft,
                           prompt: Text("Say something to MYO").foregroundStyle(MyoColor.Text.tertiary.color))
                     .font(.body)
                     .foregroundStyle(MyoColor.Text.primary.color)
@@ -50,9 +53,11 @@ struct TypeBar: View {
                             .foregroundStyle(MyoTheme.Colors.ink)
                             .frame(width: 38, height: 38)
                             .background(MyoTheme.Colors.coachAmber, in: Circle())
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.trailing, 8)
+                    .padding(.trailing, 5)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
                     .accessibilityLabel("Send")
                 }
@@ -81,11 +86,15 @@ struct TypeBar: View {
         lifted = text
         liftedUp = false
         onSend(text)
+        sends += 1
+        let send = sends
         withAnimation(.easeOut(duration: 0.7)) { liftedUp = true }
-        // Then the bar tucks away so the reply has the screen.
+        // Then the bar tucks away so the reply has the screen — unless
+        // you've already started typing the next one.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            guard send == sends, draft.isEmpty else { return }
             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { isPresented = false }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { lifted = nil }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { if send == sends { lifted = nil } }
     }
 }

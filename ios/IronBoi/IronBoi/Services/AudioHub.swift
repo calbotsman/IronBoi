@@ -22,7 +22,39 @@ final class AudioHub {
     /// the speaker, the route no longer shows the headphones at all.
     private(set) var headphonesConnected = false
 
+    /// Posted when audio had to be rebuilt (a call, Siri, a device
+    /// connecting): anyone listening should stop and listen again.
+    static let resetNotification = Notification.Name("AudioHubReset")
+
     private init() {
+        // A call, Siri, an alarm: playback stops, and waiting speech must be
+        // released or Coach looks like it's talking forever.
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { note in
+            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+            MainActor.assumeIsolated {
+                if raw == AVAudioSession.InterruptionType.began.rawValue {
+                    Self.log("interruption began")
+                    self.player.stop()
+                } else {
+                    Self.log("interruption ended")
+                    NotificationCenter.default.post(name: Self.resetNotification, object: nil)
+                }
+            }
+        }
+        // The hardware changed under the engine (AirPods in or out): it has
+        // stopped. Release playback; the next start brings it back up, and
+        // the mic restarts so its tap matches the new input.
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                Self.log("engine configuration changed")
+                self.player.stop()
+                NotificationCenter.default.post(name: Self.resetNotification, object: nil)
+            }
+        }
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
         ) { note in
@@ -39,11 +71,17 @@ final class AudioHub {
         defer {
             Self.log("route change \(reason.map { String($0.rawValue) } ?? "?") from [\(previous.map(Self.describe) ?? "-")] to [\(Self.describe(current))] headphones=\(headphonesConnected)")
         }
+        let before = headphonesConnected
         switch reason {
         case .oldDeviceUnavailable:
             if let previous, Self.headphones(in: previous) { headphonesConnected = Self.headphones(in: current) }
         default:
             if Self.headphones(in: current) { headphonesConnected = true }
+        }
+        // Headphones came or went: echo cancellation needs retuning, which
+        // happens when the mic restarts.
+        if before != headphonesConnected, sessionActive {
+            NotificationCenter.default.post(name: Self.resetNotification, object: nil)
         }
     }
 
@@ -159,6 +197,11 @@ final class AudioHub {
     /// Plays one buffer of Coach's voice; returns when it has been heard (or
     /// playback was stopped).
     func play(_ buffer: AVAudioPCMBuffer) async {
+        // The engine went down (route change, interruption): bring it back,
+        // or skip this chunk rather than play into a stopped engine.
+        if !engine.isRunning {
+            do { try start() } catch { return }
+        }
         await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             player.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { _ in
                 done.resume()
