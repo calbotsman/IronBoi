@@ -25,11 +25,23 @@ final class AudioHub {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
+        // Listen through the phone's own mic. Taking the mic of a Bluetooth
+        // headset makes it switch modes, and music apps read that like
+        // headphones being pulled out — Spotify pauses.
+        if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }),
+           session.preferredInput?.portType != .builtInMic {
+            try? session.setPreferredInput(builtIn)
+        }
 
         if !configured {
             // Echo cancellation must be set before the engine first runs.
             // The simulator and some routes refuse it; the app still works,
-            // you just can't talk over Coach there.
+            // you just can't talk over Coach there. With your music already
+            // playing it's left off: voice processing fights other apps'
+            // audio, and the music matters more than talking over Coach.
+            if session.isOtherAudioPlaying {
+                echoCancelling = false
+            } else {
             do {
                 try engine.inputNode.setVoiceProcessingEnabled(true)
                 if #available(iOS 17.0, *) {
@@ -42,6 +54,7 @@ final class AudioHub {
             } catch {
                 echoCancelling = false
             }
+            }
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: Self.voiceFormat)
             configured = true
@@ -53,17 +66,9 @@ final class AudioHub {
     }
 
     /// Plays alongside your music rather than stopping it. Bluetooth stays
-    /// in its full-quality music mode (A2DP) — the old hands-free mode
-    /// turned Spotify into phone-call audio for the whole workout. On iOS 26
-    /// AirPods that support it record at full quality too; otherwise the
-    /// phone's own mic listens.
-    private static var categoryOptions: AVAudioSession.CategoryOptions {
-        var options: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers, .allowBluetoothA2DP]
-        #if compiler(>=6.2)
-        if #available(iOS 26.0, *) { options.insert(.bluetoothHighQualityRecording) }
-        #endif
-        return options
-    }
+    /// in its full-quality music mode (A2DP) — the hands-free mode turned
+    /// Spotify into phone-call audio — and the phone's own mic listens.
+    private static let categoryOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers, .allowBluetoothA2DP]
 
     /// Plays one buffer of Coach's voice; returns when it has been heard (or
     /// playback was stopped).
@@ -80,10 +85,12 @@ final class AudioHub {
         player.stop()
     }
 
-    /// Lets the mic indicator go out when the conversation is over.
+    /// Lets the mic indicator go out when the conversation is over, and
+    /// tells other apps we're done — anything we interrupted can resume.
     func stop() {
         player.stop()
         if engine.isRunning { engine.stop() }
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     /// Decodes Cloud TTS WAV bytes into a buffer the player can schedule.

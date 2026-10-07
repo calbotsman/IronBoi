@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -29,6 +30,10 @@ struct CoachStageView: View {
     /// When Coach last stopped talking — a bare "stop" right after means
     /// "stop talking"; long after, it's a lyric.
     @State private var voiceStoppedAt: Date?
+    /// The "noisy? turn on Voice Isolation" tip, shown the first couple of
+    /// workouts unless it's already on.
+    @State private var showIsolationTip = false
+    @AppStorage("voiceIsolationTipsShown") private var isolationTipsShown = 0
     /// When Coach last asked you something — mid-workout, an answer
     /// doesn't need "MYO" in front of it.
     @State private var askedAt: Date?
@@ -557,6 +562,10 @@ struct CoachStageView: View {
     }
 
     private var controls: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+        if showIsolationTip {
+            isolationTip.transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
         HStack(alignment: .center, spacing: MyoTheme.Spacing.sm) {
             sideButton(systemImage: "keyboard", label: "Type instead") {
                 endConversation()
@@ -570,6 +579,41 @@ struct CoachStageView: View {
             } else {
                 Spacer()
             }
+        }
+        }
+        .animation(MyoTheme.Motion.fade, value: showIsolationTip)
+    }
+
+    /// iOS's Voice Isolation mic mode filters out everyone but you — kids,
+    /// the gym, the music. Apps can't switch it on; this opens the system
+    /// picker in one tap.
+    private var isolationTip: some View {
+        Button {
+            showIsolationTip = false
+            AVCaptureDevice.showSystemUserInterface(.microphoneModes)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "person.wave.2").font(.footnote.weight(.semibold))
+                Text("Noisy around you? Turn on Voice Isolation")
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundStyle(MyoTheme.Colors.ink)
+            .padding(.horizontal, 14)
+            .frame(height: 38)
+            .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.25))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func offerVoiceIsolation() {
+        guard isolationTipsShown < 2, AVCaptureDevice.preferredMicrophoneMode != .voiceIsolation else { return }
+        isolationTipsShown += 1
+        showIsolationTip = true
+        Task {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            showIsolationTip = false
         }
     }
 
@@ -589,6 +633,11 @@ struct CoachStageView: View {
                 .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil, in: Circle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Voice Isolation…", systemImage: "person.wave.2") {
+                AVCaptureDevice.showSystemUserInterface(.microphoneModes)
+            }
+        }
         .accessibilityLabel(on ? "Mic on" : "Mic off")
         .accessibilityHint(on ? "Turns the mic off" : "Turns the mic on so you can talk to MYO")
     }
@@ -951,6 +1000,7 @@ struct CoachStageView: View {
                 director.rest()
             }
             if let first = currentExerciseIndex { introduce(exercise: first, first: true) }
+            offerVoiceIsolation()
         }
     }
 

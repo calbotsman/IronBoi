@@ -156,6 +156,9 @@ final class CoachVoice: NSObject, ObservableObject {
     // MARK: - On-device fallback
 
     private func speakOnDevice(_ spoken: String) {
+        // The synthesizer plays on our session; set it up first, or it
+        // would use the default one, which stops other apps' music.
+        try? hub.start()
         isSpeaking = true
         sentenceRanges = Self.sentenceRanges(in: spoken)
         let utterance = AVSpeechUtterance(string: spoken)
