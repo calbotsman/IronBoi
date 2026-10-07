@@ -567,19 +567,17 @@ struct CoachStageView: View {
                         .myoGlass()
                 }
                 .buttonStyle(.plain)
-                do {
-                    Button { answerSkipRestDay(true) } label: {
-                        Text(appModel.nextPlannedDay.map { "Yes, do \($0.name)" } ?? "Yes, build one")
-                            .font(.body.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .foregroundStyle(MyoTheme.Colors.ink)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .contentShape(Capsule())
-                            .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.35))
-                    }
-                    .buttonStyle(.plain)
+                Button { answerSkipRestDay(true) } label: {
+                    Text(appModel.nextPlannedDay.map { "Yes, do \($0.name)" } ?? "Yes, build one")
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(MyoTheme.Colors.ink)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .contentShape(Capsule())
+                        .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.35))
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(MyoTheme.Spacing.lg)
