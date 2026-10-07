@@ -31,8 +31,13 @@ enum WorkoutEdit: Equatable {
 
         // A question or a "not" is never a command ("what should I eat
         // after I finish my workout?", "don't skip curls").
+        // Question words lead on their own; "do/is/are…" only make a question
+        // with a pronoun after ("do I need to…", "is this enough"). Bare "do"
+        // and polite "can we / could you" are commands ("do squats next",
+        // "can we swap the bench").
         let isQuestion = transcript.contains("?")
-            || t.range(of: #"^(what|how|when|why|where|which|who|should|can|could|would|is|are|do|does|did|will)\b"#,
+            || t.range(of: #"^(what|how|when|why|where|which|who|should)\b"#, options: .regularExpression) != nil
+            || t.range(of: #"^(do|does|did|will|is|are)\s+(i|we|you|it|they|there|this|that)\b"#,
                        options: .regularExpression) != nil
         if isQuestion || t.range(of: #"\b(don't|do not|never|not)\b"#, options: .regularExpression) != nil { return nil }
         if first(#"^(?:ok |okay |alright |let's |lets |i want to |i'm gonna )?(?:finish|end|wrap up|complete|close out)( my| the| this)? (workout|session)\b"#) != nil
@@ -59,7 +64,7 @@ enum WorkoutEdit: Equatable {
            let index = find(m[1]) {
             return .swap(index, to: cleanName(m[0]))
         }
-        if let m = first(#"^(?:let's |lets |can we |i want to |i'm gonna |gonna )?(?:skip|drop|remove|cut|ditch|forget) (?:the )?(.+?)(?: today| for today| this time)?$"#),
+        if let m = first(#"^(?:let's |lets |can we |can you |could you |could we |would you |i want to |i'm gonna |gonna )?(?:skip|drop|remove|cut|ditch|forget) (?:the )?(.+?)(?: today| for today| this time)?$"#),
            // "Forget it", "drop that" are about what was just said, not a lift.
            m[0].range(of: #"^(it|that|this|about it|about that)$"#, options: .regularExpression) == nil,
            let index = find(m[0]) {
