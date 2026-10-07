@@ -54,13 +54,19 @@ struct CoachView: View {
             } message: {
                 Text(appModel.errorMessage ?? voiceInput.errorMessage ?? "")
             }
-            // Typing is still here, one tap away — just not the default.
-            .sheet(isPresented: $showKeyboard) {
-                composer
-                    .presentationDetents([.height(96)])
-                    .presentationBackground(MyoTheme.Colors.cream)
-                    .onAppear { composerFocused = true }
+            // Typing is still here, one tap away — just not the default: a
+            // slim bar that rises out of the keyboard button, above the keys.
+            .safeAreaInset(edge: .bottom) {
+                if showKeyboard {
+                    TypeBar(isPresented: $showKeyboard, onSend: sendTyped)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .padding(.bottom, MyoTheme.Spacing.sm)
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.9, anchor: .bottomLeading).combined(with: .opacity),
+                            removal: .opacity.combined(with: .move(edge: .bottom))))
+                }
             }
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showKeyboard)
         }
     }
 
@@ -236,7 +242,29 @@ struct CoachView: View {
         draft = ""
         showKeyboard = false
         guard !content.isEmpty else { return }
-        typed = TypedLine(text: content)
+        sendTyped(content)
+    }
+
+    /// What you typed goes to the coach — and, like talking, arrives as a
+    /// little run of your-colour bloops the body takes in, a word or two each.
+    private func sendTyped(_ text: String) {
+        typed = TypedLine(text: text)
+        let meter = voiceInput.meter
+        let bloops = min(8, max(2, text.split(separator: " ").count / 2 + 1))
+        Task { @MainActor in
+            var reading = VoiceReading()
+            reading.active = true
+            reading.level = 0.5
+            for _ in 0..<bloops {
+                reading.onsets += 1
+                reading.peak = Float.random(in: 0.4...0.85)
+                meter.set(reading)
+                try? await Task.sleep(nanoseconds: UInt64.random(in: 70_000_000...140_000_000))
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            // Hand the meter back, unless the mic has taken it meanwhile.
+            if !voiceInput.isListening { meter.reset() }
+        }
     }
 }
 

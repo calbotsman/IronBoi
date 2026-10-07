@@ -358,10 +358,13 @@ struct CoachStageView: View {
                     }
                 }
 
+                // While typing, the type bar takes this spot.
                 controls
                     .padding(.leading, MyoTheme.Spacing.lg)
                     .padding(.top, MyoTheme.Spacing.md)
                     .padding(.bottom, MyoTheme.Spacing.sm)
+                    .opacity(showKeyboard ? 0 : 1)
+                    .allowsHitTesting(!showKeyboard)
             }
         }
         .overlay {
