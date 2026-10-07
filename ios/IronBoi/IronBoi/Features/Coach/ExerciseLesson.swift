@@ -27,6 +27,13 @@ enum ExerciseLesson {
                 Beat(line: "Knees out over your toes, heels down.", body: .hold(1)),
                 Beat(line: "Then drive up through your heels. Like this.", body: .reps),
             ]
+        case .lunge:
+            return [
+                Beat(line: "Lunges. Long stride, chest tall.", body: .hold(0)),
+                Beat(line: "Drop straight down, back knee toward the floor.", body: .hold(0.6)),
+                Beat(line: "Front knee over your ankle, not past your toes.", body: .hold(1)),
+                Beat(line: "Push through your front heel to come up. Like this.", body: .reps),
+            ]
         case .hinge:
             return [
                 Beat(line: "Deadlifts are all hips. Back flat the whole way.", body: .hold(0)),
@@ -100,6 +107,7 @@ enum ExerciseLesson {
         let cues: [String]
         switch lift {
         case .squat: cues = ["Chest up.", "Sit back into it.", "Drive through your heels.", "Knees out."]
+        case .lunge: cues = ["Chest tall.", "Straight down, not forward.", "Drive through the front heel."]
         case .hinge: cues = ["Back flat.", "Hips back, not down.", "Squeeze at the top."]
         case .swing: cues = ["Snap the hips.", "Let it float.", "Arms are just ropes."]
         case .benchPress: cues = ["Feet planted.", "Touch your chest, then drive.", "Shoulder blades pinched."]

@@ -1004,7 +1004,7 @@ struct CoachStageView: View {
         // something Coach just asked.
         let justAskedSomething = askedAt.map { Date().timeIntervalSince($0) < 12 } ?? false
         if !justAskedSomething, !appModel.activeWorkoutHasProgress, currentExerciseIndex == nil || appModel.activeWorkout == nil,
-           Self.asksToStart(text) {
+           Self.asksToStart(text) || appModel.isRestDay && Self.asksForWorkoutToday(text) {
             if appModel.isRestDay { askSkipRestDay(spoken: !typedTurn) } else { beginWorkout() }
             return
         }
@@ -1468,7 +1468,18 @@ struct CoachStageView: View {
     private static func asksToStart(_ text: String) -> Bool {
         let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
         guard t.split(separator: " ").count <= 10 else { return false }
-        return t.range(of: #"\b(start|begin)( my| a| the| today's)? (workout|session|training)\b|\blet'?s (go|work ?out|train|do (it|this))\b|\bi (want|wanna|need) to (work ?out|train|lift)\b|\bstart (it|now)\b"#,
+        if t.range(of: #"\b(start|begin)( my| a| the| today's)? (workout|session|training)\b|\blet'?s (go|work ?out|train|do (it|this))\b|\bi (want|wanna|need) to (work ?out|train|lift)\b|\bstart (it|now)\b"#,
+                   options: .regularExpression) != nil { return true }
+        return false
+    }
+
+    /// "Give me a workout for today", "I need a workout today", "work me out
+    /// today", "build me a workout" — on a rest day, that's the rest-day
+    /// question (on other days the coach shows today's card).
+    private static func asksForWorkoutToday(_ text: String) -> Bool {
+        let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        guard t.split(separator: " ").count <= 12 else { return false }
+        return t.range(of: #"\b(give|get|build|make|work|find|need|want|do)( me| us)? (a |an |some )?(workout|session|training|work ?out)\b.*\b(today|now|right now)\b|\b(build|make|give) me a (workout|session)\b|\bwork me out\b|\b(workout|train) (for )?today\b"#,
                        options: .regularExpression) != nil
     }
 

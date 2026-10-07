@@ -31,7 +31,8 @@ enum Gear: Equatable {
         if has("barbell", " bb ", " ez ", "zercher") { return .barbell }
         if has("pull up", "pullup", "chin up", "chinup") { return .pullupBar }
         switch lift {
-        case .squat: return has("lunge", "split", "step up") ? .none : .barbell
+        case .squat: return .barbell
+        case .lunge: return .none
         case .hinge, .benchPress, .skullCrusher: return .barbell
         case .overheadPress: return has("shoulder press") ? .dumbbells : .barbell
         case .lateralRaise, .curl: return .dumbbells

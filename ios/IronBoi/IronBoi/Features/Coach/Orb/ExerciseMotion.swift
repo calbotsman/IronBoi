@@ -32,7 +32,7 @@ struct ExerciseMotion: Equatable {
 /// body travels (squat, hinge, bench) and from the front when the arms do.
 enum Lift: Equatable {
     case overheadPress, lateralRaise, squat, curl, tricepExtension, pullDown
-    case hinge, swing, benchPress, skullCrusher, pushups, plank
+    case hinge, swing, benchPress, skullCrusher, pushups, plank, lunge
 
     static func match(_ name: String) -> Lift? {
         let n = name.lowercased()
@@ -48,7 +48,8 @@ enum Lift: Equatable {
         if has("pull-up", "pullup", "pull up", "chin-up", "chinup", "pulldown", "pull-down", "lat ") { return .pullDown }
         if has("swing") { return .swing }
         if has("deadlift", "rdl", "romanian", "good morning", "hinge") { return .hinge }
-        if has("squat", "lunge", "leg press", "step-up", "step up") { return .squat }
+        if has("lunge", "split squat", "bulgarian", "step-up", "step up") { return .lunge }
+        if has("squat", "leg press") { return .squat }
         return nil
     }
 
@@ -59,7 +60,7 @@ enum Lift: Equatable {
         switch self {
         case .plank: return 4.5
         case .swing: return 1.9
-        case .squat, .hinge, .pushups: return 3.2
+        case .squat, .hinge, .pushups, .lunge: return 3.2
         default: return 2.8
         }
     }
@@ -67,7 +68,7 @@ enum Lift: Equatable {
     /// Side-on lifts get the tucked-arm contact shading.
     private var side: Float {
         switch self {
-        case .squat, .hinge, .swing, .benchPress, .skullCrusher, .pushups, .plank: return 1
+        case .squat, .hinge, .swing, .benchPress, .skullCrusher, .pushups, .plank, .lunge: return 1
         default: return 0
         }
     }
@@ -76,7 +77,7 @@ enum Lift: Equatable {
     /// start at rest and drive first (curl, press).
     private var lowersFirst: Bool {
         switch self {
-        case .squat, .hinge, .benchPress, .skullCrusher, .pushups: return true
+        case .squat, .hinge, .benchPress, .skullCrusher, .pushups, .lunge: return true
         default: return false
         }
     }
@@ -132,6 +133,8 @@ enum Lift: Equatable {
             joints = Self.squatPose(depth: p, lag: depth(0.08), gear: gear)
         case .hinge:
             joints = Self.hingePose(depth: p)
+        case .lunge:
+            joints = Self.lungePose(depth: p)
         case .swing:
             // At the bottom the arms hike back through the thighs.
             joints = Self.hingePose(depth: p * 0.8, armAngle: -0.15 - depth(0.076) * 2.15)
@@ -200,6 +203,8 @@ enum Lift: Equatable {
             return (Self.squatPose(depth: 0, lag: 0, gear: .none), Self.squatPose(depth: 1, lag: 1, gear: .none))
         case .hinge, .swing:
             return (Self.hingePose(depth: 0), Self.hingePose(depth: 1))
+        case .lunge:
+            return (Self.lungePose(depth: 0), Self.lungePose(depth: 1))
         case .benchPress:
             return (lying(elbow: [-0.21, 0.10], hand: [-0.20, 0.32]),
                     lying(elbow: [-0.27, -0.06], hand: [-0.18, 0.02]))
@@ -274,6 +279,16 @@ enum Lift: Equatable {
             Joint(backKnee.x, backKnee.y, 0.115), Joint(0.0, -0.385, 0.11),
             Joint(frontKnee.x, frontKnee.y, 0.115), Joint(0.04, -0.385, 0.11),
         ]
+    }
+
+    /// Side-on lunge, facing +x: a long split stance, torso tall, then
+    /// straight down — the back knee drops toward the floor and the front
+    /// shin stays close to vertical. Arms hang (holding whatever's in hand).
+    private static func lungePose(depth d: Float) -> [Joint] {
+        let hip = SIMD2<Float>(-0.01, -0.03 + (-0.15 - -0.03) * d)
+        let hang: (Float, Float) = (-.pi / 2 + 0.04, -.pi / 2 + 0.08)
+        return Rig.side(hip: hip, tilt: 0.04, arms: [hang, (hang.0 + 0.04, hang.1 + 0.04)],
+                        feet: [SIMD2(-0.24, Rig.floor + 0.025), SIMD2(0.21, Rig.floor)])
     }
 
     /// Side-on hip hinge: the hips push back and the torso tips forward
