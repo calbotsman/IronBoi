@@ -78,7 +78,9 @@ final class VoiceInputEngine: ObservableObject {
         try await requestPermissions()
         stop()
 
-        try AudioHub.shared.start()
+        // Our tap is off (stop() above): the hub may retune echo
+        // cancellation for whatever's plugged in now.
+        try AudioHub.shared.start(reconfigure: true)
         guard !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty else {
             throw VoiceInputError.microphoneUnavailable
         }
@@ -89,9 +91,13 @@ final class VoiceInputEngine: ObservableObject {
         // On the phone where it can: the mic can be open for a whole
         // workout, so keep that audio off the network (and off a weak gym
         // connection).
+        // (Not in the simulator: it claims support but has no model, and
+        // every request fails a few seconds in.)
+        #if !targetEnvironment(simulator)
         if recognizer?.supportsOnDeviceRecognition == true {
             request.requiresOnDeviceRecognition = true
         }
+        #endif
         request.contextualStrings = ["MYO", "Coach", "set done", "sets done", "reps"]
         self.request = request
         transcript = ""

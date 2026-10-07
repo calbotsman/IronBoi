@@ -343,7 +343,7 @@ struct CoachStageView: View {
         .onChange(of: voiceInput.transcript) { _, transcript in
             // Only with echo cancellation on: without it the mic would hear
             // Coach and Coach would cut itself off.
-            if voice.isSpeaking, conversationActive, AudioHub.shared.echoCancelling,
+            if voice.isSpeaking, conversationActive, AudioHub.shared.canTalkOver,
                transcript.split(separator: " ").count >= 2 {
                 // You started talking: Coach stops and listens.
                 cutIn = true
@@ -1054,7 +1054,7 @@ struct CoachStageView: View {
         if speaksReplies {
             voice.speak(lines: lines, messageId: plan.id)
             try? AudioHub.shared.start()
-            if AudioHub.shared.echoCancelling { voiceInput.listen() }
+            if AudioHub.shared.canTalkOver { voiceInput.listen() }
         } else {
             // Muted: the body still walks through it, a beat every few seconds.
             Task {
@@ -1176,7 +1176,7 @@ struct CoachStageView: View {
             // Keep the mic open under Coach only where its voice is cancelled
             // from the mic; elsewhere listening resumes when Coach finishes.
             try? AudioHub.shared.start()
-            if AudioHub.shared.echoCancelling { voiceInput.listen() }
+            if AudioHub.shared.canTalkOver { voiceInput.listen() }
         } else {
             // Muted: the reply is on screen; go straight back to listening.
             resumeListening()
