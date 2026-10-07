@@ -47,6 +47,8 @@ final class VoiceInputEngine: ObservableObject {
 
         Task {
             do {
+                // A fresh listen: an earlier failure no longer applies.
+                errorMessage = nil
                 try await start()
             } catch {
                 errorMessage = error.localizedDescription
