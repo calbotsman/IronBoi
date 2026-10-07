@@ -48,6 +48,11 @@ struct CoachStageView: View {
     @State private var notice: String?
     /// The message being handled was typed, not said.
     @State private var typedTurn = false
+    /// Message ids that existed when a typed message went out; the first new
+    /// finished coach message after that is the reply to show as text.
+    @State private var typedReplyAfter: Set<String>?
+    /// A typed-to reply, written out under the coach until you move on.
+    @State private var textReply: CoachMessage?
     /// "Swap the bench": alternatives on offer for one lift.
     @State private var swapChoice: SwapChoice?
 
@@ -120,7 +125,7 @@ struct CoachStageView: View {
     private var phase: OrbPhase {
         if voice.isSpeaking { return .speaking }
         if voiceInput.isListening { return .listening }
-        if appModel.isSending || awaitingReplyAfter != nil
+        if appModel.isSending || awaitingReplyAfter != nil || typedReplyAfter != nil
             || appModel.messages.last?.isPendingCoachReply == true {
             return .thinking
         }
@@ -179,6 +184,7 @@ struct CoachStageView: View {
             voice.stop()
         }
         .onChange(of: appModel.messages) { _, messages in
+            showTypedReplyIfReady(messages)
             speakReplyIfReady(messages)
             performMoveIfCoachNamedOne()
         }
@@ -192,7 +198,14 @@ struct CoachStageView: View {
                 resumeListening()
             }
         }
+        // Same for a typed message: never think forever.
+        .task(id: typedReplyAfter) {
+            guard typedReplyAfter != nil else { return }
+            try? await Task.sleep(nanoseconds: 90_000_000_000)
+            if !Task.isCancelled { typedReplyAfter = nil }
+        }
         .onChange(of: appModel.isSending) { _, sending in
+            if !sending, appModel.errorMessage != nil { typedReplyAfter = nil }
             // The send itself failed — nothing is coming back to read.
             // A failed send ends the conversation — looping on an error helps no one.
             if !sending, appModel.errorMessage != nil {
@@ -494,6 +507,9 @@ struct CoachStageView: View {
                 .frame(minHeight: 88, alignment: .top)
                 .id(voice.caption)
                 .transition(.opacity)
+        case .rest where textReply != nil:
+            TypedReplyText(message: textReply!)
+                .onTapGesture { withAnimation(MyoTheme.Motion.fade) { textReply = nil } }
         case .rest:
             if !speaksReplies, let message = lastCoachMessage {
                 // Muted: text is the only way the reply reaches you.
@@ -894,6 +910,7 @@ struct CoachStageView: View {
     /// One tap starts a hands-free conversation; any tap ends it — while
     /// you're talking, while Coach thinks, or while Coach speaks.
     private func talkTapped(fromMic: Bool = false) {
+        textReply = nil
         AudioHub.log("talk tapped (mic button: \(fromMic))")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if conversationActive, phase == .speaking, !fromMic {
@@ -1564,6 +1581,10 @@ struct CoachStageView: View {
         if let move = MoveCue.move(in: trimmed) { director.perform(move) }
         if spoken, conversationActive {
             awaitingReplyAfter = Set(appModel.messages.map(\.id))
+        } else if !spoken {
+            // Typed: the answer comes back as text, not voice.
+            typedReplyAfter = Set(appModel.messages.map(\.id))
+            textReply = nil
         }
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
         Task { await appModel.sendCoachMessage(trimmed, spoken: spoken) }
@@ -1581,6 +1602,17 @@ struct CoachStageView: View {
             // Coach suggested a lift: show it.
             demo(reply.content)
         }
+    }
+
+    private func showTypedReplyIfReady(_ messages: [CoachMessage]) {
+        guard let known = typedReplyAfter else { return }
+        let finished: Set<CoachMessage.Status> = [.complete, .blocked, .error]
+        guard let reply = messages.last(where: {
+            $0.role == .coach && !known.contains($0.id) && finished.contains($0.status) && !$0.content.isEmpty
+        }) else { return }
+        typedReplyAfter = nil
+        withAnimation(MyoTheme.Motion.fade) { textReply = reply }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
     private func speakReplyIfReady(_ messages: [CoachMessage]) {
@@ -1638,4 +1670,31 @@ private struct ThinkingDots: View {
 struct TypedLine: Equatable {
     let id = UUID()
     let text: String
+}
+
+
+/// A reply to something you typed, written out a few words at a time —
+/// MYO typing back. Scrolls if it's long; tap to put it away.
+private struct TypedReplyText: View {
+    let message: CoachMessage
+    @State private var shownAt = Date()
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30)) { context in
+            let words = message.content.split(separator: " ", omittingEmptySubsequences: false)
+            let count = min(words.count, Int(context.date.timeIntervalSince(shownAt) * 28) + 1)
+            ScrollView {
+                Text(words.prefix(count).joined(separator: " "))
+                    .myoStyle(.body)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxHeight: 220)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .id(message.id)
+        .onAppear { shownAt = Date() }
+        .accessibilityLabel(message.content)
+    }
 }
