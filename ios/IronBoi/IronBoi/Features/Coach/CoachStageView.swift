@@ -985,7 +985,12 @@ struct CoachStageView: View {
         }
         if appModel.activeWorkout != nil {
             if repCount > 0 {
-                // A pause mid-count isn't the end of the set — keep going.
+                // Mid-count: "set done" (tapped, typed or said) closes the
+                // set at the count so far; anything else is just a pause.
+                if WorkoutVoice.saysSetDone(text) || WorkoutVoice.setsLogged(in: text) != nil {
+                    finishCount()
+                    return
+                }
                 restartHandledLocally = true
                 resumeListening()
                 return
