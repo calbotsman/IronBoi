@@ -15,6 +15,9 @@ struct CoachStageView: View {
     @ObservedObject var voice: CoachVoice
     @ObservedObject var director: BodyDirector
     var askedForWorkout = 0
+    /// The latest typed message — handled exactly like the same words said
+    /// out loud (set logging, workout changes, rest day, style…).
+    var typed: TypedLine? = nil
     @Binding var showKeyboard: Bool
 
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
@@ -43,6 +46,8 @@ struct CoachStageView: View {
     /// A short on-screen note under the coach ("Your workout's ready…"),
     /// for when it isn't spoken, or as well as.
     @State private var notice: String?
+    /// The message being handled was typed, not said.
+    @State private var typedTurn = false
     @AppStorage("voiceIsolationTipsShown") private var isolationTipsShown = 0
     /// When Coach last asked you something — mid-workout, an answer
     /// doesn't need "MYO" in front of it.
@@ -188,6 +193,7 @@ struct CoachStageView: View {
             }
         }
         // Coach finished speaking: your turn again.
+        .onChange(of: typed) { _, line in if let line { handleTyped(line.text) } }
         // The body acts out each line of a lesson as it's spoken.
         .onChange(of: voice.lineIndex) { _, line in actOutLesson(line: line) }
         // Finished an exercise: introduce the next one.
@@ -505,6 +511,13 @@ struct CoachStageView: View {
     private var quickTaps: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
+                if let index = currentExerciseIndex {
+                    // Mid-workout: the things you reach for between sets.
+                    quickTap("Explain again", systemImage: "arrow.counterclockwise") {
+                        introduce(exercise: index, first: false, replay: true)
+                    }
+                    quickTap("Set done", systemImage: "checkmark") { handleTyped("set done") }
+                } else {
                 quickTap("I missed a few workouts", systemImage: "arrow.uturn.backward") {
                     talk("I missed a few workouts.")
                 }
@@ -513,6 +526,7 @@ struct CoachStageView: View {
                 }
                 quickTap("Adjust my workout", systemImage: "slider.horizontal.3") {
                     talk("I need to adjust my workout.")
+                }
                 }
             }
             .padding(.trailing, MyoTheme.Spacing.lg)
@@ -656,7 +670,8 @@ struct CoachStageView: View {
             // Scrolled pills slide under the keyboard's glass, not over it.
             .zIndex(1)
             micButton.zIndex(1)
-            if phase == .rest {
+            // Mid-workout the mic is usually open, so the pills stay up then too.
+            if phase == .rest || (phase == .listening && currentExerciseIndex != nil) {
                 quickTaps.transition(.opacity)
             } else {
                 Spacer()
@@ -796,11 +811,19 @@ struct CoachStageView: View {
 
     /// Every finished utterance comes here. Mid-workout, counting and weight
     /// changes are handled on the phone; everything else goes to Coach.
+    /// Typed: same handling as spoken. It's plainly meant for MYO, so it
+    /// never needs "MYO" in front, and replies show on screen.
+    private func handleTyped(_ line: String) {
+        typedTurn = true
+        handleUtterance(line)
+        typedTurn = false
+    }
+
     private func handleUtterance(_ heard: String) {
         // "MYO, add curls" → "add curls". Mid-workout, saying MYO's name is
-        // what sends a free-form question to the coach.
-        let addressed = Self.addressesCoach(heard)
-        let text = addressed ? Self.strippingAddress(heard) : heard
+        // what sends a free-form question to the coach. Typing always is.
+        let addressed = typedTurn || Self.addressesCoach(heard)
+        let text = Self.addressesCoach(heard) ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
         if askingSkipRestDay, let yes = Self.skipRestDayAnswer(text) {
             answerSkipRestDay(yes)
@@ -835,6 +858,10 @@ struct CoachStageView: View {
         if appModel.activeWorkout != nil, repCount == 0, CoachingStyle.asksForDemo(text),
            let index = currentExerciseIndex {
             introduce(exercise: index, first: false, teach: true)
+            return
+        }
+        if repCount == 0, Self.asksForRepeat(text), let index = currentExerciseIndex {
+            introduce(exercise: index, first: false, replay: true)
             return
         }
         if appModel.activeWorkout != nil {
@@ -889,7 +916,7 @@ struct CoachStageView: View {
             }
         }
         askedAt = nil
-        send(text, spoken: true)
+        send(text, spoken: !typedTurn)
     }
 
     private static let addressPattern = #"^\W*(hey |hi |ok |okay |yo )?(myo|my o|my oh|mayo|mio|meo|miyo|coach)\b[\s,.!?]*"#
@@ -1064,6 +1091,13 @@ struct CoachStageView: View {
 
     /// A short spoken acknowledgement, then straight back to listening.
     private func confirm(_ line: String) {
+        // Always on screen too, so a typed "set 2 done" visibly lands.
+        show(notice: line)
+        if typedTurn, !conversationActive {
+            // Typed with the mic off: answer on screen, don't talk.
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            return
+        }
         restartHandledLocally = true
         if tips == .quiet {
             // Quiet: a buzz says it was heard.
@@ -1236,6 +1270,14 @@ struct CoachStageView: View {
         return nil
     }
 
+    /// "Say that again", "repeat that", "explain again", "one more time".
+    private static func asksForRepeat(_ text: String) -> Bool {
+        let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        guard t.split(separator: " ").count <= 8 else { return false }
+        return t.range(of: #"\b(say (that|it) again|repeat( that| it)?|explain (that |it )?again|one more time|come again|what did you say|again please)\b"#,
+                       options: .regularExpression) != nil
+    }
+
     /// "Start my workout", "let's go", "I want to work out".
     private static func asksToStart(_ text: String) -> Bool {
         let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
@@ -1256,11 +1298,13 @@ struct CoachStageView: View {
     /// Names the lift and — with tips on — teaches it, the body stepping
     /// into each position as it's described. `teach` forces the walk-through
     /// (you asked to be shown).
-    private func introduce(exercise index: Int, first: Bool, teach: Bool = false) {
+    /// `replay`: you asked to hear it again — the whole thing, sets and form,
+    /// whatever your tips setting.
+    private func introduce(exercise index: Int, first: Bool, teach: Bool = false, replay: Bool = false) {
         guard let workout = appModel.activeWorkout, workout.exercises.indices.contains(index) else { return }
         let exercise = workout.exercises[index]
         let motion = ExerciseMotion.match(exercise.name)
-        let style = teach ? CoachingStyle.Tips.full : tips
+        let style = teach || replay ? CoachingStyle.Tips.full : tips
         guard style != .quiet else {
             resumeListening()
             return
@@ -1270,7 +1314,7 @@ struct CoachStageView: View {
         if !teach {
             let weight = appModel.workingWeight(for: exercise)
             let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
-            let lead = first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
+            let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
             lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(load).")
             cues.append(.hold(0))
         }
@@ -1452,3 +1496,10 @@ private struct ThinkingDots: View {
 }
 
 
+
+
+/// A typed message, with an id so sending the same words twice still counts.
+struct TypedLine: Equatable {
+    let id = UUID()
+    let text: String
+}

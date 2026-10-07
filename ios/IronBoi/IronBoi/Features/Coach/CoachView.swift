@@ -7,6 +7,8 @@ struct CoachView: View {
     @StateObject private var bodyDirector = BodyDirector()
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
     @State private var showKeyboard = false
+    /// The last typed message, handed to the coach screen.
+    @State private var typed: TypedLine?
     /// Bumped when a typed message asks for today's workout; the stage shows the card.
     @State private var askedForWorkout = 0
     @State private var draft = ""
@@ -23,6 +25,7 @@ struct CoachView: View {
                         voice: coachVoice,
                         director: bodyDirector,
                         askedForWorkout: askedForWorkout,
+                        typed: typed,
                         showKeyboard: $showKeyboard
                     )
                     .overlay(alignment: .topTrailing) {
@@ -226,16 +229,14 @@ struct CoachView: View {
         }
     }
 
+    /// Typed messages go through the coach screen, which handles them just
+    /// like spoken ones — "set 2 done" logs the set either way.
     private func sendDraft() {
-        let content = draft
+        let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         draft = ""
         showKeyboard = false
-        // You named a move: the body steps into it while Coach answers.
-        if let move = MoveCue.move(in: content) { bodyDirector.perform(move) }
-        if WorkoutAsk.matches(content) { askedForWorkout += 1 }
-        Task {
-            await appModel.sendCoachMessage(content)
-        }
+        guard !content.isEmpty else { return }
+        typed = TypedLine(text: content)
     }
 }
 
