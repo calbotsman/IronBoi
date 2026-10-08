@@ -17,37 +17,41 @@ It is a design project as much as an engineering one. The interface is a cream-p
 
 **Status:** in TestFlight. Not on the App Store yet.
 
-## The four tabs
+## One screen, voice first
 
-| Tab | What it does |
+The app opens on the coach: a living orb (a Metal port of the One Body study from orb-lab) in the middle of the screen. Tap once and you are in a hands-free conversation with the real coach; replies are read aloud with sentence subtitles, and you can talk over it (with headphones on, or when the phone can cancel its own voice). Typing works the same way for when you can't talk. There is no tab bar.
+
+| Surface | What it does |
 |---|---|
-| **Coach** | Chat with the coach. Sign in with Apple, voice input, cited sources, and proposal cards you can apply or decline. |
-| **Train** | This week's plan, day by day. Start a session, swap an exercise, step weights, update a baseline, play an exercise sequence. |
-| **Record** | History and milestones. Six-week adherence bars, strength trends per lift, body-weight trend with a safety callout. |
-| **You** | Profile, goals, equipment, coaching protocol, non-negotiables, injuries and limitations, disliked exercises. |
+| **Coach** (the screen) | Talk or type. Proposal cards you can apply or decline. Ask for today's workout and a card appears under the orb; **Begin** turns it into a live session where counting reps aloud logs sets, a spoken weight change applies instantly, and the body demonstrates the current lift. |
+| **Plan** (behind the profile icon) | This week's plan, day by day. Start a session, swap an exercise, step weights, update a baseline. |
+| **History** (behind the profile icon) | Six-week adherence bars, strength trends per lift, body-weight trend with a safety callout. |
+| **You** (behind the profile icon) | Profile, goals, equipment, coaching protocol, non-negotiables, injuries and limitations, disliked exercises, and **What Coach remembers** — every saved memory fact, keep or remove. |
 
-A conversational onboarding gates the tabs until the coach has enough to write a first program.
+A conversational onboarding gates everything until the coach has enough to write a first program.
 
 ## How it works
 
 ```
 iPhone (SwiftUI)  ──callable──▶  Cloud Functions (TypeScript)  ──▶  Firestore
                                         │
-                                        ├─ Gemini 2.5 Flash (or OpenRouter) with a tool loop
+                                        ├─ Gemini 2.5 Flash via OpenRouter (no-training providers only), tool loop
+                                        ├─ Google Cloud Text-to-Speech (Chirp 3 HD) for the spoken voice
                                         ├─ deterministic safety layer (never model-authored)
                                         └─ schedulers: weekly rollover, daily follow-ups
 ```
 
-- **Firestore-first chat.** The app writes a user message; a Firestore trigger runs the coach and writes the reply. Clients can only ever create `user` messages. Security rules are covered by 36 test files that run against the emulator in CI.
+- **Firestore-first chat.** The app writes a user message; a Firestore trigger runs the coach and writes the reply. Clients can only ever create `user` messages. Every other call is a Firebase callable (the old bearer-token HTTP twins are gone). Security rules are covered by 41 test files that run against the emulator in CI.
+- **Voice.** Speech recognition is Apple's, on-device when the phone supports it; audio never reaches the backend. Spoken replies come from Cloud TTS one or two sentences at a time behind a per-user daily character cap, with the on-device voice as fallback.
 - **Coach tools.** `adapt_plan`, `accept_plan_adjustment`, `find_exercise_swaps`, `remember_user_fact`, `ask_follow_up_question` and friends, each with a Zod contract. The model proposes; the server validates and applies.
 - **Safety is code, not prompt.** Injury triage runs a server-side severe-symptom screen with a negation mask, so "no sharp pain, no numbness" is read as reassuring rather than alarming. Severe cases lock the plan and tell the user to see a clinician.
-- **Progress layer.** A builder rolls workout logs into a six-week summary (adherence, estimated one-rep max per lift, weight trend inside a safe band) that both the Record tab and the coach read from.
+- **Progress layer.** A builder rolls workout logs into a six-week summary (adherence, estimated one-rep max per lift, weight trend inside a safe band) that both the History screen and the coach read from.
 - **Program model.** A multi-week `TrainingProgram` is the source of truth; the active week is flattened into a snapshot the app renders. A scheduler rolls the week over and gates progression.
 
 ## Stack
 
-- **iOS:** Swift 5.10, SwiftUI, iOS 17+, Firebase iOS SDK 12 (Auth, Firestore, Functions, App Check with App Attest). Project generated from [`ios/IronBoi/project.yml`](ios/IronBoi/project.yml) with XcodeGen.
-- **Backend:** Node 22, TypeScript, Firebase Functions v6, Zod 4, Vitest. Provider-agnostic model layer (`IRONBOI_COACH_PROVIDER`), per-user daily message and token caps, structured logging with an allowlist so nothing sensitive is logged.
+- **iOS:** Swift 5.10, SwiftUI, iOS 17+, Metal (the orb), AVFoundation + Speech, Firebase iOS SDK 12 (Auth, Firestore, Functions, App Check with App Attest). Project generated from [`ios/IronBoi/project.yml`](ios/IronBoi/project.yml) with XcodeGen.
+- **Backend:** Node 22, TypeScript, Firebase Functions v6, Zod 4, Vitest. Provider-agnostic model layer (`IRONBOI_COACH_PROVIDER`), per-user daily message, token and spoken-character caps, structured logging with an allowlist so nothing sensitive is logged.
 - **CI:** [`ci.yml`](.github/workflows/ci.yml) typechecks and builds the functions, runs the static security lint and the full emulator suite, and builds the iOS app on macOS when `ios/**` changes. [`nightly-e2e.yml`](.github/workflows/nightly-e2e.yml) runs a real conversation against staging every night: triage → proposal → accept → overrides → follow-ups.
 
 ## Running it

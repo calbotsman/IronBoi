@@ -40,10 +40,11 @@ Alternates: `Calm, honest strength coaching` (30) · `A coach that remembers you
 >
 > **It's calm about pain.** If something hurts, Coach asks the questions a good coach would ask first. If anything sounds serious, it stops and tells you to see a clinician.
 >
-> FOUR TABS
-> • Coach: chat, with voice input
-> • Train: this week's plan, day by day; swap exercises and adjust weights
-> • Record: your sessions, strength trends and body-weight trend
+> TALK TO IT
+> • One screen: tap the coach and talk. It listens, answers out loud, and you can talk over it. Type when you can't talk.
+> • Ask for today's workout and run it by voice: count your reps and the set is logged; say a new weight and it sticks.
+> • Plan: this week, day by day; swap exercises and adjust weights
+> • History: your sessions, strength trends and body-weight trend
 > • You: your goals, equipment, limits, and what Coach remembers
 >
 > MYO is for anyone who lifts, and especially for people who are new, coming back after a break, or tired of apps that feel like they were built for someone else.
@@ -77,15 +78,15 @@ Data linked to the user, used for App Functionality only, not used for tracking:
 - **User Content → Other User Content** (coach chat, remembered facts)
 - **Usage Data → Product Interaction** (message counts for daily caps)
 
-Not collected: location, contacts, photos, HealthKit (none yet), audio (speech-to-text is on-device).
+Not collected: location, contacts, photos, HealthKit (none yet), audio. Speech recognition is Apple's (on-device when the phone supports it, otherwise Apple's servers); audio never reaches our backend and we never store it. The text of spoken replies goes to Google Cloud Text-to-Speech — declare Google as a processor alongside OpenRouter, same as the policy §11.
 
 ## Screenshots (6.9" required — 1320×2868 or 1290×2796)
 
-Order follows the build plan's hero shot:
-1. **Coach** — a reply with the citation line visible. Caption: "Ask why. Get a real answer."
-2. **Train** — this week's plan. Caption: "A program built around your week."
-3. **Coach** — a session reworked for a short day. Caption: "Short on time? It adapts."
+The Coach screen was rebuilt around the voice orb on 2026-10-05, so every shot is retaken from the current build:
+1. **Coach** — the orb mid-reply with a sentence subtitle. Caption: "Just talk to it."
+2. **Coach, live workout** — the expanded set list with counted reps. Caption: "Count your reps. It logs the set."
+3. **Coach** — a session reworked for a short day (proposal card). Caption: "Short on time? It adapts."
 4. **You → What Coach remembers.** Caption: "It remembers what you tell it."
-5. **Record** — strength trend. Caption: "See the work add up."
+5. **History** — strength trend. Caption: "See the work add up."
 
 Capture from the simulator (iPhone 17 Pro Max) with a seeded account, not the debug preview session (it shows a "Preview" sign-in path).
