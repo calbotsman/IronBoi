@@ -321,7 +321,15 @@ struct AmbientLife {
         let eased = smooth(u)
         let angle = -(0.35 + 0.95 * eased)
         let center = SIMD2<Float>(travel * 0.8 * eased, -0.04 + 0.16 * sin(u * .pi))
-        return ExitFrame(joints: OneBodyMotion.turned(superman, by: angle, offset: center), form: 1)
+        let straight = OneBodyMotion.turned(superman, by: angle, offset: center)
+        // A diver tucks on the way in: over the second half of the flight the
+        // long body curls into a ball that keeps rolling forward, so it
+        // arrives at the middle already round and the blob has nothing to
+        // gather. Without this it landed as a rod and every joint sprang to
+        // the centre on its own schedule — rod, lumps, ball.
+        let curl = smooth((u - 0.45) / 0.55)
+        let ball = OneBodyMotion.turned(OneBodyMotion.tucked(), by: angle - 1.6 * curl, offset: center)
+        return ExitFrame(joints: zip(straight, ball).map { $0 + ($1 - $0) * curl }, form: 1)
     }
 
     /// Knees go, then everything slumps into a puddle — which then pulls

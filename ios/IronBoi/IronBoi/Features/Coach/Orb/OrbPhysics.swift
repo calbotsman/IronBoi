@@ -40,6 +40,9 @@ final class OrbPhysics: ObservableObject {
     @Published var restSpeed: Float = 0.05
     /// How fast the squash axis turns to follow a new direction (1/s).
     @Published var axisFollow: Float = 10
+    /// How quickly the person contracts into the blob (rad/s, critically
+    /// damped). Higher = snappier gather-in.
+    @Published var gatherStiffness: Float = 16
 
     var reduceMotionScale: Float = 1
 
@@ -53,7 +56,7 @@ final class OrbPhysics: ObservableObject {
             ("stretchGain", stretchGain), ("stretchMax", stretchMax),
             ("landKick", landKick), ("landKickPerSpeed", landKickPerSpeed),
             ("restSpeed", restSpeed), ("axisFollow", axisFollow),
-            ("arrivalMemory", arrivalMemory),
+            ("arrivalMemory", arrivalMemory), ("gatherStiffness", gatherStiffness),
         ]
         let body = pairs.map { "  \"\($0.0)\": \(String(format: "%.3f", $0.1))" }.joined(separator: ",\n")
         return "{\n\(body)\n}"
@@ -69,6 +72,7 @@ final class OrbPhysics: ObservableObject {
         arrivalMemory = 4
         restSpeed = 0.05
         axisFollow = 10
+        gatherStiffness = 16
     }
 }
 
@@ -105,6 +109,7 @@ struct OrbPhysicsTuner: View {
                     row("arrival memory", $physics.arrivalMemory, 1...12)
                     row("rest speed", $physics.restSpeed, 0...0.3)
                     row("axis follow", $physics.axisFollow, 1...30)
+                    row("gather", $physics.gatherStiffness, 6...40)
                     HStack {
                         Button("Reset") { physics.resetToDefaults() }
                         Spacer()

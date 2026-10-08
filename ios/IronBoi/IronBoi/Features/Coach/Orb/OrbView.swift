@@ -304,7 +304,7 @@ final class OrbModel {
                 // Becoming the blob: gather into its shape first, then hand
                 // over — with a little plop.
                 if arrival == nil { arrival = hipsPeak }
-                moveJoints(toward: sphere, dt: dt, reduceMotion: false, stiffness: 1.5)
+                gatherJoints(into: sphere, dt: dt)
                 let spread = joints.map { simd_length(SIMD2($0.x, $0.y)) + abs($0.z - sphereRadius) }.max() ?? 0
                 if spread < 0.09 {
                     form = max(0, form - dt * 7)
@@ -357,8 +357,11 @@ final class OrbModel {
             squash = min(max(squash, 0.5), 1.6)
         }
         updateGear(for: pose, dt: dt, reduceMotion: reduceMotion)
-        // Eased: acts switch between side-on and front-on.
-        armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * 6))
+        // Eased: acts switch between side-on and front-on. Gathering into
+        // the blob it drops fast, or the tucked-elbow shading draws a dark
+        // ring on the ball for the last few frames of being a person.
+        let armRate: Float = pose.form < 0.01 ? 30 : 6
+        armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * armRate))
     }
 }
 
@@ -434,6 +437,28 @@ extension OrbModel {
             }
         }
         gearArray = flat
+    }
+
+    /// Becoming the blob: the whole body contracts as one mass. Every joint
+    /// gets the same critically damped spring, so they all arrive together
+    /// and nothing overshoots — the opposite of a demonstration, where the
+    /// per-joint weights are what make the person feel alive.
+    fileprivate func gatherJoints(into targets: [Joint], dt: Float) {
+        let w = physics.gatherStiffness
+        let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+        let h = dt / Float(steps)
+        for i in joints.indices {
+            var position = SIMD2(joints[i].x, joints[i].y)
+            var velocity = jointVelocity[i]
+            let goal = SIMD2(targets[i].x, targets[i].y)
+            for _ in 0..<steps {
+                velocity += (-(w * w) * (position - goal) - 2 * w * velocity) * h
+                position += velocity * h
+            }
+            jointVelocity[i] = velocity
+            joints[i] = Joint(position.x, position.y,
+                              joints[i].z + (targets[i].z - joints[i].z) * (1 - exp(-dt * w)))
+        }
     }
 
     fileprivate func moveJoints(toward targets: [Joint], dt: Float, reduceMotion: Bool, stiffness: Float = 1) {
