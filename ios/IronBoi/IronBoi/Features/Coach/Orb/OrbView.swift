@@ -108,6 +108,21 @@ final class OrbModel {
     private var lift: Float = 0.05
     private(set) var squash: Float = 1
     private var squashVelocity: Float = 0
+    /// Unit vector the squash acts along (see the shader). Vertical at rest.
+    private(set) var squashAxis = SIMD2<Float>(0, 1)
+    private var previousCenter: SIMD2<Float>?
+    /// Speed and direction the blob is moving, in shader units per second,
+    /// smoothed a touch so a single late frame doesn't twitch it.
+    private var blobVelocity = SIMD2<Float>(0, 0)
+    /// The hips' velocity as the person started gathering into the blob —
+    /// the arrival speed, before the gather-in springs bleed it off.
+    private var arrival: SIMD2<Float>?
+    /// The hips' fastest recent velocity while the body is a person,
+    /// decaying over about a quarter second. Exits ease to a stop before
+    /// the gather-in starts, so the speed at that instant is nearly zero;
+    /// this is the speed the landing should answer to.
+    private var hipsPeak = SIMD2<Float>(0, 0)
+    private let physics = OrbPhysics.shared
     /// The person is gathered into the blob's shape, ready to grow out of it.
     private var folded = false
     private(set) var lobes = SIMD3<Float>(0, 0, 0)
@@ -182,6 +197,12 @@ final class OrbModel {
         // Leans down toward you and squashes only while you're actually talking.
         lift += ((0.05 - you.presence * lean) * scale - lift) * k
         center = anchor + SIMD2(0, lift)
+        // Mass: where the blob is going, and how fast.
+        if let previous = previousCenter, dt > 0 {
+            let v = (center - previous) / dt
+            blobVelocity += (v - blobVelocity) * min(1, dt * 20)
+        }
+        previousCenter = center
         let pitch: Float = 0.5 + (agent.bands.y - 0.5) * 0.4
         let squashBase = 1 - you.presence * squashGain + agentPresence * (pitch - 0.5) * 0.2
         let lobeTarget = agent.bands * lobeGains * agentPresence + SIMD3(repeating: agent.peak * agentPresence * 0.02)
@@ -265,6 +286,16 @@ final class OrbModel {
         // two trade places without a visible crossfade.
         let sphereRadius = radius / max(bodyScale * Self.size, 0.01)
         let sphere = [Joint](repeating: Joint(0, 0, sphereRadius), count: joints.count)
+        if form > 0 {
+            let hips = jointVelocity[2] * bodyScale * Self.size
+            if simd_length(hips) >= simd_length(hipsPeak) {
+                hipsPeak = hips
+            } else {
+                hipsPeak *= exp(-dt * physics.arrivalMemory)
+            }
+        } else {
+            hipsPeak = .zero
+        }
         if reduceMotion {
             form += (pose.form - form)
             moveJoints(toward: pose.joints, dt: dt, reduceMotion: true)
@@ -272,12 +303,14 @@ final class OrbModel {
             if form > 0 {
                 // Becoming the blob: gather into its shape first, then hand
                 // over — with a little plop.
+                if arrival == nil { arrival = hipsPeak }
                 moveJoints(toward: sphere, dt: dt, reduceMotion: false, stiffness: 1.5)
                 let spread = joints.map { simd_length(SIMD2($0.x, $0.y)) + abs($0.z - sphereRadius) }.max() ?? 0
                 if spread < 0.09 {
                     form = max(0, form - dt * 7)
                     if form == 0 {
-                        squashVelocity -= 2.4
+                        land(from: arrival ?? .zero)
+                        arrival = nil
                         folded = true
                     }
                 }
@@ -293,17 +326,35 @@ final class OrbModel {
                 jointVelocity = jointVelocity.map { _ in .zero }
                 folded = false
             }
+            arrival = nil
             form += (pose.form - form) * (1 - exp(-dt * 14))
             moveJoints(toward: pose.joints, dt: dt, reduceMotion: false)
         }
         // The blob's squash is a loose spring: a landing presses it flat and
-        // it wobbles back round.
-        let squashTarget = pose.squash ?? squashBase
+        // it wobbles back round. Moving, it stretches along its direction of
+        // travel; the axis follows the motion and holds when it stops, so a
+        // landing flattens the blob along the way it arrived.
+        let speed = simd_length(blobVelocity)
+        if speed > physics.restSpeed, !reduceMotion {
+            let direction = blobVelocity / speed
+            // Axis and -axis are the same squash; turn toward the nearer one.
+            let goal = simd_dot(direction, squashAxis) < 0 ? -direction : direction
+            squashAxis += (goal - squashAxis) * min(1, dt * physics.axisFollow)
+            squashAxis = simd_normalize(squashAxis)
+        }
+        let stretch = min(physics.stretchMax, 1 + max(0, speed - physics.restSpeed) * physics.stretchGain)
+        let squashTarget = pose.squash ?? (squashBase * stretch)
         if reduceMotion {
             squash += (squashTarget - squash) * k
         } else {
-            squashVelocity += (-(13 * 13) * (squash - squashTarget) - 2 * 0.35 * 13 * squashVelocity) * dt
-            squash = min(max(squash + squashVelocity * dt, 0.55), 1.4)
+            let w = physics.squashStiffness, z = physics.squashDamping
+            let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+            let h = dt / Float(steps)
+            for _ in 0..<steps {
+                squashVelocity += (-(w * w) * (squash - squashTarget) - 2 * z * w * squashVelocity) * h
+                squash += squashVelocity * h
+            }
+            squash = min(max(squash, 0.5), 1.6)
         }
         updateGear(for: pose, dt: dt, reduceMotion: reduceMotion)
         // Eased: acts switch between side-on and front-on.
@@ -312,6 +363,18 @@ final class OrbModel {
 }
 
 extension OrbModel {
+    /// The person has just gathered into the blob: it lands along the way it
+    /// came, flattening harder the faster it arrived. `arrival` is the hips'
+    /// velocity at the moment of folding, in shader units per second.
+    fileprivate func land(from arrival: SIMD2<Float>) {
+        let speed = simd_length(arrival)
+        if speed > 0.02 {
+            let direction = arrival / speed
+            squashAxis = simd_dot(direction, squashAxis) < 0 ? -direction : direction
+        }
+        squashVelocity -= physics.landKick + physics.landKickPerSpeed * speed
+    }
+
     /// Each joint is a damped spring with its own weight: the hips and chest
     /// are heavy and settle without fuss, elbows and hands are light and
     /// carry on a little past where they're going, the head nods after the
@@ -454,6 +517,7 @@ struct OrbView: View {
                         .float(model.time),
                         .float(model.radius),
                         .float(model.squash),
+                        .float2(model.squashAxis.x, model.squashAxis.y),
                         .float2(model.center.x, model.center.y),
                         .float3(model.lobes.x, model.lobes.y, model.lobes.z),
                         .float(model.spin),

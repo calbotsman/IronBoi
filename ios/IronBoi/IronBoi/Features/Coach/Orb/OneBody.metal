@@ -164,7 +164,7 @@ static float hash21(float2 p) {
 [[ stitchable ]] half4 oneBody(
     float2 position, half4 color,
     float2 size, float time,
-    float radius, float squash, float2 center, float3 lobes,
+    float radius, float squash, float2 squashAxis, float2 center, float3 lobes,
     float spin, float tint, float fuse, float soft, float glow, float grain,
     half4 bodyColor, half4 youColor,
     device const float *drops, int dropCount,
@@ -176,9 +176,13 @@ static float hash21(float2 p) {
     float2 p = (position - size * 0.5) / min(size.x, size.y) * 2.0;
     p.y = -p.y;
 
-    float2 q = p - center;
-    q.y /= squash;
-    q.x *= sqrt(squash);
+    // Squash along an axis, volume-preserving: `squash` > 1 stretches the
+    // body along `squashAxis` (it is moving that way), < 1 flattens it along
+    // the axis (it just landed from that direction). A vertical axis is the
+    // old behaviour: leaning down toward you flattens it top-to-bottom.
+    float2 q0 = p - center;
+    float2 ax = normalize(squashAxis);
+    float2 q = float2(dot(q0, ax) / squash, (q0.x * ax.y - q0.y * ax.x) * sqrt(squash));
     float a = atan2(q.y, q.x);
     // `spin` is the lobes' rotation, integrated on the CPU. Computing it as
     // time × rate made every rate change (thinking → speaking) jump the angle

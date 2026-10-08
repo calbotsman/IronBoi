@@ -155,6 +155,11 @@ struct CoachStageView: View {
 
     var body: some View {
         stage
+        #if DEBUG
+        .overlay(alignment: .topTrailing) {
+            if ProcessInfo.processInfo.environment["MYO_TUNER"] == "1" { OrbPhysicsTuner() }
+        }
+        #endif
         .coordinateSpace(name: Self.space)
         .animation(MyoTheme.Motion.fade, value: showTodayCard)
         .animation(.easeInOut(duration: 0.35), value: workoutExpanded)
@@ -181,6 +186,29 @@ struct CoachStageView: View {
             if let raw = ProcessInfo.processInfo.environment["MYO_BODY_MOVE"],
                let move = BodyMove(rawValue: raw) {
                 director.perform(move)
+            }
+            // MYO_REEL=1: with the stunt reel, a burst of fake syllables
+            // every so often so bloops and the lean get exercised too.
+            if ProcessInfo.processInfo.environment["MYO_REEL"] == "1" {
+                Task { [meter = voiceInput.meter] in
+                    var reading = VoiceReading()
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 9_000_000_000)
+                        reading.active = true
+                        reading.level = 0.5
+                        for _ in 0..<7 {
+                            reading.onsets += 1
+                            reading.peak = Float.random(in: 0.45...0.95)
+                            reading.presence = min(1, reading.presence + 0.35)
+                            meter.set(reading)
+                            try? await Task.sleep(nanoseconds: UInt64.random(in: 180_000_000...380_000_000))
+                        }
+                        try? await Task.sleep(nanoseconds: 900_000_000)
+                        reading.active = false
+                        reading.presence = 0
+                        meter.set(reading)
+                    }
+                }
             }
             #endif
         }

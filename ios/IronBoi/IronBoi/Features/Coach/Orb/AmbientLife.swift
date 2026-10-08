@@ -82,7 +82,51 @@ struct AmbientLife {
         }
     }
 
+    #if DEBUG
+    /// MYO_REEL=1: the same stunts in the same order, forever, so a physics
+    /// change can be judged against the last build. Each exit lands in the
+    /// middle from a different direction and speed.
+    private static let reel: [String] = [
+        "walkLeft", "dive", "still", "walkRight", "cannonball", "still",
+        "jump", "somersault", "still", "shadowBox", "melt", "still",
+    ]
+    private static let reelOn = ProcessInfo.processInfo.environment["MYO_REEL"] == "1"
+    private var reelIndex = 0
+
+    private mutating func nextFromReel(at t: Float) -> Act {
+        if case .walk(_, _, let to, _) = act { x = to }
+        // Every exit ends in the middle — that's where the blob is.
+        if Self.exits.contains(lastKind) { x = 0 }
+        let kind = Self.reel[reelIndex % Self.reel.count]
+        reelIndex += 1
+        lastKind = kind
+        switch kind {
+        case "walkLeft":
+            facing = -1
+            return .walk(start: t, from: x, to: -0.28, duration: max(1.4, abs(-0.28 - x) / 0.22 + 0.5))
+        case "walkRight":
+            facing = 1
+            return .walk(start: t, from: x, to: 0.28, duration: max(1.4, abs(0.28 - x) / 0.22 + 0.5))
+        case "dive": facing = x > 0 ? -1 : 1; return .dive(start: t, from: x)
+        case "cannonball": facing = x > 0 ? -1 : 1; return .cannonball(start: t, from: x)
+        case "somersault": facing = 1; return .somersault(start: t, from: x)
+        case "melt": return .melt(start: t, from: x)
+        case "jump": return .jump(start: t, count: 2, star: false)
+        case "shadowBox":
+            return .shadowBox(start: t, duration: 3.2, punches: [
+                Punch(at: 0.5, arm: 1), Punch(at: 0.72, arm: 0), Punch(at: 1.6, arm: 1),
+                Punch(at: 1.82, arm: 1), Punch(at: 2.04, arm: 0),
+            ])
+        default:
+            return .still(until: t + 1.8)
+        }
+    }
+    #endif
+
     private mutating func next(at t: Float) -> Act {
+        #if DEBUG
+        if Self.reelOn { return nextFromReel(at: t) }
+        #endif
         if case .walk(_, _, let to, _) = act { x = to }
         // Just went back into the blob: stay one for a beat, in the middle.
         if Self.exits.contains(lastKind) {
