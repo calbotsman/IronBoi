@@ -434,6 +434,13 @@ export function buildCoachToolRegistry(
         scope: parsed.data.scope ?? null,
         dayPatchCount: parsed.data.dayPatches?.length ?? 0,
         hasPainTriage: Boolean(parsed.data.painTriage),
+        // The two booleans the server's triage downgrade keys on. Without
+        // them a high-risk pain proposal after clean red-flag answers is
+        // undiagnosable: "model omitted redFlagsAsked" and "severe screen
+        // tripped on the raw turn" look identical in the log.
+        painTriageRedFlagsAsked: parsed.data.painTriage?.redFlagsAsked ?? null,
+        painTriageUserReportsSevere: parsed.data.painTriage?.userReportsSevere ?? null,
+        severeMarkersHit: "severeMarkersHit" in result ? result.severeMarkersHit : null,
         rampWeekCount: parsed.data.rampWeeks?.length ?? 0,
         // Percentages only — the per-week `note` is model-authored text and
         // stays off the wire.
