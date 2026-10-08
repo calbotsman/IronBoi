@@ -77,7 +77,7 @@ export async function syncCurrentWeekSnapshot(
   );
 }
 
-// Shared by regenerateWorkoutPlan / regenerateWorkoutPlanHttp — a full
+// Used by regenerateWorkoutPlan — a full
 // rebuild resets both docs: workoutPlans/current is overwritten (dropping
 // any dailyOverrides, matching the existing "old days that were dropped
 // should go" behavior) and trainingPrograms/current restarts its week clock

@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import type { CollectionReference, DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
-import { SynthesizeSpeechRequest, synthesizeSpeech } from "./voice/speech.js";
+import { SynthesizeSpeechRequest, synthesizeSpeech, ttsAllowedForSignInProvider } from "./voice/speech.js";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
+import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { z } from "zod";
-import { auth, db } from "./firebase.js";
+import { db } from "./firebase.js";
 import { orchestrateCoachTurn } from "./coach/orchestrate.js";
 import {
   IosCoachMessageRequest,
@@ -70,15 +70,15 @@ import { applyExerciseBaselines } from "./workouts/rebaseline.js";
 import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
+import { checkDailyTtsCap, recordTtsUsage } from "./usage/cap.js";
 
 // Phase 3 Task 3.2 — App Check enforcement (env-gated).
 //
 // Enforcement is driven by IRONBOI_ENFORCE_APP_CHECK and defaults OFF.
-// It was disabled because it was the only thing enforced on the onCall
-// surface (the *Http endpoints never enforced it), so a Debug build whose
-// debug token wasn't registered had every callable — including profile
-// save — rejected with app:INVALID while auth was VALID. Auth still
-// protects every function. See docs/audits/myo-engineering-qa-2026-06-23.md.
+// It was disabled because a Debug build whose debug token wasn't
+// registered had every callable — including profile save — rejected with
+// app:INVALID while auth was VALID. Auth still protects every function.
+// See docs/audits/myo-engineering-qa-2026-06-23.md.
 //
 // TO FLIP IT ON (console prerequisites first — full steps in
 // docs/operations/appcheck-enable-runbook.md):
@@ -96,13 +96,14 @@ import { safeLogger } from "./logging/safeLogger.js";
 // the Firebase SDK ships them automatically. consumeAppCheckToken makes each
 // token one-shot (no replay).
 //
-// SCOPE CAVEAT: this gates the onCall surface only. As of the callable
-// migration (claude/callable-migration) the iOS app routes through the
-// onCall callables by default (AppModel.useCallableFunctions), so flipping
-// this flag now protects real traffic. The *Http onRequest endpoints
-// (bearer ID-token auth; the X-Firebase-AppCheck header they receive is
-// never verified server-side) remain deployed ONLY as the rollback path
-// until a retirement PR removes them after the migration soaks.
+// The onCall surface is the ONLY surface: the bearer-token *Http twins
+// that the iOS app used before the callable migration (and that never
+// verified App Check) were retired on 2026-10-07, so flipping this flag
+// protects all real traffic. Before flipping it, confirm in the logs that
+// app_check_presence reports outcome:present from a current build — as of
+// 2026-10-07 build 34 the tokens it sends fail to decode (App Attest is
+// not yet registered in the console), and enforcement would reject every
+// call.
 export function callableOpts(env: NodeJS.ProcessEnv = process.env) {
   const enforced = env.IRONBOI_ENFORCE_APP_CHECK === "true";
   // Consumption is a SEPARATE opt-in: one-shot tokens + the iOS SDK's
@@ -138,9 +139,9 @@ const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const openRouterApiKey = defineSecret("OPENROUTER_API_KEY");
 
-// Callable-surface twin of writeHttpHandlerError's ZodError branch: a
-// malformed payload must surface as invalid-argument (not opaque INTERNAL)
-// and leave the same operator log breadcrumb (issue paths, never values).
+// A malformed payload must surface as invalid-argument (not opaque
+// INTERNAL) and leave an operator log breadcrumb (issue paths, never
+// values).
 function parseCallablePayload<T>(schema: { parse(input: unknown): T }, data: unknown, endpoint: string): T {
   try {
     return schema.parse(data ?? {});
@@ -196,109 +197,21 @@ function requireAdmin(auth?: { token?: Record<string, unknown>; uid?: string }) 
   }
 }
 
-function bearerTokenFromRequest(request: { header(name: string): string | undefined }) {
-  const authorization = request.header("authorization") ?? "";
-  const match = authorization.match(/^Bearer (.+)$/i);
-  return match?.[1];
-}
+// maybeApplyWorkoutPlanAdjustment and the shared coach-message handler
+// live in ./coach/sendMessage.ts so the logic is unit-testable in the
+// emulator suite.
 
-function writeJsonResponse(
-  response: { status(code: number): { json(body: unknown): void } },
-  statusCode: number,
-  body: unknown,
-) {
-  response.status(statusCode).json(body);
-}
-
-function decodeJwtPayload(token: string) {
-  const payload = token.split(".")[1];
-  if (!payload) return {};
-
-  try {
-    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
-    const decoded = JSON.parse(Buffer.from(normalized, "base64").toString("utf8")) as {
-      aud?: unknown;
-      exp?: unknown;
-      iss?: unknown;
-    };
-
-    return {
-      tokenAud: typeof decoded.aud === "string" ? decoded.aud : "unknown",
-      tokenExp: typeof decoded.exp === "number" ? decoded.exp : 0,
-      tokenIss: typeof decoded.iss === "string" ? decoded.iss : "unknown",
-    };
-  } catch {
-    return {
-      tokenAud: "unreadable",
-      tokenExp: 0,
-      tokenIss: "unreadable",
-    };
-  }
-}
-
-async function verifyBearerUserId(
-  request: { header(name: string): string | undefined },
-  response: { status(code: number): { json(body: unknown): void } },
-) {
-  const idToken = bearerTokenFromRequest(request);
-  if (!idToken) {
-    writeJsonResponse(response, 401, { ok: false, error: "missing_bearer_token" });
-    return null;
-  }
-
-  try {
-    const decoded = await auth.verifyIdToken(idToken);
-    return decoded.uid;
-  } catch (error) {
-    safeLogger.warn("Firebase ID token rejected", {
-      event: "firebase_id_token_rejected",
-      errorCode: error instanceof Error ? error.name : "unknown_error",
-      errorDetail: error instanceof Error ? error.message.slice(0, 180) : "unknown_error",
-      ...decodeJwtPayload(idToken),
-    });
-    writeJsonResponse(response, 401, { ok: false, error: "invalid_token" });
-    return null;
-  }
-}
-
-function writeHttpHandlerError(
-  response: { status(code: number): { json(body: unknown): void } },
-  error: unknown,
-  fallbackError: string,
-) {
-  if (error instanceof z.ZodError) {
-    // Log issue PATHS (never values — they can carry user content) so a
-    // chronic validation failure is visible to the operator instead of
-    // silently 400ing users forever.
-    safeLogger.warn("HTTP function rejected invalid request", {
-      event: "http_function_invalid_request",
-      errorCode: fallbackError,
-      errorDetail: error.issues
-        .slice(0, 5)
-        .map((issue) => `${issue.path.join(".")}:${issue.code}`)
-        .join(","),
-    });
-    writeJsonResponse(response, 400, { ok: false, error: "invalid_request" });
-    return;
-  }
-
-  safeLogger.error("HTTP function failed", {
-    event: "http_function_failed",
-    errorCode: error instanceof Error ? error.name : "unknown_error",
-    errorDetail: error instanceof Error ? error.message.slice(0, 180) : "unknown_error",
-  });
-  writeJsonResponse(response, 500, { ok: false, error: fallbackError });
-}
-
-// maybeApplyWorkoutPlanAdjustment and the shared coach-message handler now
-// live in ./coach/sendMessage.ts so the onCall and *Http wrappers share one
-// implementation (and so the logic is unit-testable in the emulator suite).
-
-async function deleteDocumentTree(ref: DocumentReference) {
+async function deleteDocumentTree(ref: DocumentReference, keep: ReadonlySet<string> = new Set()) {
   const collections = await ref.listCollections();
-  await Promise.all(collections.map(deleteCollectionTree));
-  await ref.delete();
+  await Promise.all(collections.filter((c) => !keep.has(c.id)).map(deleteCollectionTree));
+  if (keep.size === 0) await ref.delete();
 }
+
+// "Start over" must not reset the day's spend counters: with usage/ inside
+// users/{uid}/**, a plain wipe let any account zero its message, token and
+// spoken-character caps between bursts. deleteAccount still removes
+// everything (the account is gone; the caps die with it).
+const RESET_KEEPS: ReadonlySet<string> = new Set(["usage"]);
 
 async function deleteCollectionTree(collection: CollectionReference) {
   const snapshot = await collection.get();
@@ -307,14 +220,6 @@ async function deleteCollectionTree(collection: CollectionReference) {
   }
 }
 
-// Phase 3 Task 3.1 — Account deletion.
-//
-// User-initiated wipe. Writes a tombstone at deletedAccounts/{uid} BEFORE
-// the destructive ops (so the audit trail survives the deletion of the
-// user's data), then recursively deletes users/{uid}/**, then revokes all
-// refresh tokens so any signed-in clients can't keep using the session.
-//
-// Required by Apple App Store guideline 5.1.1(v) and CCPA/GDPR Article 17.
 // Regenerate the user's workoutPlans/current doc from their CURRENT
 // profile and the seed default plan. Useful when:
 //   - The plan-generation rules change (e.g. the M/W/F vs Mon-Wed
@@ -325,9 +230,7 @@ async function deleteCollectionTree(collection: CollectionReference) {
 //
 // Overwrites the existing plan doc. The iOS UI puts a confirm step in
 // front of this — the callable itself doesn't second-guess.
-// Shared implementation behind BOTH regenerateWorkoutPlan (onCall) and
-// regenerateWorkoutPlanHttp. Throws HttpsError("failed-precondition") when
-// the profile is missing; the Http wrapper maps that to a 400.
+// Throws HttpsError("failed-precondition") when the profile is missing.
 export async function handleRegenerateWorkoutPlan(userId: string) {
   const profileSnap = await db.doc(profilePath(userId)).get();
   if (!profileSnap.exists) {
@@ -375,6 +278,14 @@ export const regenerateWorkoutPlan = onCall(CALLABLE_OPTS, async (request) => {
   return handleRegenerateWorkoutPlan(userId);
 });
 
+// Phase 3 Task 3.1 — Account deletion.
+//
+// User-initiated wipe. Writes a tombstone at deletedAccounts/{uid} BEFORE
+// the destructive ops (so the audit trail survives the deletion of the
+// user's data), then recursively deletes users/{uid}/**, then revokes all
+// refresh tokens so any signed-in clients can't keep using the session.
+//
+// Required by Apple App Store guideline 5.1.1(v) and CCPA/GDPR Article 17.
 export const deleteAccount = onCall(
   CALLABLE_OPTS,
   async (request) => {
@@ -426,44 +337,16 @@ export const getCoachBootstrap = onCall(CALLABLE_OPTS, async (request) => {
   };
 });
 
-// onCall twin of resetMyDataHttp — wipes users/{uid}/** but (unlike
+// Wipes users/{uid}/** but (unlike
 // deleteAccount) keeps the auth user and writes no tombstone: this is
 // "start over", not "delete my account". The parity audit
 // (claude/callable-migration) found no callable existed for this endpoint.
 export const resetMyData = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
-  await deleteDocumentTree(db.doc(userRoot(userId)));
+  await deleteDocumentTree(db.doc(userRoot(userId)), RESET_KEEPS);
   return { ok: true, userId };
 });
 
-export const resetMyDataHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      await deleteDocumentTree(db.doc(userRoot(userId)));
-      writeJsonResponse(response, 200, { ok: true, userId });
-    } catch (error) {
-      writeHttpHandlerError(response, error, "reset_my_data_failed");
-    }
-  },
-);
 
 export const getUserState = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
@@ -490,8 +373,7 @@ export const getUserState = onCall(CALLABLE_OPTS, async (request) => {
   };
 });
 
-// Shared implementation behind BOTH upsertProfile (onCall) and
-// upsertProfileHttp. createdAt/updatedAt are required by the schema but
+// Implementation behind upsertProfile. createdAt/updatedAt are required by the schema but
 // server-owned — the client never sends them. Inject here: preserve the
 // original createdAt on updates, stamp updatedAt now. (The pre-migration
 // onCall demanded them from the client and so rejected every real iOS
@@ -622,12 +504,47 @@ export const finishWorkoutSessionCallable = onCall(
 );
 
 // Coach's spoken voice — one sentence or two of a reply as WAV audio.
+//
+// Metered per user per day (usage/cap.ts) because Cloud TTS is billed per
+// character on the project's own service account and any signed-in user —
+// including an anonymous one minted with the public web API key — can call
+// this. Over the cap the app falls back to the on-device voice, so the
+// user still hears the reply; only the bill stops. Text replies are never
+// affected (the message/token caps are separate).
 export const synthesizeSpeechCallable = onCall(
   { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB" },
   async (request) => {
-    requireUserId(request.auth);
-    const parsed = SynthesizeSpeechRequest.parse(request.data ?? {});
-    return { ok: true, ...(await synthesizeSpeech(parsed)) };
+    const userId = requireUserId(request.auth);
+    const signInProvider = (request.auth?.token as { firebase?: { sign_in_provider?: string } } | undefined)
+      ?.firebase?.sign_in_provider;
+    if (!ttsAllowedForSignInProvider(signInProvider)) {
+      throw new HttpsError("permission-denied", "tts_requires_sign_in");
+    }
+    const parsed = parseCallablePayload(SynthesizeSpeechRequest, request.data, "synthesizeSpeech");
+    const cap = await checkDailyTtsCap(db, userId, parsed.text.length);
+    if (!cap.allowed) {
+      safeLogger.warn("Spoken-reply cap reached", {
+        event: "tts_cap_reached",
+        userId,
+        errorCode: cap.reason,
+        ttsChars: cap.usage.ttsChars,
+      });
+      // Same audit-of-record as the message/token caps (orchestrate.ts), so
+      // the privacy policy's "every spend-cap hit is in your audit log"
+      // stays true for the voice budget.
+      await recordAuditEventBestEffort(db, {
+        userId,
+        eventType: "daily_spend_cap_reached",
+        actor: "system",
+        payload: { reason: cap.reason, dateKey: cap.dateKey },
+      });
+      throw new HttpsError("resource-exhausted", cap.reason);
+    }
+    const speech = await synthesizeSpeech(parsed);
+    // Count only audio that was actually produced; a failed synthesis
+    // costs nothing and should not eat the budget.
+    await recordTtsUsage(db, userId, cap.dateKey, parsed.text.length);
+    return { ok: true, ...speech };
   },
 );
 
@@ -665,150 +582,6 @@ export const applyExerciseBaselinesCallable = onCall(CALLABLE_OPTS, async (reque
   const parsed = ApplyExerciseBaselinesRequest.parse(request.data ?? {});
   return await applyExerciseBaselines(db, userId, parsed);
 });
-
-// *Http twins. iOS routes through callBackend(httpName:callableName:), which
-// can be flipped back to the bearer-token transport by one line in AppModel —
-// a callable with no twin would strand these features on that rollback.
-export const getExerciseSwapOptionsHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    await handleWorkoutHttp(request, response, "get_swap_options_failed", async (userId, body) => {
-      const parsed = GetExerciseSwapOptionsRequest.parse(body);
-      return await getExerciseSwapOptions(db, userId, parsed);
-    });
-  },
-);
-
-export const swapExerciseHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    await handleWorkoutHttp(request, response, "swap_exercise_failed", async (userId, body) => {
-      const parsed = SwapExerciseRequest.parse(body);
-      return await swapExercise(db, userId, parsed);
-    });
-  },
-);
-
-export const applyExerciseBaselinesHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    await handleWorkoutHttp(request, response, "apply_baselines_failed", async (userId, body) => {
-      const parsed = ApplyExerciseBaselinesRequest.parse(body);
-      return await applyExerciseBaselines(db, userId, parsed);
-    });
-  },
-);
-
-// The CORS/method/auth preamble every *Http workout endpoint above repeats
-// verbatim. Extracted here rather than copied three more times. Structurally
-// typed like the other helpers in this file (bearerTokenFromRequest,
-// writeJsonResponse) so it stays testable without an express fixture.
-type HttpHandlerRequest = {
-  method: string;
-  body?: { data?: unknown } | unknown;
-  header(name: string): string | undefined;
-};
-
-type HttpHandlerResponse = {
-  set(field: string, value: string): unknown;
-  status(code: number): { json(body: unknown): void; send(body: string): void };
-};
-
-async function handleWorkoutHttp(
-  request: HttpHandlerRequest,
-  response: HttpHandlerResponse,
-  errorCode: string,
-  run: (userId: string, body: unknown) => Promise<unknown>,
-) {
-  response.set("Access-Control-Allow-Origin", "*");
-  response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-  response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-  if (request.method === "OPTIONS") {
-    response.status(204).send("");
-    return;
-  }
-  if (request.method !== "POST") {
-    writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-    return;
-  }
-
-  const userId = await verifyBearerUserId(request, response);
-  if (!userId) return;
-
-  try {
-    const body = isRecord(request.body) ? (request.body.data ?? request.body) : request.body;
-    const result = await run(userId, body);
-    writeJsonResponse(response, 200, result);
-  } catch (error) {
-    writeHttpHandlerError(response, error, errorCode);
-  }
-}
-
-export const startWorkoutSessionHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const parsed = StartWorkoutSessionRequest.parse(request.body?.data ?? request.body);
-      const activeWorkout = await startWorkoutSession(
-        db,
-        userId,
-        parsed,
-        seed.DEFAULT_PLAN,
-      );
-      writeJsonResponse(response, 200, { ok: true, activeWorkout });
-    } catch (error) {
-      writeHttpHandlerError(response, error, "start_workout_failed");
-    }
-  },
-);
-
-export const finishWorkoutSessionHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const parsed = FinishWorkoutSessionRequest.parse(request.body?.data ?? request.body);
-      const result = await finishWorkoutSession(db, userId, parsed);
-      writeJsonResponse(response, 200, { ok: true, ...result });
-    } catch (error) {
-      writeHttpHandlerError(response, error, "finish_workout_failed");
-    }
-  },
-);
 
 // Phase 2 Task 2.3 — proposal queue.
 // 14-day TTL for unconfirmed proposed facts. Long enough that a returning
@@ -1005,7 +778,7 @@ export const createCoachSession = onCall(
   },
 );
 
-// Parity-audited onCall twin of sendCoachMessageHttp. Pre-migration this
+// Parity-audited against the retired sendCoachMessageHttp. Pre-migration this
 // callable parsed CoachMessage.extend(...) STRICT — so the clientDate and
 // startedAt the iOS app sends were REJECTED — and it skipped the session
 // upsert and the deterministic weight-update path
@@ -1018,55 +791,26 @@ export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
   return handleSendCoachMessage(db, userId, parsed);
 });
 
-export const sendCoachMessageHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
 
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const parsed = IosCoachMessageRequest.parse(request.body?.data ?? request.body);
-      const result = await handleSendCoachMessage(db, userId, parsed);
-      writeJsonResponse(response, 200, result);
-    } catch (error) {
-      writeHttpHandlerError(response, error, "send_coach_message_failed");
-    }
-  },
-);
-
-// onCall twin of sendOnboardingAnswerHttp — same OnboardingAnswerRequest
-// schema, same processOnboardingAnswer core, same response shape. The
-// parity audit found no callable existed for this endpoint.
+// Same OnboardingAnswerRequest schema, processOnboardingAnswer core and
+// response shape as the retired sendOnboardingAnswerHttp. The parity audit
+// found no callable existed for this endpoint.
 export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
   return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
 });
 
-// onCall twin of acceptProgramProposalHttp — same schema, same core, same
-// response shape. The parity audit found no callable existed for this
-// endpoint.
+// Same schema, core and response shape as the retired
+// acceptProgramProposalHttp. The parity audit found no callable existed for
+// this endpoint.
 export const acceptProgramProposal = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   const parsed = parseCallablePayload(AcceptProgramProposalRequest, request.data, "acceptProgramProposal");
   return acceptProgramProposalCore(db, userId, parsed);
 });
 
-// onCall twin of acceptPlanAdjustmentProposalHttp — same schema (including
+// Same as the retired acceptPlanAdjustmentProposalHttp — same schema (including
 // the scope + clientDate fields the iOS proposal card sends), same core,
 // same response shape. The parity audit found no callable existed for this
 // endpoint.
@@ -1087,8 +831,9 @@ export const acceptPlanAdjustmentProposal = onCall(
 // firebase-functions turns any non-HttpsError throw into a bare 500
 // "INTERNAL", and the iOS SDK surfaces that verbatim — so a proposal that
 // was simply superseded by a newer one read to the user as an app crash,
-// identical to a real infrastructure failure. (The *Http twin never had this
-// problem; it returned named codes. The callable migration flattened them.)
+// identical to a real infrastructure failure. (The retired *Http twin never
+// had this problem; it returned named codes. The callable migration
+// flattened them.)
 // Mapping them here restores a distinguishable, actionable error per case
 // without leaking anything user-specific: every message below is a fixed
 // string chosen by us, never model or user text.
@@ -1129,181 +874,10 @@ function acceptPlanAdjustmentHttpsError(error: unknown, userId: string, proposal
   return new HttpsError("internal", "accept_failed");
 }
 
-export const sendOnboardingAnswerHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
 
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
 
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
 
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
 
-    try {
-      const parsed = OnboardingAnswerRequest.parse(request.body?.data ?? request.body);
-      const result = await processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
-      writeJsonResponse(response, 200, result);
-    } catch (error) {
-      writeHttpHandlerError(response, error, "send_onboarding_answer_failed");
-    }
-  },
-);
-
-export const acceptProgramProposalHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const parsed = AcceptProgramProposalRequest.parse(request.body?.data ?? request.body);
-      const result = await acceptProgramProposalCore(db, userId, parsed);
-      writeJsonResponse(response, 200, result);
-    } catch (error) {
-      writeHttpHandlerError(response, error, "accept_program_proposal_failed");
-    }
-  },
-);
-
-export const acceptPlanAdjustmentProposalHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const parsed = AcceptPlanAdjustmentProposalRequest.parse(
-        request.body?.data ?? request.body,
-      );
-      const result = await acceptPlanAdjustmentProposalCore(db, userId, parsed);
-      writeJsonResponse(response, 200, result);
-    } catch (error) {
-      // Keep the named codes rather than collapsing everything to one string,
-      // so this fallback path reports the same outcomes as the callable and
-      // the iOS error mapping works identically on both. writeHttpHandlerError
-      // drops the thrown code, which is what made every failure here read as a
-      // generic "couldn't apply that change".
-      const raw = error instanceof Error ? error.message : "";
-      const mapped = ACCEPT_ERROR_STATUS[raw];
-      if (mapped) {
-        const status =
-          mapped.code === "not-found" ? 404 : mapped.code === "permission-denied" ? 403 : 409;
-        writeJsonResponse(response, status, { ok: false, error: mapped.message });
-        return;
-      }
-      writeHttpHandlerError(response, error, "accept_plan_adjustment_failed");
-    }
-  },
-);
-
-// HTTP mirror of the upsertProfile onCall. The iOS app attaches a broken
-// App Check token, and onCall callables reject an invalid token even with
-// enforceAppCheck:false. This onRequest endpoint only verifies the Firebase
-// Auth bearer token, matching the resilient pattern of the other *Http
-// endpoints. Same behavior as upsertProfile: userId is always injected from
-// the verified bearer token, never trusted from the body.
-export const upsertProfileHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const result = await handleUpsertProfile(userId, request.body?.data ?? request.body);
-      writeJsonResponse(response, 200, result);
-    } catch (error) {
-      writeHttpHandlerError(response, error, "upsert_profile_failed");
-    }
-  },
-);
-
-// HTTP mirror of the regenerateWorkoutPlan onCall. Same App Check rationale
-// as upsertProfileHttp above. Rebuilds workoutPlans/current from the user's
-// current profile and the seed default plan.
-export const regenerateWorkoutPlanHttp = onRequest(
-  { region: "us-central1", invoker: "public" },
-  async (request, response) => {
-    response.set("Access-Control-Allow-Origin", "*");
-    response.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-
-    if (request.method === "OPTIONS") {
-      response.status(204).send("");
-      return;
-    }
-
-    if (request.method !== "POST") {
-      writeJsonResponse(response, 405, { ok: false, error: "method_not_allowed" });
-      return;
-    }
-
-    const userId = await verifyBearerUserId(request, response);
-    if (!userId) return;
-
-    try {
-      const result = await handleRegenerateWorkoutPlan(userId);
-      writeJsonResponse(response, 200, result);
-    } catch (error) {
-      if (error instanceof HttpsError && error.code === "failed-precondition") {
-        writeJsonResponse(response, 400, { ok: false, error: "profile_not_found" });
-        return;
-      }
-      writeHttpHandlerError(response, error, "regenerate_workout_plan_failed");
-    }
-  },
-);
 
 const SafetyEvalResult = z.object({
   caseId: z.string().min(1),
