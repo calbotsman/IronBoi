@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SynthesizeSpeechRequest, synthesizeSpeech } from "../../../src/voice/speech.js";
+import { SynthesizeSpeechRequest, coachVoice, synthesizeSpeech, ttsAllowedForSignInProvider } from "../../../src/voice/speech.js";
 import { VOICE_MODE_RULES, coachStyleRules } from "../../../src/coach/orchestrate.js";
 
 describe("synthesizeSpeech", () => {
@@ -17,9 +17,18 @@ describe("synthesizeSpeech", () => {
     delete process.env.GOOGLE_TTS_ACCESS_TOKEN;
   });
 
-  it("rejects over-long text and odd voice names", () => {
+  it("rejects over-long text and ignores a client-chosen voice", () => {
     expect(SynthesizeSpeechRequest.safeParse({ text: "x".repeat(601) }).success).toBe(false);
-    expect(SynthesizeSpeechRequest.safeParse({ text: "hi", voice: "../etc" }).success).toBe(false);
+    const parsed = SynthesizeSpeechRequest.safeParse({ text: "hi", voice: "Zephyr" });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toEqual({ text: "hi" });
+  });
+
+  it("uses the operator-configured voice, and falls back on a bad one", () => {
+    expect(coachVoice({})).toBe("Sulafat");
+    expect(coachVoice({ IRONBOI_COACH_VOICE: "Zephyr" })).toBe("Zephyr");
+    expect(coachVoice({ IRONBOI_COACH_VOICE: "../etc" })).toBe("Sulafat");
+    expect(coachVoice({ IRONBOI_COACH_VOICE: "" })).toBe("Sulafat");
   });
 
   it("surfaces an API error instead of returning silence", async () => {
@@ -27,6 +36,19 @@ describe("synthesizeSpeech", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 403, text: async () => "API not enabled" });
     await expect(synthesizeSpeech({ text: "hi" }, fetchMock as unknown as typeof fetch)).rejects.toThrow("HTTP 403");
     delete process.env.GOOGLE_TTS_ACCESS_TOKEN;
+  });
+});
+
+describe("who may have a spoken reply", () => {
+  it("signed-in users always may", () => {
+    expect(ttsAllowedForSignInProvider("apple.com", {})).toBe(true);
+    expect(ttsAllowedForSignInProvider(undefined, {})).toBe(true);
+  });
+
+  it("anonymous uids only where the operator allowed it", () => {
+    expect(ttsAllowedForSignInProvider("anonymous", {})).toBe(false);
+    expect(ttsAllowedForSignInProvider("anonymous", { IRONBOI_TTS_ALLOW_ANONYMOUS: "TRUE" })).toBe(false);
+    expect(ttsAllowedForSignInProvider("anonymous", { IRONBOI_TTS_ALLOW_ANONYMOUS: "true" })).toBe(true);
   });
 });
 

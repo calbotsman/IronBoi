@@ -14,9 +14,9 @@ import {
 import { isCoachToolLoopEnabled } from "./orchestrate.js";
 import { safeLogger } from "../logging/safeLogger.js";
 
-// The request shape the iOS app actually sends (previously only accepted by
-// sendCoachMessageHttp). Shared by BOTH the onCall callable and the *Http
-// wrapper so the two surfaces cannot drift again.
+// The request shape the iOS app actually sends (historically only accepted
+// by the since-retired sendCoachMessageHttp; the callable drifted from it
+// until the 2026-07 parity audit).
 export const IosCoachMessageRequest = z.object({
   sessionId: z.string().min(1),
   messageId: z.string().min(1),
@@ -164,9 +164,8 @@ export async function maybeApplyWorkoutPlanAdjustment(
   });
 }
 
-// Shared coach-message handler — the single implementation behind BOTH
-// sendCoachMessage (onCall) and sendCoachMessageHttp (onRequest). Preserves
-// the full *Http behavior the iOS app depends on:
+// Coach-message handler behind the sendCoachMessage callable (and, until
+// 2026-10-07, its *Http twin). Preserves the behavior the iOS app depends on:
 //   1. Upserts the session doc (the app never calls createCoachSession).
 //   2. Writes the message with clientDate/turnId/structuredAnswer so the
 //      onUserCoachMessageCreated trigger sees them.

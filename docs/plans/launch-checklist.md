@@ -10,41 +10,42 @@ The roadmap (`docs/plans/ironboi-phase-plan.md`) tracks the engineering work. **
 
 Each item is either ⬜ open or ✅ done. Date the done items so future-you knows when. Last updated by Claude 2026-06-02.
 
-## Status as of 2026-10-05 (read this first — the boxes below are from June)
+## Status as of 2026-10-07 (read this first — the boxes below are from June)
 
-Audited from the repo; console-only items marked "check" could not be verified (Firebase and gcloud CLI logins had expired).
+Re-audited from the repo, GitHub, the Firebase CLI and staging logs on 2026-10-07 (`docs/audits/myo-full-audit-2026-10-07.md`). gcloud was expired, so IAM and API-enablement on staging could not be verified.
 
-**Done (implied by TestFlight build 13 existing):** Apple Developer enrollment and team, App ID, Sign in with Apple and App Attest capabilities (both in `IronBoi.entitlements`), App Store Connect record, distribution signing. Staging backend is live and the nightly E2E passes. Plist switching, CI, build-number script, brand decision (display name MYO, bundle stays `ironboi`).
+**Done (implied by TestFlight build 34 existing):** Apple Developer enrollment and team, App ID, Sign in with Apple and App Attest capabilities (both in `IronBoi.entitlements`), App Store Connect record, distribution signing. Staging backend is live with the voice-coach branch deployed. Plist switching, CI, build-number script, brand decision (display name MYO, bundle stays `ironboi`).
 
-**Done in the repo on 2026-10-05:**
-- Memory review screen (You → What Coach remembers) — the old soft blocker.
-- Privacy policy brought up to date: OpenRouter named as a processor (staging has routed coach turns through it since 2026-07-26), and the memory section now matches how facts are actually saved and removed. **Not hosted yet.**
-- `ITSAppUsesNonExemptEncryption = NO`, so export compliance isn't asked on every upload.
-- `functions/.env.ironboi-prod` created so a prod deploy runs the same config as staging (tool loop on, OpenRouter pinned). Without it a prod deploy would have run with the tool loop off.
-- Listing draft: `docs/plans/app-store-listing.md` (name, subtitle, promo, description, keywords, App Privacy answers, screenshot plan).
-- OpenRouter requests now send `provider.data_collection: "deny"`, so they only route to model providers that don't store or train on chats. This backs the privacy-policy promise.
-- An out-of-credits or key-limit response from OpenRouter (401/402/403) now logs as `model_billing_error` instead of the generic `coach_orchestration_error`.
+**Done in the repo on 2026-10-05:** memory review screen; privacy policy names OpenRouter; `ITSAppUsesNonExemptEncryption = NO`; `functions/.env.ironboi-prod`; listing draft; OpenRouter requests send `provider.data_collection: "deny"`; 401/402/403 from OpenRouter log as `model_billing_error`.
+
+**Done in the repo on 2026-10-07 (branch `claude/audit-followups`, stacked on the voice-coach PR):**
+- Spoken replies are metered: `synthesizeSpeechCallable` enforces a per-user daily character cap (`IRONBOI_TTS_CHARS_PER_DAY_CAP`, default 60k ≈ $1.80/day worst case) and the voice is pinned server-side (`IRONBOI_COACH_VOICE`); the client can no longer pick a voice. Over the cap the app falls back to the on-device voice.
+- The twelve bearer-token `*Http` endpoints are gone from `functions/src/index.ts`, the iOS fallback transport is gone from `AppModel.swift`, and the nightly E2E harness calls the callables. The onCall surface is now the only surface, so App Check enforcement will cover all traffic once it is turned on. The next full staging deploy will prompt to delete the twelve retired functions — say yes.
+- Privacy policy (md + html) now names Google Cloud Text-to-Speech, describes the always-open conversation mic, and says speech recognition is Apple's (on-device when supported, otherwise Apple's servers). `Last updated` 2026-10-07. **This expands what is shared (§12), so hosted copy + an in-app notice are needed before public users; TestFlight testers should be told.**
+- `adapt_plan_shape` logs now carry `painTriageRedFlagsAsked`, `painTriageUserReportsSevere`, `severeMarkersHit` so a high-risk injury proposal after clean red-flag answers is diagnosable (deployed to staging 2026-10-07).
+- README and the listing draft describe the voice-first screen instead of four tabs.
 
 **Still open — Josh, in a web console:**
-1. `firebase login --reauth` and `gcloud auth login` (both expired).
-2. Create the `ironboi-prod` Firebase project → add the iOS app → replace `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` with the real download → set `OPENROUTER_API_KEY` and `GEMINI_API_KEY` secrets → deploy.
-3. Register App Attest for the prod app in Firebase App Check.
+1. `gcloud auth login` (expired; firebase CLI auth was fine on 10-07).
+2. Create the `ironboi-prod` Firebase project → add the iOS app → replace `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` with the real download → set `OPENROUTER_API_KEY` and `GEMINI_API_KEY` secrets → enable the Cloud Text-to-Speech API on the project → deploy. (As of 10-07 the only Firebase projects are ironboi-ac586, ironboi-fe18f and ironboi-staging.)
+3. Register App Attest for the app in Firebase App Check — **and verify in logs before enforcing.** On 2026-10-07 build 34 every callable logged `Failed to validate AppCheck token … Decoding App Check token failed` and `app_check_presence outcome=absent`. With enforcement off this costs nothing; with it on, every call fails. Flip `IRONBOI_ENFORCE_APP_CHECK` only after `app_check_presence` reports `outcome:present` from a real build.
 4. Host the privacy policy and pick a support URL (both required).
-5. In App Store Connect: paste the listing, answer App Privacy (declare OpenRouter's processing), age rating, category, contacts.
+5. In App Store Connect: paste the listing, answer App Privacy (declare OpenRouter and Google as processors), age rating, category, contacts.
 6. A GCP budget alert on the prod project.
-6b. **Separate OpenRouter keys for MYO**: one for staging, one for prod, each with a credit limit, plus auto top-up and a low-balance email. Today's key is shared with the studio. The staging outages on 09-22, 09-23 and 10-04 (every turn failing in about 3s) fit a drained balance. Set each with `firebase functions:secrets:set OPENROUTER_API_KEY --project <project>`, then redeploy.
-7. Confirm OpenRouter and the Gemini API are on terms that don't train on user content (the policy now says so).
+6b. **Separate OpenRouter keys for MYO**: one for staging, one for prod, each with a credit limit, plus auto top-up and a low-balance email. Today's key is shared with the studio. The staging outages on 09-22, 09-23 and 10-04 (every turn failing with HTTP 402) were a drained balance. Set each with `firebase functions:secrets:set OPENROUTER_API_KEY --project <project>`, then redeploy.
+7. Confirm OpenRouter, the Gemini API and Google Cloud Text-to-Speech are on terms that don't train on user content (the policy now says so and links Google Cloud's data-processing addendum; `data_collection: deny` backs the OpenRouter half).
 
 **Still open — repo work:**
-- App icon. A kettlebell-stamp draft was rejected (2026-10-05); Zara recommends direction A — an M drawn in one ink stroke that reads as shoulders. Awaiting Josh's pick.
-- Screenshots. The Coach screen was redesigned around the voice blob on 2026-10-05, so retake all five from a real account.
-- Proposed memory facts aren't swept after 14 days. They're hidden from the app and never used, and the policy now says only that; a scheduled cleanup (`decayProposedMemory`) is still a nice-to-have.
-- Safety evals aren't run in CI (`functions/src/evals/safety-evals.json` has `releaseGate: true`, nothing runs it).
+- App icon. A kettlebell-stamp draft was rejected (2026-10-05); Zara recommends direction A — an M drawn in one ink stroke that reads as shoulders. Awaiting Josh's pick. `docs/design/app-icon/myo-icon.svg` is sitting untracked.
+- Screenshots. Retake all five from the current build (plan in `app-store-listing.md`); two untracked drafts are in `docs/app-store/screenshots/`.
+- Proposed memory facts aren't swept after 14 days (`decayProposedMemory` is still a nice-to-have).
+- Safety evals aren't run in CI (`functions/src/evals/safety-evals.json` has `releaseGate: true`, nothing runs it). Needs a runner with an LLM judge; not a one-liner.
+- No iOS unit tests. `AppModel.swift` ~2.3k lines, `CoachStageView.swift` ~1.8k.
 - Then run `scripts/preflight-appstore.sh` — it must exit 0 before a public submission.
 
 **Deferred to v1.1 (fine for launch):** embeddings for the evidence corpus (today it's a 20-entry keyword-matched corpus with a cite-or-refuse prompt rule), HealthKit.
 
-**Watch:** of the five nightly E2E failures (Sep 30 – Oct 4), only Oct 4 was an outage, and it looks like OpenRouter billing (see 6b). The other four were the harness's strict checks on what the model chose to do ("ramp reaches beyond a single week", "ramp proposal was never accepted"). Those checks should be soft or retried so they stop reading as outages.
+**Watch — the nightly injury arc is FLAKY, not harness noise.** Of the nine nights Sep 29 – Oct 7, seven failed; Oct 4 was the OpenRouter balance (HTTP 402), the other six were scenario C: the same scripted red-flag answers produced `riskLevel:high requiresFollowUp:true` instead of a low-risk card. The server only downgrades to low when the model sends `painTriage.redFlagsAsked:true` and the raw turn has no severe markers. A manual run on 10-07 (after the diagnostics deploy) passed 30/30 with `redFlagsAsked:true`, so the model sometimes omits it. Next failure, read `adapt_plan_shape` for that night: `painTriageRedFlagsAsked:null` means the model skipped triage attestation (prompt/schema fix), `severeMarkersHit:true` means the deterministic screen fired on the harness text (regex fix). Prime suspect for the Oct 6+ frequency change is `ac4e90d` (`provider.data_collection: deny` changes which upstream serves Flash). The ramp-scenario checks are fine as they are.
 
 ---
 

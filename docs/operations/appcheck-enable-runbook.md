@@ -44,12 +44,15 @@ flipping bricks the TestFlight build. The flip criterion is now mechanical:
 
 ## Read this first — what flipping the flag actually protects
 
-**STALE SECTION — superseded 2026-07-20.** The audit below predates the
-callable migration. `AppModel.useCallableFunctions` has been `true` since
-commit 19e3cd0: the app now routes **all** its traffic through the onCall
-callables, so flipping the flag protects the real traffic path, not just
-`deleteAccount`. The `*Http` endpoints survive only as the one-line rollback.
-Kept for history:
+**STALE SECTION — superseded 2026-07-20, and again 2026-10-07.** The audit
+below predates the callable migration. The app has routed **all** its
+traffic through the onCall callables since commit 19e3cd0, and on
+2026-10-07 the `*Http` endpoints and the iOS rollback transport were
+deleted outright, so flipping the flag protects every call there is.
+Before flipping it, confirm `app_check_presence` logs `outcome:present`
+from a current build — on 2026-10-07 (build 34) every callable logged
+"Decoding App Check token failed" because App Attest is not yet
+registered in the console. Kept for history:
 
 **The iOS app barely uses the callable surface.** Audit of
 `ios/IronBoi/IronBoi/Services/AppModel.swift` (2026-07-17):
