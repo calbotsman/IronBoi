@@ -2375,8 +2375,24 @@ extension AppModel {
         try? await Task.sleep(nanoseconds: 1_400_000_000)
         isSending = false
         messages.append(CoachMessage(id: "pc\(stamp)", messageId: "pc\(stamp)", role: .coach,
-            content: "Got it. You said \u{201C}\(content)\u{201D}. In the real app I'd answer that with your plan in front of me. This is the preview, so I'm just showing you how talking to me feels.",
+            content: Self.previewReply(to: content),
             status: .complete, timestamp: Date(), riskLevel: nil))
+    }
+
+    /// A few realistic answers for the preview (screenshots, demos); anything
+    /// else gets the honest "this is the preview" line.
+    private static func previewReply(to content: String) -> String {
+        let t = content.lowercased()
+        if t.contains("focus") || t.contains("this week") {
+            return "Deadlift. It's the lift that's been moving: 315 for 3 last week, and you hit every rep. Keep Tuesday's sets honest, lower slow, and we'll go 320 next week. Everything else is maintenance."
+        }
+        if t.contains("25 minutes") || t.contains("short on time") || t.contains("in a hurry") {
+            return "Keep the deadlift, three sets of five. Drop the rows and the curls, keep two sets of hanging leg raises. That's twenty-two minutes with the warm-up."
+        }
+        if t.contains("knee") || t.contains("hurt") {
+            return "Before we change anything: is it sharp or shooting? Any numbness or tingling? Does it start with a specific movement?"
+        }
+        return "Got it. You said \u{201C}\(content)\u{201D}. In the real app I'd answer that with your plan in front of me. This is the preview, so I'm just showing you how talking to me feels."
     }
 
     static var previewMessages: [CoachMessage] {
