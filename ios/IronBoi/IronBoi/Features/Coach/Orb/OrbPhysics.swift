@@ -44,6 +44,35 @@ final class OrbPhysics: ObservableObject {
     /// damped). Higher = snappier gather-in.
     @Published var gatherStiffness: Float = 16
 
+    // MARK: Jelly (round 2) — the surface rings after an impact
+
+    /// How fast the surface ripples ring (rad/s). Higher = finer tremble.
+    @Published var jellyStiffness: Float = 18
+    /// 0 rings for ages, 1 no ring. ~0.12 is four or five visible wobbles.
+    @Published var jellyDamping: Float = 0.12
+    /// Ripple amplitude per unit of landing kick (2-lobe mode).
+    @Published var jellyLand: Float = 0.03
+    /// Ripple amplitude when a bloop is absorbed (3-lobe mode).
+    @Published var jellyBloop: Float = 0.03
+
+    // MARK: Bloops (round 3) — your syllables arrive with gravity and a nudge
+
+    /// Launch speed from below the screen (shader units/s). 0 = old homing.
+    @Published var bloopLaunch: Float = 1.0
+    /// Gravity on a bloop (shader units/s²): the arc.
+    @Published var bloopGravity: Float = 1.2
+    /// Pull toward the body (shader units/s²): why it always arrives.
+    @Published var bloopPull: Float = 3.0
+    /// Air drag (1/s): keeps the arc from flying off.
+    @Published var bloopDrag: Float = 1.6
+    /// Squash kick when a bloop lands, per unit of bloop size.
+    @Published var bloopNudge: Float = 0.5
+
+    // MARK: Lean (round 4) — toward you, on a spring
+
+    @Published var leanStiffness: Float = 8
+    @Published var leanDamping: Float = 0.55
+
     var reduceMotionScale: Float = 1
 
     private init() {}
@@ -57,6 +86,11 @@ final class OrbPhysics: ObservableObject {
             ("landKick", landKick), ("landKickPerSpeed", landKickPerSpeed),
             ("restSpeed", restSpeed), ("axisFollow", axisFollow),
             ("arrivalMemory", arrivalMemory), ("gatherStiffness", gatherStiffness),
+            ("jellyStiffness", jellyStiffness), ("jellyDamping", jellyDamping),
+            ("jellyLand", jellyLand), ("jellyBloop", jellyBloop),
+            ("bloopLaunch", bloopLaunch), ("bloopGravity", bloopGravity), ("bloopPull", bloopPull),
+            ("bloopDrag", bloopDrag), ("bloopNudge", bloopNudge),
+            ("leanStiffness", leanStiffness), ("leanDamping", leanDamping),
         ]
         let body = pairs.map { "  \"\($0.0)\": \(String(format: "%.3f", $0.1))" }.joined(separator: ",\n")
         return "{\n\(body)\n}"
@@ -73,6 +107,9 @@ final class OrbPhysics: ObservableObject {
         restSpeed = 0.05
         axisFollow = 10
         gatherStiffness = 16
+        jellyStiffness = 18; jellyDamping = 0.12; jellyLand = 0.03; jellyBloop = 0.03
+        bloopLaunch = 1.0; bloopGravity = 1.2; bloopPull = 3.0; bloopDrag = 1.6; bloopNudge = 0.5
+        leanStiffness = 8; leanDamping = 0.55
     }
 }
 
@@ -99,7 +136,9 @@ struct OrbPhysicsTuner: View {
             .buttonStyle(.plain)
 
             if open {
+                ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
+                    Text("Mass").font(.caption2.weight(.bold))
                     row("stiffness", $physics.squashStiffness, 4...30)
                     row("damping", $physics.squashDamping, 0.05...1)
                     row("stretch gain", $physics.stretchGain, 0...0.5)
@@ -110,6 +149,20 @@ struct OrbPhysicsTuner: View {
                     row("rest speed", $physics.restSpeed, 0...0.3)
                     row("axis follow", $physics.axisFollow, 1...30)
                     row("gather", $physics.gatherStiffness, 6...40)
+                    Text("Jelly").font(.caption2.weight(.bold)).padding(.top, 4)
+                    row("ring speed", $physics.jellyStiffness, 6...40)
+                    row("ring damping", $physics.jellyDamping, 0.02...0.6)
+                    row("ring on land", $physics.jellyLand, 0...0.2)
+                    row("ring on bloop", $physics.jellyBloop, 0...0.2)
+                    Text("Bloops").font(.caption2.weight(.bold)).padding(.top, 4)
+                    row("launch", $physics.bloopLaunch, 0...3)
+                    row("gravity", $physics.bloopGravity, 0...4)
+                    row("pull", $physics.bloopPull, 0...6)
+                    row("drag", $physics.bloopDrag, 0...3)
+                    row("nudge", $physics.bloopNudge, 0...2)
+                    Text("Lean").font(.caption2.weight(.bold)).padding(.top, 4)
+                    row("lean stiffness", $physics.leanStiffness, 2...20)
+                    row("lean damping", $physics.leanDamping, 0.1...1)
                     HStack {
                         Button("Reset") { physics.resetToDefaults() }
                         Spacer()
@@ -121,6 +174,8 @@ struct OrbPhysicsTuner: View {
                     }
                     .font(.caption.weight(.semibold))
                 }
+                }
+                .frame(maxHeight: 460)
                 .padding(12)
                 .frame(width: 260)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))

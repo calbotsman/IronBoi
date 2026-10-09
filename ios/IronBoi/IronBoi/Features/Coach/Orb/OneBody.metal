@@ -164,7 +164,9 @@ static float hash21(float2 p) {
 [[ stitchable ]] half4 oneBody(
     float2 position, half4 color,
     float2 size, float time,
-    float radius, float squash, float2 squashAxis, float2 center, float3 lobes,
+    // squashAxis.xy is the axis, .zw the jelly amplitudes: packed because
+    // SwiftUI's function stitching fails past ~26 arguments.
+    float radius, float squash, float4 squashAxis, float2 center, float3 lobes,
     float spin, float tint, float fuse, float soft, float glow, float grain,
     half4 bodyColor, half4 youColor,
     device const float *drops, int dropCount,
@@ -181,15 +183,22 @@ static float hash21(float2 p) {
     // the axis (it just landed from that direction). A vertical axis is the
     // old behaviour: leaning down toward you flattens it top-to-bottom.
     float2 q0 = p - center;
-    float2 ax = normalize(squashAxis);
+    float2 ax = normalize(squashAxis.xy);
+    float2 jelly = squashAxis.zw;
     float2 q = float2(dot(q0, ax) / squash, (q0.x * ax.y - q0.y * ax.x) * sqrt(squash));
     float a = atan2(q.y, q.x);
     // `spin` is the lobes' rotation, integrated on the CPU. Computing it as
     // time × rate made every rate change (thinking → speaking) jump the angle
     // by time × Δrate — many turns once the app had been open a while.
+    // Jelly: two ringing modes anchored to the squash axis — a landing
+    // sets the 2-lobe mode going along the way it arrived, a bloop the
+    // 3-lobe one. Both are springs on the CPU; this is just their shape.
+    float axisAngle = atan2(ax.y, ax.x);
     float lobe = lobes.x * sin(2.0 * a + spin)
                + lobes.y * sin(3.0 * a - spin * 1.3)
-               + lobes.z * sin(7.0 * a + spin * 2.1);
+               + lobes.z * sin(7.0 * a + spin * 2.1)
+               + jelly.x * cos(2.0 * (a - axisAngle))
+               + jelly.y * cos(3.0 * (a - axisAngle) + 0.7);
     float d = length(q) - radius * (1.0 + lobe + 0.04 * snoise(float3(q * 2.2, time * 0.4)));
 
     // A body when it helps: the blob's field blends into the person's.
