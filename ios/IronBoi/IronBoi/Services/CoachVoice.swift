@@ -102,6 +102,16 @@ final class CoachVoice: NSObject, ObservableObject {
         }
     }
 
+    /// What Coach hadn't got to yet, while it's speaking: the reply from
+    /// just after the current sentence to the end. Read it BEFORE stop()
+    /// when you cut in, so the rest can be offered later ("want the rest of
+    /// what I was saying?").
+    var remainingSpeech: String? {
+        guard isSpeaking, !caption.isEmpty, let range = spokenText.range(of: caption) else { return nil }
+        let rest = spokenText[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return rest.count >= 24 ? rest : nil
+    }
+
     /// Stops mid-word — you cut in, or the conversation ended.
     func stop() {
         generation += 1

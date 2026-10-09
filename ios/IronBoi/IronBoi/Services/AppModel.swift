@@ -1785,7 +1785,8 @@ final class AppModel: NSObject, ObservableObject {
             status: CoachMessage.Status(rawValue: rawStatus) ?? .unknown,
             timestamp: timestampString.flatMap(Self.parseISODate) ?? Date(),
             riskLevel: data["riskLevel"] as? String,
-            sources: sources
+            sources: sources,
+            spokenContent: (data["spokenContent"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 
