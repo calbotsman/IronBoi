@@ -23,8 +23,8 @@ Tuning happens in the simulator, one piece of physics per round.
    ```
 2. The reel, in order, forever: walk left → **dive** → blob → walk right →
    **cannonball** → blob → two jumps → **somersault** → blob → shadow-box →
-   **melt** → blob. A burst of seven fake syllables (bloops) lands every
-   nine seconds on top of that, so the lean gets exercised too.
+   **melt** → blob. (Bloops only ever appear in talk mode, so the reel has
+   none; they get their own round.)
 3. Tap **Physics**, move sliders, watch the next landing. **Copy** puts the
    values on the clipboard as JSON. Paste them to Claude; they get baked in
    as the new defaults and a row is added below.

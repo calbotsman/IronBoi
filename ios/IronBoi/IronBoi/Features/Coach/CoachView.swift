@@ -87,7 +87,8 @@ struct CoachView: View {
                     scale: 0.9,
                     demo: intro.demo,
                     // Rise from just above the wordmark, not through the text.
-                    bloopStart: geo.size.height * 0.56
+                    bloopStart: geo.size.height * 0.56,
+                    stagedBloops: true
                 )
             }
             .ignoresSafeArea()

@@ -177,7 +177,7 @@ final class OrbModel {
               loop: ExerciseMotion? = nil, inWorkout: Bool = false, setsDone: Int = 0,
               demo: ExerciseMotion? = nil, ambient: Bool = false,
               lesson: LessonCue? = nil, counting: Bool = false, youTalking: Bool = false,
-              spawnY: Float? = nil,
+              spawnY: Float? = nil, stagedBloops: Bool = false,
               scale: Float = 1, reduceMotion: Bool) {
         bodyScale += (scale - bodyScale) * 0.15
         let now = CACurrentMediaTime()
@@ -211,10 +211,17 @@ final class OrbModel {
         spin += dt * (0.25 + think * 1.2) * (reduceMotion ? 0.25 : 1)
         if spin > 2 * .pi * 1000 { spin -= 2 * .pi * 1000 }
 
-        // Your syllables → droplets rising from just below the screen.
+        // Talk mode: you're speaking to the coach and it's listening as a
+        // blob — not counting reps with you, not mid-lesson, and not just
+        // hearing the gym through the workout's always-open mic.
+        let talkMode = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
+
+        // Your syllables → droplets rising from just below the screen. Only
+        // in talk mode (or the intro's staged words): the blob fills up with
+        // what you say to it, nothing else.
         let bottom = spawnY ?? -Float(size.height / max(min(size.width, size.height), 1)) - 0.1
         if you.onsets != lastYouOnsets {
-            if you.active, !reduceMotion {
+            if you.active, !reduceMotion, talkMode || stagedBloops {
                 drops[nextDrop] = SIMD4(anchor.x + Float.random(in: -0.5...0.5) * 0.9, bottom,
                                         dropSize * (0.6 + you.peak * 1.2), 1)
                 velocity[nextDrop] = 0
@@ -250,7 +257,7 @@ final class OrbModel {
         // blob only while words are actually being heard — not for gym
         // noise, not while you count (it does the reps with you), and not
         // mid-lesson.
-        let listening = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
+        let listening = talkMode
         if listening { life.rest(until: time + 2) }
         if phase != .rest { ambientLife.rest(until: time + 1.2) }
         let blob = BodyPose(joints: OneBodyMotion.standing(reduceMotion ? 0 : time), form: 0, side: 0, label: "")
@@ -518,6 +525,9 @@ struct OrbView: View {
     var youTalking = false
     /// Where bloops start, in points from the top. Default: below the screen.
     var bloopStart: CGFloat? = nil
+    /// Bloops arrive whenever `you` has onsets, not only in talk mode — the
+    /// intro's staged words.
+    var stagedBloops = false
     var setsDone = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -534,6 +544,7 @@ struct OrbView: View {
                                    loop: loop, inWorkout: inWorkout, setsDone: setsDone, demo: demo,
                                    ambient: ambient, lesson: lesson, counting: counting, youTalking: youTalking,
                                    spawnY: bloopStart.map { -Float(($0 - size.height / 2) / (min(size.width, size.height) / 2)) },
+                                   stagedBloops: stagedBloops,
                                    scale: Float(scale), reduceMotion: reduceMotion)
                 Rectangle()
                     .fill(Color.white)
