@@ -22,6 +22,7 @@ import {
   CoachMemoryFact,
   CoachTips,
   CoachTone,
+  TrainingFocus,
   ConsentRecord,
   DailyCheck,
   IngestHealthSamplesRequest,
@@ -334,10 +335,13 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
     throw new HttpsError("failed-precondition", "profile_not_found");
   }
   const profileData = profileSnap.data() ?? {};
-  // We only need schedule.daysPerWeek + schedule.preferredDays. Coerce a
-  // minimal object so this works for partial profiles too — a user who
-  // edited daysPerWeek alone on the You tab still gets a plan.
+  // We only need schedule.daysPerWeek + schedule.preferredDays and the
+  // training focus. Coerce a minimal object so this works for partial
+  // profiles too — a user who edited daysPerWeek alone on the You tab still
+  // gets a plan.
+  const focus = TrainingFocus.safeParse(profileData.trainingFocus);
   const profile = {
+    trainingFocus: focus.success ? focus.data : undefined,
     schedule: {
       daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
         ? profileData.schedule.daysPerWeek
