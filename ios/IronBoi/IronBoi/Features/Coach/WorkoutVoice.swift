@@ -19,8 +19,9 @@ enum WorkoutVoice {
     ]
     /// What the recognizer hears when you count: "to" for two, "for" for four…
     /// Only accepted when it's the next number in the count.
-    private static let soundAlikes: [String: Int] = [
-        "won": 1, "to": 2, "too": 2, "tree": 3, "for": 4, "fore": 4, "sex": 6, "ate": 8, "tin": 10,
+    static let soundAlikes: [String: Int] = [
+        "won": 1, "wan": 1, "to": 2, "too": 2, "tu": 2, "tree": 3, "free": 3, "for": 4, "fore": 4,
+        "fife": 5, "sex": 6, "sick": 6, "ate": 8, "nein": 9, "tin": 10, "tan": 10,
     ]
 
     /// How far you've counted: the longest run 1, 2, 3… in what you said,
@@ -60,14 +61,31 @@ enum WorkoutVoice {
 
     /// Mostly numbers (and a little filler) — someone counting, not a
     /// sentence that happens to contain "12". Doesn't need to start at one:
-    /// a count resumes mid-way after a pause.
-    static func looksLikeCounting(_ transcript: String) -> Bool {
-        let words = tokens(transcript)
+    /// a count resumes mid-way after a pause. Judged on the LAST few words
+    /// (`tail`), so "okay, let's go — one, two, three" still counts: the
+    /// recogniser keeps everything since the mic last restarted, and one
+    /// leading phrase must not poison a whole set.
+    static func looksLikeCounting(_ transcript: String, tail: Int = 4) -> Bool {
+        let words = Array(tokens(transcript).suffix(tail))
         guard !words.isEmpty else { return false }
         let filler: Set<String> = ["and", "done", "finished", "set", "that's", "it", "last", "the", "got", "rep", "reps",
                                    "okay", "ok", "uh", "um", "come", "on", "more"]
         let counted = words.filter { Int($0) != nil || numberWords[$0] != nil || soundAlikes[$0] != nil || filler.contains($0) }
         return Double(counted.count) / Double(words.count) >= 0.75
+    }
+
+    /// A word that means "stop and listen to me" when Coach is talking and
+    /// you're mid-workout: the next number of your count (so Coach saying
+    /// "eight" can never cut itself off unless you're on seven), or a set
+    /// being called done once a count is running.
+    static func cutsIn(_ transcript: String, repCount: Int, countBase: Int) -> Bool {
+        if repCount > 0, saysSetDone(transcript) { return true }
+        return looksLikeCounting(transcript) && self.repCount(in: transcript, from: countBase) > repCount
+    }
+
+    /// Is this word a number or something that sounds like one.
+    static func isNumberWord(_ word: String) -> Bool {
+        Int(word) != nil || numberWords[word] != nil || soundAlikes[word] != nil
     }
 
     // MARK: - Sets without counting

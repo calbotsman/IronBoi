@@ -249,11 +249,19 @@ struct CoachStageView: View {
             }
             guard !speaking else { return }
             // Coach finished on its own: whatever the open mic caught under
-            // it was echo or noise — start your turn clean. If you cut in,
-            // keep what you're saying.
+            // it was echo or noise — start your turn clean. Unless it was
+            // you: a count, or "set done", said under Coach is kept (and it
+            // can't be Coach's own words — those fail the echo test). If
+            // you cut in, keep what you're saying.
             if !cutIn, voiceInput.isListening {
-                markRestartHandled()
-                voiceInput.stop()
+                let heard = voiceInput.transcript
+                let yours = !heard.isEmpty && !Self.echoes(heard, of: voice.spokenText)
+                    && (WorkoutVoice.looksLikeCounting(heard)
+                        || (appModel.activeWorkout != nil && repCount > 0 && WorkoutVoice.saysSetDone(heard)))
+                if !yours {
+                    markRestartHandled()
+                    voiceInput.stop()
+                }
             }
             cutIn = false
             resumeListening()
@@ -262,15 +270,32 @@ struct CoachStageView: View {
         // silence): pick back up, unless it stopped on an error.
         // Counting reps out loud: the count updates as you say each number.
         .onChange(of: voiceInput.transcript) { _, transcript in
-            // Only with echo cancellation on: without it the mic would hear
-            // Coach and Coach would cut itself off.
-            if voice.isSpeaking, conversationActive, AudioHub.shared.canTalkOver,
-               !voice.speakingOnDevice, !Self.echoes(transcript, of: voice.caption),
-               transcript.split(separator: " ").count >= 2 {
-                // You started talking: Coach stops and listens.
-                cutIn = true
-                voice.stop()
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            // You started talking over Coach: Coach stops and listens. Two
+            // ways in. Mid-workout, the next number of your count or "done"
+            // cuts in on its own — one word, no waiting — and it can't be
+            // Coach cutting itself off, because Coach saying "eight" only
+            // counts if you were on seven. Otherwise two words that aren't
+            // an echo of what Coach is saying. The echo test is what keeps
+            // this safe without echo cancellation (speaker + music); the
+            // on-device fallback voice can't be cancelled at all, so only
+            // the count route is open under it.
+            if voice.isSpeaking, conversationActive, !Self.echoes(transcript, of: voice.spokenText) {
+                var counted = appModel.activeWorkout != nil
+                    && WorkoutVoice.cutsIn(transcript, repCount: repCount, countBase: countBase)
+                // Starting a count from nothing is the one case a single
+                // number can't prove is you: "one" is in half of Coach's
+                // sentences. Without echo cancellation it takes "one, two".
+                if counted, repCount == 0, !AudioHub.shared.canTalkOver,
+                   WorkoutVoice.repCount(in: transcript, from: countBase) < 2 {
+                    counted = false
+                }
+                let spoke = !voice.speakingOnDevice && transcript.split(separator: " ").count >= 2
+                if counted || spoke {
+                    cutIn = true
+                    AudioHub.log("cut in (\(counted ? "count" : "speech")): \"\(transcript.suffix(40))\" echo=\(AudioHub.shared.canTalkOver)")
+                    voice.stop()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
             }
             trackReps(in: transcript)
         }
@@ -585,15 +610,20 @@ struct CoachStageView: View {
         send(line, spoken: true)
     }
 
-    /// The mic is hearing Coach's own sentence (a Bluetooth speaker, a car)
-    /// rather than you: most of what it heard is in what Coach is saying.
+    /// The mic is hearing Coach's own voice (the speaker with no echo
+    /// cancellation, a Bluetooth speaker, a car) rather than you: most of
+    /// what it heard is in what Coach is saying. Compared against the WHOLE
+    /// reply, not just the current sentence, and with number words left
+    /// out — Coach's instructions are full of them ("three sets of eight"),
+    /// and that made your own "one, two, three" look like echo.
     private static func echoes(_ heard: String, of spoken: String) -> Bool {
         func words(_ s: String) -> [String] {
-            s.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { $0.count > 2 }
+            s.lowercased().components(separatedBy: CharacterSet.letters.inverted)
+                .filter { $0.count > 2 && !WorkoutVoice.isNumberWord($0) }
         }
         let said = Set(words(spoken))
         let got = words(heard)
-        guard !said.isEmpty, !got.isEmpty else { return false }
+        guard !said.isEmpty, got.count >= 2 else { return false }
         return Double(got.filter(said.contains).count) / Double(got.count) >= 0.5
     }
 
@@ -1541,7 +1571,7 @@ struct CoachStageView: View {
             voice.speak(lines: lines, messageId: plan.id)
             try? AudioHub.shared.start()
             // Only in talk mode — typing means the mic stays off.
-            if AudioHub.shared.canTalkOver, conversationActive { voiceInput.listen() }
+            if conversationActive { voiceInput.listen() }
         } else {
             // Muted: the body still walks through it, a beat every few seconds.
             Task {
@@ -1701,10 +1731,13 @@ struct CoachStageView: View {
         if reply.content.contains("?") { askedAt = Date() }
         if speaksReplies {
             voice.speak(reply.content, messageId: reply.id)
-            // Keep the mic open under Coach only where its voice is cancelled
-            // from the mic; elsewhere listening resumes when Coach finishes.
+            // The mic stays open under Coach so you can cut in. Where its
+            // voice is cancelled from the mic (echo cancellation on, or
+            // headphones) that's clean; on the speaker with music playing
+            // the mic hears Coach too, and the echo test in the transcript
+            // handler is what tells you apart.
             try? AudioHub.shared.start()
-            if AudioHub.shared.canTalkOver { voiceInput.listen() }
+            voiceInput.listen()
         } else {
             // Muted: the reply is on screen; go straight back to listening.
             resumeListening()

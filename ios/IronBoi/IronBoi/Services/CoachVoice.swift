@@ -15,6 +15,9 @@ final class CoachVoice: NSObject, ObservableObject {
     /// Which line of a `speak(lines:)` is playing, so the body can act it out.
     @Published private(set) var lineIndex = 0
     private var lines: [String] = []
+    /// Everything in the reply being spoken, start to finish — what the mic
+    /// might be hearing of Coach's own voice, not just the current sentence.
+    private(set) var spokenText = ""
 
     let meter = VoiceMeter()
     /// Text in, WAV out. Set by the screen that owns the backend connection.
@@ -54,6 +57,7 @@ final class CoachVoice: NSObject, ObservableObject {
     private func play(_ chunks: [String], messageId: String) {
         let spoken = chunks.joined(separator: " ")
         stop()
+        spokenText = spoken
         generation += 1
         let gen = generation
         speakingMessageId = messageId
