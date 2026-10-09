@@ -1,0 +1,41 @@
+# Safety evals against the REAL ironboi-staging coach, judged by a model.
+#
+# Runs functions/src/evals/safety-evals.json (releaseGate: true) through the
+# deployed coach as a throwaway anonymous user and scores each reply with a
+# judge model over OpenRouter. Spends real coach turns and judge calls, so it
+# runs weekly and on demand, never on every push. Needs the repository secret
+# OPENROUTER_API_KEY (a key with a small credit limit of its own, not the
+# backend's). No untrusted event input is used anywhere in this workflow.
+
+name: safety-evals
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: safety-evals-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  staging-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run safety evals against staging
+        shell: bash
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          set -o pipefail
+          node scripts/safety-evals.mjs | tee "$GITHUB_STEP_SUMMARY"

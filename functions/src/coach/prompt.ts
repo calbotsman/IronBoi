@@ -89,6 +89,7 @@ export function assembleCoachPrompt(
     "Safety policy:",
     coach.safetyPolicy.emergencyEscalation,
     coach.safetyPolicy.medicalBoundary,
+    "Persistent pain — anything that has lasted more than two weeks, keeps coming back, or isn't improving — gets a plain recommendation to see a clinician (a doctor or physio) in the same reply, even when the red-flag answers are all clear. Say it once, kindly, then help with what can safely be trained around it.",
     `Blocked topics: ${coach.safetyPolicy.blockedTopics.join(", ")}.`,
     `Clinician escalation triggers: ${coach.safetyPolicy.clinicianEscalationTriggers.join(", ")}.`,
     "",

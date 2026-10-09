@@ -48,7 +48,7 @@ iPhone (SwiftUI)  ──callable──▶  Cloud Functions (TypeScript)  ──�
 
 - **iOS:** Swift 5.10, SwiftUI, iOS 17+, Firebase iOS SDK 12 (Auth, Firestore, Functions, App Check with App Attest). Project generated from [`ios/IronBoi/project.yml`](ios/IronBoi/project.yml) with XcodeGen.
 - **Backend:** Node 22, TypeScript, Firebase Functions v6, Zod 4, Vitest. Provider-agnostic model layer (`IRONBOI_COACH_PROVIDER`), per-user daily message and token caps, structured logging with an allowlist so nothing sensitive is logged.
-- **CI:** [`ci.yml`](.github/workflows/ci.yml) typechecks and builds the functions, runs the static security lint and the full emulator suite, and builds the iOS app on macOS when `ios/**` changes. [`nightly-e2e.yml`](.github/workflows/nightly-e2e.yml) runs a real conversation against staging every night: triage → proposal → accept → overrides → follow-ups.
+- **CI:** [`ci.yml`](.github/workflows/ci.yml) typechecks and builds the functions, runs the static security lint and the full emulator suite, and builds the iOS app on macOS when `ios/**` changes. [`nightly-e2e.yml`](.github/workflows/nightly-e2e.yml) runs a real conversation against staging every night: triage → proposal → accept → overrides → follow-ups. [`safety-evals.yml`](.github/workflows/safety-evals.yml) sends the safety eval cases to the staging coach weekly and has a judge model score each reply.
 
 ## Running it
 

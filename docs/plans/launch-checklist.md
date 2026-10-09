@@ -39,7 +39,7 @@ Audited from the repo; console-only items marked "check" could not be verified (
 - App icon. A kettlebell-stamp draft was rejected (2026-10-05); Zara recommends direction A — an M drawn in one ink stroke that reads as shoulders. Awaiting Josh's pick.
 - Screenshots. The Coach screen was redesigned around the voice blob on 2026-10-05, so retake all five from a real account.
 - Proposed memory facts aren't swept after 14 days. They're hidden from the app and never used, and the policy now says only that; a scheduled cleanup (`decayProposedMemory`) is still a nice-to-have.
-- Safety evals aren't run in CI (`functions/src/evals/safety-evals.json` has `releaseGate: true`, nothing runs it).
+- Safety evals now have a runner: `node scripts/safety-evals.mjs` sends every case in `functions/src/evals/safety-evals.json` to the staging coach and a judge model scores the `must` / `mustNot` tags; `.github/workflows/safety-evals.yml` runs it weekly and on demand. **Josh: add the repository secret `OPENROUTER_API_KEY`** (a small-limit key of its own) or the workflow can't judge.
 - Then run `scripts/preflight-appstore.sh` — it must exit 0 before a public submission.
 
 **Deferred to v1.1 (fine for launch):** embeddings for the evidence corpus (today it's a 20-entry keyword-matched corpus with a cite-or-refuse prompt rule), HealthKit.
