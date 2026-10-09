@@ -81,7 +81,7 @@ Not collected: location, contacts, photos, HealthKit (none yet), audio (speech-t
 
 ## Screenshots (6.9" required — 1320×2868 or 1290×2796)
 
-Order follows the build plan's hero shot:
+A full set from the 2026-10-09 build is in `docs/app-store/screenshots/2026-10-09/` (iPhone 17 Pro Max simulator, 1320×2868, preview session with seeded data): 01 coach reply, 02 live workout with the rest timer (02b expanded set list), 03 plan-change card, 04 memory, 05 history. Retake after the icon lands and after any Coach-screen change. The original plan:
 1. **Coach** — a reply with the citation line visible. Caption: "Ask why. Get a real answer."
 2. **Train** — this week's plan. Caption: "A program built around your week."
 3. **Coach** — a session reworked for a short day. Caption: "Short on time? It adapts."
