@@ -235,6 +235,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // cannot bleed across utterance boundaries — a triage description ending
   // in a denial must not mask a severe phrase at the start of the raw turn.
   const severeText = [originalUserText, input.painTriage?.description ?? "", rawText].join(". ");
+  const severeMarkersHit = hasSevereMarkers(severeText);
   let riskLevel = riskForCategory(category, severeText);
   let requiresFollowUp = needsFollowUp(
     category,
@@ -244,7 +245,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   let triageCleared = false;
   if (
     category === "injury_pain" &&
-    !hasSevereMarkers(severeText) &&
+    !severeMarkersHit &&
     input.painTriage?.redFlagsAsked === true &&
     input.painTriage.userReportsSevere === false &&
     (input.dayPatches?.length ?? 0) > 0
@@ -549,6 +550,8 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       requiresFollowUp,
       dayKey: appliesTo.dayKey,
       needsScopeConfirmation: true,
+      severeMarkersHit,
+      triageCleared,
     };
   }
 
@@ -581,6 +584,8 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       persisted.proposalId,
     ),
     needsScopeConfirmation: false,
+    severeMarkersHit,
+    triageCleared,
   };
 }
 

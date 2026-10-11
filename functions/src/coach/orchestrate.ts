@@ -31,7 +31,7 @@ import type { CoachTips, CoachTone } from "../contracts/coach-agent.js";
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
 // switchover: flag off = the deterministic keyword classifier in
-// sendCoachMessage/sendCoachMessageHttp creates proposals and this
+// sendCoachMessage creates proposals and this
 // orchestrator runs the plain single-call turn; flag on = the tool loop
 // owns proposal creation and the classifier is skipped (running both would
 // double-create proposals for the same message). Both paths write to the

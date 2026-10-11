@@ -1,6 +1,5 @@
 import AuthenticationServices
 import CryptoKit
-import FirebaseAppCheck
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseFunctions
@@ -127,57 +126,15 @@ final class AppModel: NSObject, ObservableObject {
     @Published var errorMessage: String?
 
     private let sessionId = "general"
-    // Resolved from Info.plist's `IronBoiCallableBaseURL` key, which is set
-    // per build configuration in project.yml:
-    //   Debug   → ironboi-staging cloudfunctions
-    //   Release → ironboi-prod cloudfunctions
-    // If the Info.plist value is missing or malformed (corrupted build,
-    // unit test target), we log and fall back to staging so the app keeps
-    // working instead of crashing on launch. The fallback is a literal
-    // checked at build time, so the trailing `!` is safe.
-    private let callableBaseURL: URL = AppModel.resolveCallableBaseURL()
 
-    private static func resolveCallableBaseURL() -> URL {
-        if let raw = Bundle.main.object(forInfoDictionaryKey: "IronBoiCallableBaseURL") as? String {
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty, let url = URL(string: trimmed) {
-                return url
-            }
-        }
-        // Always fall back to staging if the Info.plist lookup fails.
-        //
-        // Xcode's auto-generated Info.plist (GENERATE_INFOPLIST_FILE: YES)
-        // only propagates INFOPLIST_KEY_* settings whose names match
-        // Apple-defined keys. Our custom IronBoiCallableBaseURL doesn't
-        // qualify, so the lookup returns nil and we end up here on every
-        // build. Until we move to a real Info.plist or .xcconfig for
-        // custom keys, the staging fallback keeps the app alive.
-        //
-        // SECURITY NOTE: Before shipping to the PUBLIC App Store (not
-        // TestFlight), wire up a real prod URL via a hand-written
-        // Info.plist or xcconfig per build configuration. Otherwise
-        // public users will route to staging.
-        NSLog("[IronBoi] Info.plist IronBoiCallableBaseURL is missing or invalid; using staging fallback.")
-        return URL(string: "https://us-central1-ironboi-staging.cloudfunctions.net")!
-    }
-
-    // MARK: - Backend transport switch
+    // MARK: - Backend transport
     //
-    // `true` routes every backend call through the Firebase SDK callables
-    // (onCall twins in functions/src/index.ts). The SDK attaches the Auth
-    // ID token AND the App Check token automatically, so App Check
-    // enforcement (IRONBOI_ENFORCE_APP_CHECK) can eventually protect real
-    // traffic. `false` restores the legacy bearer-token *Http path via
-    // callFunction(_:idToken:data:) — flip this ONE line to roll back.
-    // The *Http endpoints stay deployed until a retirement PR after the
-    // callable migration has soaked.
-    // Transport switch for the callable migration. DEFAULT FALSE until the
-    // 2026-07-20: the invoker-IAM drift is fixed and verified live — all
-    // five drifted callable services (createCoachSession, deleteAccount,
-    // regenerateWorkoutPlan, confirmMemoryFact, ingestHealthSamples) got
-    // their allUsers run.invoker binding restored, and the staging E2E's
-    // deleteAccount callable check passes.
-    private let useCallableFunctions = true
+    // Every backend call is a Firebase SDK callable (onCall in
+    // functions/src/index.ts). The SDK attaches the Auth ID token AND the
+    // App Check token automatically. The bearer-token *Http transport that
+    // predated the callable migration was retired on 2026-10-07 along with
+    // its server twins; there is no rollback switch because there is
+    // nothing to roll back to.
     // Same region + construction as deleteAccount always used.
     private lazy var callableFunctions = Functions.functions(region: "us-central1")
 
@@ -373,7 +330,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isOnboardingBusy = false }
 
         do {
-            try await callBackend(httpName: "resetMyDataHttp", callableName: "resetMyData", data: [:])
+            try await callCallable("resetMyData", data: [:])
             onboardingMessages = []
             messages = []
             onboardingStatus = .notStarted
@@ -417,7 +374,7 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let now = ISO8601DateFormatter().string(from: Date())
-            try await callBackend(httpName: "sendCoachMessageHttp", callableName: "sendCoachMessage", data: [
+            try await callCallable("sendCoachMessage", data: [
                 "sessionId": sessionId,
                 "messageId": "ios_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
@@ -479,7 +436,7 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let now = Self.isoString(from: Date())
-            try await callBackend(httpName: "sendOnboardingAnswerHttp", callableName: "sendOnboardingAnswer", data: [
+            try await callCallable("sendOnboardingAnswer", data: [
                 "messageId": "ios_onboarding_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
                 "timestamp": now,
@@ -498,7 +455,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isOnboardingBusy = false }
 
         do {
-            try await callBackend(httpName: "acceptProgramProposalHttp", callableName: "acceptProgramProposal", data: [
+            try await callCallable("acceptProgramProposal", data: [
                 "proposalId": pendingProgramProposal.proposalId,
                 "decidedAt": Self.isoString(from: Date()),
             ])
@@ -590,7 +547,7 @@ final class AppModel: NSObject, ObservableObject {
             if let scope {
                 data["scope"] = scope
             }
-            try await callBackend(httpName: "acceptPlanAdjustmentProposalHttp", callableName: "acceptPlanAdjustmentProposal", data: data)
+            try await callCallable("acceptPlanAdjustmentProposal", data: data)
             try await refreshCurrentWorkoutPlan()
             planChangesAccepted += 1
         } catch {
@@ -667,10 +624,7 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let now = Self.isoString(from: Date())
-            let response: StartWorkoutResponse = try await callBackend(
-                httpName: "startWorkoutSessionHttp",
-                callableName: "startWorkoutSessionCallable",
-                data: [
+            let response: StartWorkoutResponse = try await callCallable("startWorkoutSessionCallable", data: [
                     "dayKey": dayKey,
                     "startedAt": now,
                     // Local calendar date — the backend uses it to resolve a
@@ -972,10 +926,7 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let completedAt = Self.isoString(from: Date())
-            let response: FinishWorkoutResponse = try await callBackend(
-                httpName: "finishWorkoutSessionHttp",
-                callableName: "finishWorkoutSessionCallable",
-                data: [
+            let response: FinishWorkoutResponse = try await callCallable("finishWorkoutSessionCallable", data: [
                     "sessionId": activeWorkout.sessionId,
                     "completedAt": completedAt,
                     "exercises": try Self.jsonObject(from: performed),
@@ -1029,10 +980,7 @@ final class AppModel: NSObject, ObservableObject {
             if let sessionId { data["sessionId"] = sessionId }
             if let availableEquipment { data["availableEquipment"] = availableEquipment }
 
-            let response: SwapOptionsResponse = try await callBackend(
-                httpName: "getExerciseSwapOptionsHttp",
-                callableName: "getExerciseSwapOptionsCallable",
-                data: data
+            let response: SwapOptionsResponse = try await callCallable("getExerciseSwapOptionsCallable", data: data
             )
             return .loaded(response.options)
         } catch {
@@ -1087,10 +1035,7 @@ final class AppModel: NSObject, ObservableObject {
                 data["exercises"] = try Self.jsonObject(from: exercises)
             }
 
-            let response: SwapExerciseResponse = try await callBackend(
-                httpName: "swapExerciseHttp",
-                callableName: "swapExerciseCallable",
-                data: data
+            let response: SwapExerciseResponse = try await callCallable("swapExerciseCallable", data: data
             )
 
             if let updated = response.activeWorkout {
@@ -1115,10 +1060,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isWorkoutBusy = false }
 
         do {
-            try await callBackend(
-                httpName: "applyExerciseBaselinesHttp",
-                callableName: "applyExerciseBaselinesCallable",
-                data: [
+            try await callCallable("applyExerciseBaselinesCallable", data: [
                     "sessionId": sessionId,
                     "clientDate": Self.currentDateISO(),
                     "baselines": suggestions.map { suggestion in
@@ -1155,39 +1097,14 @@ final class AppModel: NSObject, ObservableObject {
         return raw
     }
 
-    private func requireFreshFirebaseAuthToken() async throws -> String {
-        guard let currentUser = Auth.auth().currentUser else {
-            throw CoachAuthError.missingFirebaseUser
-        }
-
-        // Non-forcing: the SDK returns the cached token and only round-trips to
-        // Firebase when it's within ~5 min of expiry. Forcing a refresh on every
-        // user action added latency and a failure point to each interaction.
-        let idToken = try await currentUser.getIDToken()
-        user = currentUser
-        return idToken
-    }
-
-    /// Single entry point for every backend call. Routes to the Firebase
-    /// SDK callable (`callableName`) or the legacy bearer-token *Http
-    /// endpoint (`httpName`) depending on `useCallableFunctions`. Both
-    /// transports return the same `{ok: ..., ...}` payload shape, so call
-    /// sites decode the same Decodable models either way.
-    private func callBackend(httpName: String, callableName: String, data: [String: Any]) async throws {
-        let _: EmptyFunctionResponse = try await callBackend(httpName: httpName, callableName: callableName, data: data)
-    }
-
-    private func callBackend<T: Decodable>(httpName: String, callableName: String, data: [String: Any]) async throws -> T {
-        if useCallableFunctions {
-            return try await callCallable(callableName, data: data)
-        }
-        let idToken = try await requireFreshFirebaseAuthToken()
-        return try await callFunction(httpName, idToken: idToken, data: data)
+    /// Single entry point for every backend call. The Firebase SDK callable
+    /// returns `{ok: ..., ...}` payloads that the Decodable models decode.
+    private func callCallable(_ name: String, data: [String: Any]) async throws {
+        let _: EmptyFunctionResponse = try await callCallable(name, data: data)
     }
 
     private func callCallable<T: Decodable>(_ name: String, data: [String: Any]) async throws -> T {
-        // Fail fast with the same friendly message the HTTP path produced
-        // via requireFreshFirebaseAuthToken, instead of an opaque
+        // Fail fast with a friendly message instead of an opaque
         // UNAUTHENTICATED from the backend. Also keeps `user` fresh.
         guard let currentUser = Auth.auth().currentUser else {
             throw CoachAuthError.missingFirebaseUser
@@ -1206,42 +1123,6 @@ final class AppModel: NSObject, ObservableObject {
         return try JSONDecoder().decode(T.self, from: json)
     }
 
-    private func callFunction(_ name: String, idToken: String, data: [String: Any]) async throws {
-        let _: EmptyFunctionResponse = try await callFunction(name, idToken: idToken, data: data)
-    }
-
-    private func callFunction<T: Decodable>(_ name: String, idToken: String, data: [String: Any]) async throws -> T {
-        var request = URLRequest(url: callableBaseURL.appendingPathComponent(name))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-
-        // This custom wrapper bypasses the Firebase SDK, so App Check tokens
-        // don't attach automatically. Fetch one and send it in the header the
-        // backend's verifyToken path expects (X-Firebase-AppCheck). Failure to
-        // mint a token is non-fatal until the server enforces App Check on
-        // the *Http endpoints — log and continue rather than block the user.
-        do {
-            let appCheckToken = try await AppCheck.appCheck().token(forcingRefresh: false)
-            request.setValue(appCheckToken.token, forHTTPHeaderField: "X-Firebase-AppCheck")
-        } catch {
-            NSLog("[IronBoi] App Check token unavailable for \(name): \(error.localizedDescription)")
-        }
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["data": data])
-
-        let (responseData, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw CoachAuthError.invalidFunctionResponse
-        }
-
-        guard 200..<300 ~= httpResponse.statusCode else {
-            throw CoachAuthError.functionFailed(Self.makeFunctionErrorMessage(from: responseData, statusCode: httpResponse.statusCode))
-        }
-
-        return try JSONDecoder().decode(T.self, from: responseData)
-    }
-
     private func refreshCurrentWorkoutPlan() async throws {
         guard let userId = user?.uid else { return }
         let snapshot = try await db
@@ -1257,24 +1138,6 @@ final class AppModel: NSObject, ObservableObject {
         }
 
         currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: data)
-    }
-
-    private static func makeFunctionErrorMessage(from data: Data, statusCode: Int) -> String {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return "Coach request failed with HTTP \(statusCode)."
-        }
-
-        if let error = json["error"] as? [String: Any] {
-            let status = error["status"] as? String
-            let message = error["message"] as? String
-            return [status, message].compactMap { $0 }.joined(separator: ": ")
-        }
-
-        if let error = json["error"] as? String {
-            return error
-        }
-
-        return "Coach request failed with HTTP \(statusCode)."
     }
 
     private func listenForCoachMessages(userId: String?) {
@@ -1351,12 +1214,12 @@ final class AppModel: NSObject, ObservableObject {
         defer { isSavingProfile = false }
 
         do {
-            // The upsertProfile callable now shares the *Http handler
-            // (server-owned createdAt/updatedAt injection). The old "broken
-            // App Check token" failure mode is what registering debug
-            // tokens + AppAttestProvider fixes; useCallableFunctions=false
-            // restores the resilient auth-only *Http path if needed.
-            try await callBackend(httpName: "upsertProfileHttp", callableName: "upsertProfile", data: next.firestorePayload())
+            // createdAt/updatedAt are server-owned (injected by the
+            // handler); the client never sends them. A "broken App Check
+            // token" failure here means the debug token / App Attest
+            // registration is missing — there is no auth-only fallback
+            // transport any more.
+            try await callCallable("upsertProfile", data: next.firestorePayload())
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1373,7 +1236,7 @@ final class AppModel: NSObject, ObservableObject {
         defer { isWorkoutBusy = false }
 
         do {
-            try await callBackend(httpName: "regenerateWorkoutPlanHttp", callableName: "regenerateWorkoutPlan", data: [:])
+            try await callCallable("regenerateWorkoutPlan", data: [:])
             // The Firestore listener picks up the new plan and republishes
             // currentWorkoutPlan automatically — no local mutation needed.
         } catch {

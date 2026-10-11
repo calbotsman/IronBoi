@@ -145,14 +145,22 @@ async function httpJson(url, { method = "GET", headers = {}, body } = {}) {
   return { status: response.status, json };
 }
 
-/** POST {data: payload} to an *Http onRequest function with Bearer auth. */
-async function callFunctionHttp(name, payload) {
+/**
+ * Call a Firebase callable (onCall) over its REST protocol: POST {data}
+ * with Bearer auth. The function's return value comes back as {result};
+ * a thrown HttpsError comes back as {error:{status,message}}. Returns the
+ * unwrapped result as `json` (so call sites read `.ok` as before) and the
+ * error message as `error`. The *Http bearer-token twins were retired on
+ * 2026-10-07; this is now the only transport, same as the iOS app.
+ */
+async function callCallable(name, payload) {
   const { status, json } = await httpJson(`${FUNCTIONS_BASE}/${name}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${state.idToken}` },
     body: { data: payload },
   });
-  return { status, json };
+  const error = json?.error ? (json.error.message ?? json.error.status ?? String(json.error)) : undefined;
+  return { status, json: json?.result ?? null, error };
 }
 
 /** Firestore REST: get a document. Returns {status, doc} where doc is decoded or null. */
@@ -243,7 +251,7 @@ async function signUpAnonymous() {
 }
 
 /**
- * Send one coach chat message via sendCoachMessageHttp (iOS AppModel shape)
+ * Send one coach chat message via the sendCoachMessage callable (iOS AppModel shape)
  * and poll for the `<messageId>_coach` reply doc to reach a terminal status.
  * Returns { messageId, reply, elapsedMs } — reply is null on poll timeout.
  */
@@ -253,7 +261,7 @@ async function sendCoachTurn(label, content) {
   const messageId = `ios_${Date.now()}`;
   const now = new Date().toISOString();
 
-  const { status, json } = await callFunctionHttp("sendCoachMessageHttp", {
+  const { status, json } = await callCallable("sendCoachMessage", {
     sessionId: SESSION_ID,
     messageId,
     content,
@@ -367,9 +375,9 @@ async function scenarioAuthAndBootstrap() {
     `fresh user has no workoutPlans/current (HTTP ${before.status})`,
   );
 
-  // regenerateWorkoutPlanHttp requires a profile — create a minimal valid one
+  // regenerateWorkoutPlan requires a profile — create a minimal valid one
   // (UserHealthProfile contract; createdAt/updatedAt/userId are server-injected).
-  const profileRes = await callFunctionHttp("upsertProfileHttp", {
+  const profileRes = await callCallable("upsertProfile", {
     ageYears: 30,
     sexOrGender: "prefer_not_to_say",
     goals: ["general_fitness"],
@@ -378,14 +386,14 @@ async function scenarioAuthAndBootstrap() {
     preferences: {},
   });
   if (!check("HARD", profileRes.status === 200 && profileRes.json?.ok === true,
-    `upsertProfileHttp accepted minimal profile (HTTP ${profileRes.status}${profileRes.json?.error ? `, ${profileRes.json.error}` : ""})`)) {
+    `upsertProfile accepted minimal profile (HTTP ${profileRes.status}${profileRes.error ? `, ${profileRes.error}` : ""})`)) {
     endScenario();
     return false;
   }
 
-  const regenRes = await callFunctionHttp("regenerateWorkoutPlanHttp", {});
+  const regenRes = await callCallable("regenerateWorkoutPlan", {});
   check("HARD", regenRes.status === 200 && regenRes.json?.ok === true,
-    `regenerateWorkoutPlanHttp ok (HTTP ${regenRes.status}${regenRes.json?.error ? `, ${regenRes.json.error}` : ""})`);
+    `regenerateWorkoutPlan ok (HTTP ${regenRes.status}${regenRes.error ? `, ${regenRes.error}` : ""})`);
 
   const plan = await pollUntil(async () => {
     const { doc } = await fsGetDoc(`users/${state.uid}/workoutPlans/current`);
@@ -403,11 +411,11 @@ async function scenarioPlainChat() {
   beginScenario("B. Plain chat turn");
   const { reply, sendStatus } = await sendCoachTurnWithRetry("plain-chat", "what should I focus on this week?");
   if (sendStatus !== 200) {
-    check("HARD", false, `sendCoachMessageHttp returned HTTP ${sendStatus}`);
+    check("HARD", false, `sendCoachMessage returned HTTP ${sendStatus}`);
     endScenario();
     return false;
   }
-  check("HARD", true, "sendCoachMessageHttp returned 200");
+  check("HARD", true, "sendCoachMessage returned 200");
   const terminalOk = reply && ["complete", "blocked"].includes(reply.status);
   check("HARD", Boolean(terminalOk),
     reply
@@ -736,17 +744,17 @@ async function scenarioCleanup() {
 
   let dataWiped = deleteOk;
   if (!deleteOk) {
-    // Known staging issue (2026-07-19): some onCall services (deleteAccount,
-    // regenerateWorkoutPlan, createCoachSession) 401 at the platform layer —
-    // missing public invoker. Fall back to resetMyDataHttp so the throwaway
-    // user's DATA never leaks, even while the callable is broken. The bare
-    // anonymous Auth record (no email, no data) is inert residue.
-    const reset = await callFunctionHttp("resetMyDataHttp", {});
+    // Second chance so the throwaway user's DATA never leaks even if
+    // deleteAccount itself is broken (2026-07-19: invoker-IAM drift made it
+    // 401 at the platform layer). resetMyData wipes users/{uid}/** and
+    // leaves the bare anonymous Auth record (no email, no data) as inert
+    // residue.
+    const reset = await callCallable("resetMyData", {});
     dataWiped = reset.status === 200 && reset.json?.ok === true;
     check("SOFT", dataWiped,
       dataWiped
-        ? "fallback resetMyDataHttp wiped the test user's data (anonymous Auth record remains)"
-        : `fallback resetMyDataHttp ALSO failed (HTTP ${reset.status})`);
+        ? "fallback resetMyData wiped the test user's data (anonymous Auth record remains)"
+        : `fallback resetMyData ALSO failed (HTTP ${reset.status}${reset.error ? `, ${reset.error}` : ""})`);
   }
 
   if (!dataWiped) {

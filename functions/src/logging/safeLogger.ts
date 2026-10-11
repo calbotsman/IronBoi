@@ -50,6 +50,12 @@ export const allowedLogKeys = new Set([
   "hasPainTriage",
   "rampWeekCount",
   "rampShape",
+  "painTriageRedFlagsAsked",
+  "painTriageUserReportsSevere",
+  "severeMarkersHit",
+  "triageCleared",
+  // synthesizeSpeechCallable daily cap (usage/cap.ts) — counts only.
+  "ttsChars",
 ]);
 
 const suspiciousKeyPattern =

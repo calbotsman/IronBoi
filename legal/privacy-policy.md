@@ -1,7 +1,7 @@
 # MYO Privacy Policy
 
 **Effective date:** 2026-06-02
-**Last updated:** 2026-10-05
+**Last updated:** 2026-10-07
 
 This is the privacy policy for **MYO** ("MYO," "we," "us"), an AI fitness coaching app for iOS published under the App Store name "IronBoi" by The Combination Rule (bundle identifier `com.thecombinationrule.ironboi`).
 
@@ -28,9 +28,10 @@ The rest of this document spells out the details.
 | **Email address and name** | Apple Sign In (only if you share them) | Identify your account so the coach is talking to *you* and only you |
 | **User ID (Firebase Auth UID)** | Apple Sign In | Tie all your data together server-side |
 | **Workouts and daily checks** | You enter them in the app | Show your history, let the coach see what you've actually done |
-| **Coach conversation history** | You chat with the coach | Let the coach maintain context across sessions |
+| **Coach conversation history** | You chat with the coach | Let the coach maintain context across sessions. Each message also records whether you spoke or typed it, and any style preference you set in conversation ("be brief", "be quiet", "calm", "hype me up"), so the coach answers the way you asked. |
 | **Memory facts** (e.g., "prefers morning sessions") | Either you tell the coach, or the coach infers them from a chat | Personalize advice. When you tell the coach something worth remembering (an injury, your schedule, equipment you have), it saves it and uses it in later replies. You can see and remove every saved fact in the app under **You → What Coach remembers**, or tell the coach "forget that". Facts the coach infers on its own, rather than from something you said, are marked "proposed" and aren't used until you keep them; unreviewed ones lapse after 14 days. |
-| **Voice audio** | You hold the mic button to dictate to the coach | Convert speech to text using Apple's on-device speech recognition. **The audio itself is not sent to our servers** — only the transcribed text. |
+| **Voice audio** | You talk to the coach: either a voice conversation (the microphone stays open from when you start it until you end it) or dictating a single message | Convert speech to text using Apple's speech recognition — on your iPhone when it supports on-device recognition, otherwise on Apple's servers under Apple's privacy policy. **The audio itself is never sent to our servers** — only the transcribed text. We do not keep audio. |
+| **Coach's spoken replies** | The coach reads its replies aloud in a voice conversation | The **text of each spoken reply** (the coach's words, which can include what you asked about) is sent to Google Cloud Text-to-Speech to produce the audio you hear, under Google Cloud's data-processing terms (https://cloud.google.com/terms/data-processing-addendum), which do not allow Google to use it to train models. |
 | **Usage counters** | App activity (number of messages, token counts per day) | Enforce per-user daily caps so one account can't run up an enormous bill or be abused. |
 | **Audit log** | Server-side, every consent change, memory write, health-ingest, and spend-cap hit | Internal records of what changed and when. The actual content of what changed is never logged — only a one-way hash. |
 
@@ -39,13 +40,16 @@ We do NOT currently collect:
 - **Location** — we don't ask for it and don't use it.
 - **Contacts, photos, or anything else outside our own app's data**.
 
+Two things stay on your phone and never reach us: a workout you have started but not finished is cached on the device until you finish or discard it, and nothing else is stored locally beyond what iOS keeps for the app. Exercise "watch" links open YouTube in your browser, where Google's privacy policy applies; we don't send YouTube anything about you.
+
 ---
 
 ## 3. How we use your data
 
 - **To run the coaching feature.** Every chat turn sends what you wrote plus your profile, recent workouts, and confirmed memory facts to a third-party large language model so it can produce a reply. Today that request goes through OpenRouter, which forwards it to Google's Gemini model. Neither is permitted to use your content to train their models.
+- **To speak replies aloud.** In a voice conversation, the text of each coach reply is sent to Google Cloud Text-to-Speech, which returns the audio. If the voice service is unavailable or you reach the daily voice limit, your iPhone's built-in voice reads the reply instead and nothing leaves the device.
 - **To save your progress.** Workouts, daily checks, and your custom plan are stored so you can see them across devices and sessions.
-- **To enforce safety limits.** A per-user daily message and token cap prevents abuse. Hitting the cap is recorded in your audit log.
+- **To enforce safety limits.** Per-user daily caps on messages, model tokens, and spoken-reply characters prevent abuse. Hitting a cap is recorded in your audit log.
 - **To respond if something goes wrong.** Errors are logged with your account ID so we can debug; no chat content or personal data appears in error logs.
 
 We do **not** use your data:
@@ -136,9 +140,9 @@ MYO is a "vendor of personal health records" under the FTC's Health Breach Notif
 
 We share data only with the service providers that operate our backend:
 
-- **Google LLC** (Firebase / Google Cloud) — hosts our database, authentication, and serverless functions. Google's privacy policy: https://policies.google.com/privacy
+- **Google LLC** (Firebase / Google Cloud) — hosts our database, authentication, and serverless functions, and converts the coach's spoken replies to audio (Cloud Text-to-Speech). Google's privacy policy: https://policies.google.com/privacy
 - **OpenRouter, Inc.** — routes each coach request to the language model that writes the reply. It receives the content of that request (your message plus the context described in section 3). OpenRouter's policy: https://openrouter.ai/privacy
-- **Apple Inc.** — when you Sign In with Apple, Apple gives us a user identifier and (if you share) your name and a relay email. Apple's policy: https://www.apple.com/legal/privacy/
+- **Apple Inc.** — when you Sign In with Apple, Apple gives us a user identifier and (if you share) your name and a relay email. When your iPhone cannot recognize speech on-device, Apple processes your voice audio for speech recognition; that audio goes from your phone to Apple, never through us. Apple's policy: https://www.apple.com/legal/privacy/
 
 We have no other third-party data processors. Google LLC also serves the Gemini model that OpenRouter forwards requests to. We do not share data with advertisers, data brokers, or affiliated entities.
 

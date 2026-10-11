@@ -9,10 +9,22 @@ import { z } from "zod";
  */
 export const SynthesizeSpeechRequest = z.object({
   text: z.string().min(1).max(600),
-  voice: z.string().regex(/^[A-Za-z]+$/).max(32).optional(),
 });
 
 export const DEFAULT_COACH_VOICE = "Sulafat";
+const VOICE_NAME = /^[A-Za-z]+$/;
+
+/**
+ * The coach has ONE voice, chosen by the operator (IRONBOI_COACH_VOICE, a
+ * Chirp 3 HD voice name), never by the client. A client-selectable voice
+ * was an unbounded knob on a billed API for no product reason.
+ */
+export function coachVoice(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.IRONBOI_COACH_VOICE?.trim();
+  return configured && VOICE_NAME.test(configured) && configured.length <= 32
+    ? configured
+    : DEFAULT_COACH_VOICE;
+}
 const TTS_URL = "https://texttospeech.googleapis.com/v1/text:synthesize";
 const TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
@@ -29,12 +41,27 @@ async function accessToken(fetchImpl: typeof fetch): Promise<string> {
   return body.access_token;
 }
 
+/**
+ * The per-user cap bounds one account; it does not bound someone minting
+ * accounts. Real users sign in with Apple, so anonymous uids (which the
+ * public web API key can create freely) only get a voice where the
+ * operator has said so — staging, where the simulator's DEBUG-only dev
+ * sign-in is anonymous. Anywhere else they fall back to the on-device voice.
+ */
+export function ttsAllowedForSignInProvider(
+  signInProvider: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (signInProvider !== "anonymous") return true;
+  return env.IRONBOI_TTS_ALLOW_ANONYMOUS === "true";
+}
+
 /** Returns base64 WAV (LINEAR16, 24 kHz mono). */
 export async function synthesizeSpeech(
   request: z.infer<typeof SynthesizeSpeechRequest>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ audio: string; mimeType: "audio/wav" }> {
-  const voice = request.voice ?? DEFAULT_COACH_VOICE;
+  const voice = coachVoice();
   const res = await fetchImpl(TTS_URL, {
     method: "POST",
     headers: {

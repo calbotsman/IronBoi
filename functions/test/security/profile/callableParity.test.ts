@@ -12,9 +12,9 @@ import { profilePath, workoutPlanPath } from "../../../src/paths.js";
 import { baseProfile } from "../fixtures/users.js";
 
 // Callable-migration parity suite for the profile-shaped shared handlers.
-// Both the onCall callables (upsertProfile, regenerateWorkoutPlan) and
-// their *Http twins route through these handlers, so this pins the
-// behavior the iOS app depends on regardless of transport — in
+// The onCall callables (upsertProfile, regenerateWorkoutPlan) route through
+// these handlers (their *Http twins did too, until they were retired on
+// 2026-10-07), so this pins the behavior the iOS app depends on — in
 // particular that createdAt/updatedAt are SERVER-owned. The
 // pre-migration upsertProfile onCall required the client to send them,
 // which rejected every real iOS payload (drift found by the parity
