@@ -13,6 +13,10 @@ const cleanWriteUps = [
   "Back pain. No red flags reported (sharp, numbness, radiating).",
   "Dull ache only. Negative for sharp pain, numbness, tingling and radiation.",
   "Lower back, dull, 2/10. Sharp/shooting pain, numbness/tingling, radiating symptoms all denied.",
+  // One "no" over a list — what finally showed up in the logs as
+  // severeMarker "\\bnumb(ness)?\\b" on 2026-10-11.
+  "Dull ache in lower back since yesterday. No sharp pain, numbness or radiating symptoms.",
+  "Lower back dull ache, no sharp pain, numbness, or tingling, not radiating.",
 ];
 
 // Severe content a model must not be able to launder with a denial clause.
@@ -20,6 +24,7 @@ const stillSevere = [
   "Denies numbness but reports sharp, shooting pain radiating down the left leg.",
   "Sharp shooting pain radiating down the leg; denies numbness.",
   "Denies numbness, except when sitting, when sharp pain shoots down the leg.",
+  "No numbness or tingling, but sharp pain radiating down the left leg.",
 ];
 
 describe("severe screen on model-authored triage text", () => {

@@ -2079,6 +2079,11 @@ export function stripClinicalDenials(text: string): string {
       // "denies sharp pain, numbness, or radiating pain" / "without sharp
       // pain" / "negative for …" / "ruled out …" — up to a contrast word.
       .replace(new RegExp(String.raw`\b(?:denies|denied|denying|deny|without|negative for|ruled out|ruling out|no history of|free of|absent of)\b[^.;!?]*?` + stop, "gi"), " ")
+      // One "no"/"not" covering a whole list — "no sharp pain, numbness or
+      // radiating symptoms" — negates everything up to the sentence break or
+      // a contrast word. (The user's raw text keeps the stricter mask, where
+      // a single "no" only reaches the next comma.)
+      .replace(new RegExp(String.raw`\b(?:no|not)\s+[^.;!?]*?` + stop, "gi"), " ")
       // "no red flags reported (sharp, numbness, radiating)" / "no red flags: …"
       .replace(new RegExp(String.raw`\b(?:no|without)\s+red\s+flags?\b[^.;!?]*?` + stop, "gi"), " ")
       // "sharp pain: no" / "numbness: none" — only when the answer ends
