@@ -8,13 +8,43 @@ final class VoiceInputEngine: ObservableObject {
     @Published private(set) var transcript = ""
     @Published var errorMessage: String?
 
+    /// Live mic loudness and syllable onsets, for the orb.
+    let meter = VoiceMeter()
+    /// Called once with the final text when the speaker pauses — the user
+    /// talks, stops, and the message sends without a tap.
+    var onPause: ((String) -> Void)?
+    private var pauseTask: Task<Void, Never>?
+    /// While true, a pause doesn't end the utterance — set during a rep
+    /// count, where the gaps between reps are long and expected.
+    var holdOpen = false {
+        didSet { if holdOpen { pauseTask?.cancel() } else if isListening, !transcript.isEmpty { schedulePauseCheck() } }
+    }
+    private static let pauseSeconds: UInt64 = 1_400_000_000
+
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let audioEngine = AVAudioEngine()
+    /// Shared with Coach's voice so the mic can stay open while Coach talks.
+    private var audioEngine: AVAudioEngine { AudioHub.shared.engine }
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var hasInstalledTap = false
+    /// Bumped on every stop; callbacks and starts carry the value they began
+    /// with and drop out if it's moved on.
+    private var session = 0
+    /// Starting the mic failed (no input, a call, a route change).
+    var onFailure: (() -> Void)?
+
+    /// Starts listening if it isn't already (safe to call while Coach talks).
+    func listen() {
+        guard !isListening else { return }
+        toggle()
+    }
 
     func toggle() {
+        #if DEBUG
+        // MYO_NO_MIC=1: never open the mic — for watching Coach in the
+        // simulator, whose mic hears the Mac's speakers.
+        if ProcessInfo.processInfo.environment["MYO_NO_MIC"] == "1", !isListening, Self.fakeUtterances.isEmpty { return }
+        #endif
         if isListening {
             stop()
             return
@@ -22,19 +52,25 @@ final class VoiceInputEngine: ObservableObject {
 
         Task {
             do {
+                // A fresh listen: an earlier failure no longer applies.
+                errorMessage = nil
                 try await start()
             } catch {
                 errorMessage = error.localizedDescription
+                AudioHub.log("listen failed: \(error.localizedDescription)")
                 stop()
+                onFailure?()
             }
         }
     }
 
     func stop() {
-        if audioEngine.isRunning {
-            audioEngine.stop()
-        }
-
+        // Anything still in flight from this listen is now stale.
+        session += 1
+        pauseTask?.cancel()
+        pauseTask = nil
+        meter.reset()
+        // The engine stays up — Coach may be mid-sentence on it.
         if hasInstalledTap {
             audioEngine.inputNode.removeTap(onBus: 0)
             hasInstalledTap = false
@@ -47,30 +83,50 @@ final class VoiceInputEngine: ObservableObject {
     }
 
     private func start() async throws {
+        #if DEBUG
+        if playFakeUtteranceIfAny() { return }
+        #endif
+        let before = session
         try await requestPermissions()
+        // Stopped (conversation ended) while we waited for permission: don't
+        // open the mic after all.
+        guard session == before else { return }
         stop()
+        let mine = session
 
-        let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
-        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
-
-        guard !audioSession.currentRoute.inputs.isEmpty else {
+        // Our tap is off (stop() above): the hub may retune echo
+        // cancellation for whatever's plugged in now.
+        try AudioHub.shared.start(reconfigure: true)
+        guard !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty else {
             throw VoiceInputError.microphoneUnavailable
         }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
+        // On the phone where it can: the mic can be open for a whole
+        // workout, so keep that audio off the network (and off a weak gym
+        // connection).
+        // (Not in the simulator: it claims support but has no model, and
+        // every request fails a few seconds in.)
+        #if !targetEnvironment(simulator)
+        if recognizer?.supportsOnDeviceRecognition == true {
+            request.requiresOnDeviceRecognition = true
+        }
+        #endif
+        request.contextualStrings = ["MYO", "Coach", "set done", "sets done", "reps"]
         self.request = request
         transcript = ""
 
         recognitionTask = recognizer?.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
-                guard let self else { return }
+                // A late callback from an earlier listen must not touch this one.
+                guard let self, self.session == mine else { return }
 
                 if let text = result?.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !text.isEmpty {
+                   !text.isEmpty, text != self.transcript {
                     self.transcript = text
+                    self.schedulePauseCheck()
                 }
 
                 if error != nil || result?.isFinal == true {
@@ -86,14 +142,58 @@ final class VoiceInputEngine: ObservableObject {
             throw VoiceInputError.microphoneUnavailable
         }
 
+        let meter = self.meter
+        let analyzer = MicAnalyzer()
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
             request?.append(buffer)
+            analyzer.process(buffer, into: meter)
         }
         hasInstalledTap = true
-
-        audioEngine.prepare()
-        try audioEngine.start()
         isListening = true
+    }
+
+    #if DEBUG
+    /// Simulator testing: the simulator's mic often hears nothing, so
+    /// `MYO_FAKE_SPEECH="1 2 3 | went up to 165"` plays each `|`-separated
+    /// utterance word by word through the same transcript/pause path real
+    /// speech takes, one utterance per listen.
+    private static var fakeUtterances: [String] = ProcessInfo.processInfo.environment["MYO_FAKE_SPEECH"]?
+        .components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } ?? []
+
+    private func playFakeUtteranceIfAny() -> Bool {
+        guard !Self.fakeUtterances.isEmpty else { return false }
+        let words = Self.fakeUtterances.removeFirst().split(separator: " ").map(String.init)
+        isListening = true
+        transcript = ""
+        Task { @MainActor in
+            // "~" is a 3-second silence, like the gap between reps.
+            var said: [String] = []
+            for word in words {
+                try? await Task.sleep(nanoseconds: word == "~" ? 3_000_000_000 : 450_000_000)
+                guard self.isListening else { return }
+                if word == "~" { continue }
+                said.append(word)
+                self.transcript = said.joined(separator: " ")
+                self.schedulePauseCheck()
+            }
+        }
+        return true
+    }
+    #endif
+
+    /// Waits for a quiet stretch after the last new words, then hands the
+    /// transcript to `onPause`. Every new partial result restarts the wait.
+    private func schedulePauseCheck() {
+        pauseTask?.cancel()
+        guard !holdOpen else { return }
+        pauseTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.pauseSeconds)
+            guard let self, !Task.isCancelled, self.isListening else { return }
+            let text = self.transcript
+            guard !text.isEmpty else { return }
+            self.stop()
+            self.onPause?(text)
+        }
     }
 
     private func requestPermissions() async throws {

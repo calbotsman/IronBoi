@@ -12,7 +12,7 @@ import {
 import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
-import { selectCoachModelProvider, type CoachToolExecutor } from "./modelProvider.js";
+import { ModelBillingError, selectCoachModelProvider, type CoachToolExecutor } from "./modelProvider.js";
 import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import {
   classifyUserMessage,
@@ -26,6 +26,7 @@ import {
   publishDraftProposals,
 } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
+import type { CoachTips, CoachTone } from "../contracts/coach-agent.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
@@ -39,6 +40,41 @@ export function isCoachToolLoopEnabled(): boolean {
   return process.env.IRONBOI_COACH_TOOL_LOOP_ENABLED === "true";
 }
 
+/** Appended to the system prompt when the user is talking out loud. */
+export const VOICE_MODE_RULES = [
+  "VOICE MODE — the user is talking to you out loud and your reply is read aloud by a voice.",
+  "- Reply in 1–3 short spoken sentences, about 40 words at most. Say the one thing that matters; offer more only if they ask.",
+  "- No lists, bullets, markdown, headings, or tables. Say numbers the way a coach would say them (\"three sets of eight at one fifty-five\").",
+  "- Sound like a calm personal trainer standing next to them, not a document.",
+  "- You have a body on their screen that can demonstrate push-ups and a plank. When showing would help, say it plainly (\"Let's do push-ups.\" / \"Watch this plank.\").",
+  "- Tools and safety rules are unchanged: still use the tools, still ask red-flag questions about pain.",
+].join("\n");
+
+/**
+ * Appended to the system prompt (text and voice) when the user has asked the
+ * coach to talk less or in a particular tone. Defaults ("full" tips, no tone)
+ * return null so the prompt is unchanged.
+ */
+export function coachStyleRules(
+  tips?: CoachTips | null,
+  tone?: CoachTone | null,
+): string | null {
+  const lines: string[] = [];
+  if (tips === "brief") {
+    lines.push("STYLE — the user asked for less talking: answer in one or two short sentences. No tips or form cues unless they ask.");
+  } else if (tips === "quiet") {
+    lines.push("STYLE — the user asked you to be quiet: reply in as few words as possible (under 15). No tips, no follow-up questions unless safety requires one.");
+  }
+  if (tone === "hype") {
+    lines.push("TONE — high energy and encouraging, like a hype-man trainer: short, punchy lines.");
+  } else if (tone === "calm") {
+    lines.push("TONE — calm, steady and low-key. No exclamation marks, no hype.");
+  }
+  if (lines.length === 0) return null;
+  lines.push("Safety rules still apply: always ask red-flag questions about pain and give safety guidance when needed, whatever the style.");
+  return lines.join("\n");
+}
+
 type OrchestrateCoachTurnArgs = {
   db: Firestore;
   coach: CoachConfig;
@@ -50,6 +86,12 @@ type OrchestrateCoachTurnArgs = {
   // Local calendar date (YYYY-MM-DD) the client stamped on the triggering
   // message, if any — used to key today-scope overrides to the user's day.
   clientDate?: string;
+  /** "live_voice"/"dictation": the reply will be spoken aloud. */
+  inputMode?: string;
+  /** How much the user wants the coach to talk; "full" = default. */
+  coachTips?: CoachTips;
+  /** The coach's tone; absent = default. */
+  coachTone?: CoachTone;
   geminiApiKey?: string;
   openRouterApiKey?: string;
 };
@@ -80,6 +122,9 @@ export async function orchestrateCoachTurn({
   turnId,
   userContent,
   clientDate,
+  inputMode,
+  coachTips,
+  coachTone,
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
@@ -193,12 +238,20 @@ export async function orchestrateCoachTurn({
       // way today-scope overrides are keyed — devices aren't in ET.
       today: clientDate ?? currentDateISO(),
     });
-    const { system, userMessage } = assembleCoachPrompt(
+    const assembled = assembleCoachPrompt(
       coach,
       contextBundle,
       userContent,
       { toolsEnabled: toolLoopEnabled },
     );
+    const spoken = inputMode === "live_voice" || inputMode === "dictation";
+    const styleRules = coachStyleRules(coachTips, coachTone);
+    const system = [
+      assembled.system,
+      spoken ? VOICE_MODE_RULES : null,
+      styleRules,
+    ].filter((part): part is string => Boolean(part)).join("\n\n");
+    const userMessage = assembled.userMessage;
     const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });
 
     if (!provider) {
@@ -370,10 +423,15 @@ export async function orchestrateCoachTurn({
     );
   } catch (error) {
     const aborted = isAbortError(error);
-    const errorCode = aborted ? "model_timeout" : "coach_orchestration_error";
+    const billing = error instanceof ModelBillingError;
+    const errorCode = aborted
+      ? "model_timeout"
+      : billing
+        ? "model_billing_error"
+        : "coach_orchestration_error";
 
     safeLogger.error("Coach turn error", {
-      event: aborted ? "coach_model_timeout" : "coach_turn_error",
+      event: aborted ? "coach_model_timeout" : billing ? "coach_model_billing_error" : "coach_turn_error",
       userId,
       sessionId,
       messageId,

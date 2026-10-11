@@ -7,52 +7,50 @@ struct WorkoutView: View {
     @State private var selectedDemoExercise: PlannedExercise?
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if !appModel.hasSession {
-                    signedOutView
-                } else if let workout = appModel.activeWorkout {
-                    ActiveWorkoutView(workout: workout)
-                } else {
-                    planView
-                }
+        Group {
+            if !appModel.hasSession {
+                signedOutView
+            } else if let workout = appModel.activeWorkout {
+                ActiveWorkoutView(workout: workout)
+            } else {
+                planView
             }
-            .navigationTitle("Train")
-            // The plan summary bakes in "today's" dailyOverride; an app
-            // resident across midnight would show yesterday's splice until
-            // the next server write. Re-derive from the cached doc whenever
-            // the app comes back to the foreground.
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active {
-                    appModel.recomputeCurrentWorkoutPlanForToday()
-                }
+        }
+        .navigationTitle("Plan")
+        // The plan summary bakes in "today's" dailyOverride; an app
+        // resident across midnight would show yesterday's splice until
+        // the next server write. Re-derive from the cached doc whenever
+        // the app comes back to the foreground.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                appModel.recomputeCurrentWorkoutPlanForToday()
             }
-            .alert("MYO", isPresented: Binding(
-                get: { appModel.errorMessage != nil },
-                set: { if !$0 { appModel.errorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) {
-                    appModel.errorMessage = nil
-                }
-            } message: {
-                Text(appModel.errorMessage ?? "")
+        }
+        .alert("MYO", isPresented: Binding(
+            get: { appModel.errorMessage != nil },
+            set: { if !$0 { appModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                appModel.errorMessage = nil
             }
-            .sheet(item: $selectedDemoExercise) { exercise in
-                PlannedExerciseDetailSheet(dayKey: "Demo", exercise: exercise)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-            // Rebaseline card. Lives at the root of the tab rather than
-            // inside ActiveWorkoutView because finishing tears that view
-            // down — a sheet attached to it would be dismissed with it.
-            .sheet(isPresented: Binding(
-                get: { !appModel.pendingBaselineSuggestions.isEmpty },
-                set: { if !$0 { appModel.dismissBaselineSuggestions() } }
-            )) {
-                BaselineUpdateSheet(suggestions: appModel.pendingBaselineSuggestions)
-                    .presentationDetents([.medium])
-                    .presentationDragIndicator(.visible)
-            }
+        } message: {
+            Text(appModel.errorMessage ?? "")
+        }
+        .sheet(item: $selectedDemoExercise) { exercise in
+            PlannedExerciseDetailSheet(dayKey: "Demo", exercise: exercise)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+        }
+        // Rebaseline card. Lives at the root of the tab rather than
+        // inside ActiveWorkoutView because finishing tears that view
+        // down — a sheet attached to it would be dismissed with it.
+        .sheet(isPresented: Binding(
+            get: { !appModel.pendingBaselineSuggestions.isEmpty },
+            set: { if !$0 { appModel.dismissBaselineSuggestions() } }
+        )) {
+            BaselineUpdateSheet(suggestions: appModel.pendingBaselineSuggestions)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
         }
     }
 

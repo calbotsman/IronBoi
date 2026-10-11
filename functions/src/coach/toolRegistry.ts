@@ -33,7 +33,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
   {
     name: "adapt_plan",
     description:
-      "Propose a change to the user's workout plan (skip, shorten, or otherwise adjust a day) in response to something they said. This creates a review card the user must approve in the app — it never mutates the plan directly. If they haven't told you whether the change should apply to just that day or carry forward through the rest of their plan, omit `scope` here and ask them in your reply; call this again with `scope` once they answer (nothing is created until scope is known).",
+      "Propose a change to the user's workout plan (skip, shorten, or otherwise adjust a day) in response to something they said. This creates a review card the user must approve in the app — it never mutates the plan directly. If they haven't told you whether the change should apply to just that day or carry forward through the rest of their plan, omit `scope` here and ask them in your reply; call this again with `scope` once they answer (nothing is created until scope is known). WHEN THEY ASK FOR A WORKOUT TODAY ('give me a workout for today', 'I want to train today', including on a rest day or after time off): that is a request for ONE session — send scope 'today' with dayKey = today and a dayPatch of real exercises for today. Do NOT answer it with rampWeeks: a ramp scales the existing plan and leaves a rest day empty, so the user still has nothing to do today. If they've been away, make today's session lighter (fewer sets, moderate loads) and offer a graded return for the coming weeks as a separate, optional follow-up.",
     parameters: {
       type: "object",
       properties: {

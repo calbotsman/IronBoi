@@ -1,25 +1,23 @@
 import SwiftUI
 
-/// The Record tab — "Your history: this is what we did together."
+/// History — "this is what we did together." Pushed from the profile.
 /// Milestone stamps for earned PRs, then the training log as folded paper
 /// cards. Reads live from appModel.workoutLogs.
 struct RecordView: View {
     @EnvironmentObject private var appModel: AppModel
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if logs.isEmpty, !appModel.hasSession {
-                    signedOut
-                } else if logs.isEmpty {
-                    emptyState
-                } else {
-                    content
-                }
+        Group {
+            if logs.isEmpty, !appModel.hasSession {
+                signedOut
+            } else if logs.isEmpty {
+                emptyState
+            } else {
+                content
             }
-            .background(PaperBackground())
-            .navigationTitle("Record")
         }
+        .background(PaperBackground())
+        .navigationTitle("History")
     }
 
     private var logs: [WorkoutLogSummary] {
@@ -106,7 +104,7 @@ struct RecordView: View {
         ContentUnavailableView {
             Label("Record", systemImage: "calendar.day.timeline.left")
         } description: {
-            Text("No sessions recorded yet. Start a workout in Train to begin building your record.")
+            Text("No sessions recorded yet. Start a workout from Plan to begin building your history.")
         }
     }
 

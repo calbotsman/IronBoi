@@ -108,6 +108,13 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      # The Coach orb is a Metal shader (Features/Coach/Orb/OneBody.metal).
+      # Xcode 26 ships the Metal compiler as a separate download; older Xcodes
+      # bundle it, so this is a no-op there. `xcrun --find metal` finds a stub
+      # either way — only running it tells you whether it works.
+      - name: Ensure Metal toolchain
+        run: xcrun metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
+
       - name: Build (Debug, iOS Simulator)
         run: >-
           xcodebuild

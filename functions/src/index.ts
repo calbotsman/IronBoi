@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { CollectionReference, DocumentReference } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
+import { SynthesizeSpeechRequest, synthesizeSpeech } from "./voice/speech.js";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
@@ -19,6 +20,8 @@ import { recomputeProgressSummaryIfStale } from "./progress/store.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
+  CoachTips,
+  CoachTone,
   ConsentRecord,
   DailyCheck,
   IngestHealthSamplesRequest,
@@ -45,6 +48,8 @@ import {
 } from "./paths.js";
 import {
   FinishWorkoutSessionRequest,
+  AbandonWorkoutSessionRequest,
+  abandonWorkoutSession,
   StartWorkoutSessionRequest,
   finishWorkoutSession,
   startWorkoutSession,
@@ -615,6 +620,24 @@ export const finishWorkoutSessionCallable = onCall(
     return { ok: true, ...result };
   },
 );
+
+// Coach's spoken voice — one sentence or two of a reply as WAV audio.
+export const synthesizeSpeechCallable = onCall(
+  { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    requireUserId(request.auth);
+    const parsed = SynthesizeSpeechRequest.parse(request.data ?? {});
+    return { ok: true, ...(await synthesizeSpeech(parsed)) };
+  },
+);
+
+// Throw away an unfinished session (started, never finished). No log written.
+export const abandonWorkoutSessionCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = AbandonWorkoutSessionRequest.parse(request.data ?? {});
+  const result = await abandonWorkoutSession(db, userId, parsed);
+  return { ok: true, ...result };
+});
 
 // --- Exercise swaps & weight rebaselining ------------------------------
 //
@@ -1340,6 +1363,9 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       turnId,
       userContent: data.content,
       clientDate: typeof data.clientDate === "string" ? data.clientDate : undefined,
+      inputMode: typeof data.inputMode === "string" ? data.inputMode : undefined,
+      coachTips: CoachTips.safeParse(data.coachTips).data,
+      coachTone: CoachTone.safeParse(data.coachTone).data,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
       openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });

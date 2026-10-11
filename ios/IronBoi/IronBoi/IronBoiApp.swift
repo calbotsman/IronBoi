@@ -47,33 +47,17 @@ struct AppRootView: View {
 
     var body: some View {
         Group {
-            if appModel.user != nil && appModel.onboardingStatus != .complete {
+            if appModel.user != nil && !appModel.profileLoaded {
+                // Signed in, profile still loading: plain paper, no guessing.
+                PaperBackground().ignoresSafeArea()
+            } else if appModel.user != nil && appModel.onboardingStatus != .complete {
                 OnboardingView()
             } else {
-                TabView(selection: $appModel.selectedTab) {
-                    CoachView()
-                        .tabItem {
-                            Label("Coach", systemImage: "message.fill")
-                        }
-                        .tag(AppModel.AppTab.coach)
-
-                    WorkoutView()
-                        .tabItem {
-                            Label("Train", systemImage: "checklist")
-                        }
-                        .tag(AppModel.AppTab.workout)
-
-                    RecordView()
-                        .tabItem {
-                            Label("Record", systemImage: "chart.bar.fill")
-                        }
-                        .tag(AppModel.AppTab.progress)
-
+                // One screen: the coach. Plan, History and You live behind
+                // the profile icon in its corner.
+                CoachView()
+                .sheet(isPresented: $appModel.showProfile) {
                     PreferencesView()
-                        .tabItem {
-                            Label("You", systemImage: "person.crop.circle")
-                        }
-                        .tag(AppModel.AppTab.you)
                 }
             }
         }

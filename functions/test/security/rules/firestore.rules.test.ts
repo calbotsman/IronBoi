@@ -148,6 +148,44 @@ describe("Firestore rules isolation", () => {
     );
   });
 
+  it("coachMessage_owner_create_with_coach_style", async () => {
+    const db = await authedDb(USER_A);
+    await assertSucceeds(
+      setDoc(
+        doc(db, `users/${USER_A}/coachSessions/s1/messages/m1`),
+        userMessage({ inputMode: "live_voice", coachTips: "quiet", coachTone: "calm" }),
+      ),
+    );
+    await assertSucceeds(
+      setDoc(
+        doc(db, `users/${USER_A}/coachSessions/s1/messages/m2`),
+        userMessage({ messageId: "m2", coachTips: "brief", coachTone: "hype" }),
+      ),
+    );
+  });
+
+  it("coachMessage_owner_invalid_coach_style_denied", async () => {
+    const db = await authedDb(USER_A);
+    await assertFails(
+      setDoc(
+        doc(db, `users/${USER_A}/coachSessions/s1/messages/m1`),
+        userMessage({ coachTips: "chatty" }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        doc(db, `users/${USER_A}/coachSessions/s1/messages/m1`),
+        userMessage({ coachTone: "angry" }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        doc(db, `users/${USER_A}/coachSessions/s1/messages/m1`),
+        userMessage({ coachTips: 3 }),
+      ),
+    );
+  });
+
   it("coachMessage_owner_create_coach_role_denied", async () => {
     const db = await authedDb(USER_A);
     await assertFails(

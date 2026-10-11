@@ -15,13 +15,14 @@ service cloud.firestore {
     }
 
     function validUserCoachMessage(messageId) {
-      return onlyKeys(["messageId", "role", "content", "timestamp", "toolCallIds", "status", "inputMode", "structuredAnswer", "turnId"])
+      return onlyKeys(["messageId", "role", "content", "timestamp", "toolCallIds", "status", "inputMode", "coachTips", "coachTone", "structuredAnswer", "turnId"])
         && request.resource.data.messageId == messageId
         && request.resource.data.role == "user"
         && request.resource.data.content is string
         && request.resource.data.timestamp is string
         && request.resource.data.toolCallIds is list
         && validInputMode()
+        && validCoachStyle()
         && (!("structuredAnswer" in request.resource.data) || request.resource.data.structuredAnswer is map)
         && (!("turnId" in request.resource.data) || request.resource.data.turnId is string)
         && request.resource.data.status == "queued";
@@ -33,6 +34,14 @@ service cloud.firestore {
         || request.resource.data.inputMode == "tap"
         || request.resource.data.inputMode == "dictation"
         || request.resource.data.inputMode == "live_voice";
+    }
+
+    // How the user wants MYO to talk: optional, closed value sets.
+    function validCoachStyle() {
+      return (!("coachTips" in request.resource.data)
+          || request.resource.data.coachTips in ["full", "brief", "quiet"])
+        && (!("coachTone" in request.resource.data)
+          || request.resource.data.coachTone in ["hype", "calm"]);
     }
 
     function ownerDecisionOnly() {

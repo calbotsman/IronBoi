@@ -1,7 +1,7 @@
 # MYO Privacy Policy
 
 **Effective date:** 2026-06-02
-**Last updated:** 2026-06-02
+**Last updated:** 2026-10-05
 
 This is the privacy policy for **MYO** ("MYO," "we," "us"), an AI fitness coaching app for iOS published under the App Store name "IronBoi" by The Combination Rule (bundle identifier `com.thecombinationrule.ironboi`).
 
@@ -29,7 +29,7 @@ The rest of this document spells out the details.
 | **User ID (Firebase Auth UID)** | Apple Sign In | Tie all your data together server-side |
 | **Workouts and daily checks** | You enter them in the app | Show your history, let the coach see what you've actually done |
 | **Coach conversation history** | You chat with the coach | Let the coach maintain context across sessions |
-| **Memory facts** (e.g., "prefers morning sessions") | Either you tell the coach, or the coach infers them from a chat | Personalize advice. Inferred facts are marked "proposed" and don't influence advice until you confirm them. They auto-expire after 14 days if unconfirmed. |
+| **Memory facts** (e.g., "prefers morning sessions") | Either you tell the coach, or the coach infers them from a chat | Personalize advice. When you tell the coach something worth remembering (an injury, your schedule, equipment you have), it saves it and uses it in later replies. You can see and remove every saved fact in the app under **You → What Coach remembers**, or tell the coach "forget that". Facts the coach infers on its own, rather than from something you said, are marked "proposed" and aren't used until you keep them; unreviewed ones lapse after 14 days. |
 | **Voice audio** | You hold the mic button to dictate to the coach | Convert speech to text using Apple's on-device speech recognition. **The audio itself is not sent to our servers** — only the transcribed text. |
 | **Usage counters** | App activity (number of messages, token counts per day) | Enforce per-user daily caps so one account can't run up an enormous bill or be abused. |
 | **Audit log** | Server-side, every consent change, memory write, health-ingest, and spend-cap hit | Internal records of what changed and when. The actual content of what changed is never logged — only a one-way hash. |
@@ -43,7 +43,7 @@ We do NOT currently collect:
 
 ## 3. How we use your data
 
-- **To run the coaching feature.** Every chat turn sends what you wrote plus your profile, recent workouts, and confirmed memory facts to a third-party large language model (currently Google Gemini) so it can produce a reply. Google does not retain that content for training their models when accessed via the Vertex AI API.
+- **To run the coaching feature.** Every chat turn sends what you wrote plus your profile, recent workouts, and confirmed memory facts to a third-party large language model so it can produce a reply. Today that request goes through OpenRouter, which forwards it to Google's Gemini model. Neither is permitted to use your content to train their models.
 - **To save your progress.** Workouts, daily checks, and your custom plan are stored so you can see them across devices and sessions.
 - **To enforce safety limits.** A per-user daily message and token cap prevents abuse. Hitting the cap is recorded in your audit log.
 - **To respond if something goes wrong.** Errors are logged with your account ID so we can debug; no chat content or personal data appears in error logs.
@@ -69,7 +69,7 @@ If you are outside the United States, your data will be transferred to and proce
 | Category | Retention |
 |---|---|
 | Account, workouts, daily checks, coach history, confirmed memory | Until you delete your account, or stop using the app for 18 months (we'll email you before deletion). |
-| **Proposed memory facts** (coach-inferred, not yet confirmed) | 14 days from creation, then auto-deleted. |
+| **Proposed memory facts** (coach-inferred, not yet confirmed) | 14 days from creation. After that they are no longer shown or used, and they are erased with the rest of your account. |
 | Audit log entries | As long as the rest of your account; deleted with it. |
 | Crash and error logs | 90 days. |
 | Deletion tombstone (`{ userId, deletedAt, requestedBy }`) | 7 years, for our records that a deletion request was processed. Never includes the deleted content itself. |
@@ -96,7 +96,7 @@ Deletion is permanent. We cannot recover the data once it's gone.
 Depending on where you live, you may have additional rights:
 
 - **Right to access.** Request a copy of the data we hold about you. Email us.
-- **Right to correct.** Most fields are editable in-app (profile, workouts). For coach memory, you can confirm or delete proposed facts.
+- **Right to correct.** Most fields are editable in-app (profile, workouts). For coach memory, you can see every saved fact and keep or remove it under You → What Coach remembers. A removed fact stops being used immediately.
 - **Right to delete.** Via in-app **Delete Account** or by emailing us.
 - **Right to portability.** Email us; we can export your data as JSON.
 - **California (CCPA/CPRA).** Same rights as above, plus the right to know what categories of data we collect, the right to opt out of any sale (we don't sell), and the right not to be discriminated against for exercising your rights.
@@ -137,9 +137,10 @@ MYO is a "vendor of personal health records" under the FTC's Health Breach Notif
 We share data only with the service providers that operate our backend:
 
 - **Google LLC** (Firebase / Google Cloud) — hosts our database, authentication, and serverless functions. Google's privacy policy: https://policies.google.com/privacy
+- **OpenRouter, Inc.** — routes each coach request to the language model that writes the reply. It receives the content of that request (your message plus the context described in section 3). OpenRouter's policy: https://openrouter.ai/privacy
 - **Apple Inc.** — when you Sign In with Apple, Apple gives us a user identifier and (if you share) your name and a relay email. Apple's policy: https://www.apple.com/legal/privacy/
 
-We have no other third-party data processors. We do not share data with advertisers, data brokers, or affiliated entities.
+We have no other third-party data processors. Google LLC also serves the Gemini model that OpenRouter forwards requests to. We do not share data with advertisers, data brokers, or affiliated entities.
 
 ---
 

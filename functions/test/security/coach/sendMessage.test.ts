@@ -99,6 +99,17 @@ describe("shared coach-message handler (callable/*Http parity)", () => {
     expect(parsed.inputMode).toBe("text");
   });
 
+  it("accepts optional coachTips/coachTone and rejects unknown values", () => {
+    const parsed = IosCoachMessageRequest.parse(
+      iosPayload({ coachTips: "quiet", coachTone: "hype" }),
+    );
+    expect(parsed.coachTips).toBe("quiet");
+    expect(parsed.coachTone).toBe("hype");
+    expect(IosCoachMessageRequest.parse(iosPayload()).coachTips).toBeUndefined();
+    expect(IosCoachMessageRequest.safeParse(iosPayload({ coachTips: "chatty" })).success).toBe(false);
+    expect(IosCoachMessageRequest.safeParse(iosPayload({ coachTone: "angry" })).success).toBe(false);
+  });
+
   it("still accepts an older-client payload without clientDate/startedAt", () => {
     const { clientDate: _c, startedAt: _s, ...older } = iosPayload();
     const parsed = IosCoachMessageRequest.parse(older);
@@ -107,7 +118,9 @@ describe("shared coach-message handler (callable/*Http parity)", () => {
   });
 
   it("upserts the session and writes the message with clientDate/turnId", async () => {
-    const parsed = IosCoachMessageRequest.parse(iosPayload({ turnId: "turn-2" }));
+    const parsed = IosCoachMessageRequest.parse(
+      iosPayload({ turnId: "turn-2", coachTips: "brief", coachTone: "calm" }),
+    );
     const result = await handleSendCoachMessage(db, USER_ID, parsed);
 
     expect(result).toMatchObject({
@@ -140,6 +153,8 @@ describe("shared coach-message handler (callable/*Http parity)", () => {
       status: "queued",
       clientDate: MONDAY_DATE,
       turnId: "turn-2",
+      coachTips: "brief",
+      coachTone: "calm",
     });
     expect(messageSnap.data()?.serverCreatedAt).toBeTruthy();
   });

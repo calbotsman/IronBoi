@@ -148,3 +148,75 @@ struct MyoValueRow<Trailing: View>: View {
         .frame(minHeight: 44)
     }
 }
+
+/// Opens the You screen. Sits in the top-right corner of every tab — an icon
+/// only, no label — so profile and settings stay one tap away without taking
+/// a tab.
+struct ProfileButton: View {
+    @EnvironmentObject private var appModel: AppModel
+
+    var body: some View {
+        if appModel.hasSession { button }
+    }
+
+    private var button: some View {
+        Button {
+            appModel.showProfile = true
+        } label: {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("You")
+        .accessibilityHint("Your profile, goals, memory and account")
+    }
+}
+
+extension View {
+    /// Liquid Glass on iOS 26 (interactive: it lights up and flexes under
+    /// your finger); frosted material on older systems. `tint` warms it.
+    func myoGlass(tint: Color? = nil, in shape: some Shape = Capsule()) -> some View {
+        glassBase(tint: tint, in: shape)
+            // Light catching the top edge, fading round the sides…
+            .overlay(
+                shape.stroke(
+                    LinearGradient(colors: [.white.opacity(0.95), .white.opacity(0.15), .white.opacity(0.5)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1.2
+                )
+                .allowsHitTesting(false)
+            )
+            // …and a soft sheen across the upper half.
+            .overlay(
+                shape.fill(LinearGradient(colors: [.white.opacity(0.42), .white.opacity(0)],
+                                          startPoint: .top, endPoint: .center))
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 10, y: 4)
+    }
+
+    @ViewBuilder
+    private func glassBase(tint: Color?, in shape: some Shape) -> some View {
+        // compiler(>=6.2) ⇔ Xcode 26 SDK, where Glass exists; CI's older
+        // Xcode compiles only the fallback.
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            glassEffect(tint.map { Glass.regular.tint($0).interactive() } ?? Glass.regular.interactive(), in: shape)
+        } else {
+            frosted(tint: tint, in: shape)
+        }
+        #else
+        frosted(tint: tint, in: shape)
+        #endif
+    }
+
+    private func frosted(tint: Color?, in shape: some Shape) -> some View {
+        background(.ultraThinMaterial, in: shape)
+            .background((tint ?? .clear).opacity(0.35), in: shape)
+            .overlay(shape.stroke(Color.white.opacity(0.5), lineWidth: 0.75))
+    }
+}

@@ -13,21 +13,102 @@ final class AppModel: NSObject, ObservableObject {
         case coach
         case workout
         case progress
-        case you
     }
 
     @Published private(set) var user: User?
     @Published private(set) var messages: [CoachMessage] = []
     @Published private(set) var onboardingMessages: [CoachMessage] = []
     @Published private(set) var onboardingStatus: OnboardingStatus = .notStarted
+    /// False until the first profile snapshot lands. Until then the app
+    /// can't know whether to show onboarding or the coach, and guessing
+    /// flashed the onboarding screen at every launch.
+    @Published private(set) var profileLoaded = false
     @Published private(set) var onboardingStep: String = "goals"
     @Published private(set) var onboardingMissingFields: [String] = []
     @Published private(set) var pendingProgramProposal: ProgramProposalSummary?
     @Published private(set) var pendingPlanAdjustmentProposal: PlanAdjustmentProposalSummary?
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
-    @Published private(set) var activeWorkout: ActiveWorkoutSession?
+    @Published private(set) var activeWorkout: ActiveWorkoutSession? {
+        didSet {
+            saveLocalWorkout()
+            if activeWorkout?.sessionId != oldValue?.sessionId {
+                focusedExerciseIndex = nil
+                sessionChanges = []
+                skippedExercises = []
+                // An old workout you never logged a set in isn't one you're
+                // in the middle of — clear it rather than open on it. Nor is
+                // one with nothing in it (started on a rest day).
+                if let workout = activeWorkout, workout.status == .active,
+                   workout.exercises.isEmpty
+                    || (activeWorkoutIsLeftover && !workout.exercises.contains { $0.completedSets.contains(where: \.completed) }) {
+                    let id = workout.sessionId
+                    Task {
+                        // Only the session that prompted this — not one started since.
+                        guard self.activeWorkout?.sessionId == id else { return }
+                        await self.discardActiveWorkout()
+                    }
+                }
+            }
+        }
+    }
+    /// The lift you chose to do next, out of order ("let's do swings now").
+    @Published private(set) var focusedExerciseIndex: Int?
+    /// What you changed mid-workout, in words — asked about at the end.
+    @Published private(set) var sessionChanges: [String] = [] { didSet { saveLocalWorkout() } }
+    /// Lifts you skipped today; left out of the log.
+    private var skippedExercises: Set<Int> = [] { didSet { saveLocalWorkout() } }
+
+    // MARK: - The workout in progress, kept on the phone
+
+    /// Logged sets, added/swapped/skipped lifts live on the phone until you
+    /// finish; this keeps them through the app being killed or evicted.
+    private struct LocalWorkout: Codable {
+        let workout: ActiveWorkoutSession
+        let changes: [String]
+        let skipped: [Int]
+    }
+
+    private static let localWorkoutKey = "localActiveWorkout"
+
+    private func saveLocalWorkout() {
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        guard let workout = activeWorkout, workout.status == .active else {
+            UserDefaults.standard.removeObject(forKey: Self.localWorkoutKey)
+            return
+        }
+        let local = LocalWorkout(workout: workout, changes: sessionChanges, skipped: Array(skippedExercises))
+        if let data = try? JSONEncoder().encode(local) {
+            UserDefaults.standard.set(data, forKey: Self.localWorkoutKey)
+        }
+    }
+
+    /// The phone's copy of this session, if it's at least as new as the
+    /// server's (the server only hears about a session at start and finish).
+    private func localCopy(of server: ActiveWorkoutSession) -> LocalWorkout? {
+        guard let data = UserDefaults.standard.data(forKey: Self.localWorkoutKey),
+              let local = try? JSONDecoder().decode(LocalWorkout.self, from: data),
+              local.workout.sessionId == server.sessionId,
+              let localTime = Self.parseISO(local.workout.updatedAt),
+              let serverTime = Self.parseISO(server.updatedAt),
+              localTime >= serverTime
+        else { return nil }
+        return local
+    }
+
+    private static func parseISO(_ string: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: string) ?? ISO8601DateFormatter().date(from: string)
+    }
+    /// After finishing: today's changes, waiting on "keep them?".
+    @Published var pendingSessionChanges: [String] = []
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
     @Published private(set) var progressSummary: ProgressSummaryModel?
+    /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
+    /// otherwise — the memory screen groups proposed / active / ended.
+    @Published private(set) var memoryFacts: [MemoryFact] = []
     @Published private(set) var profile: UserProfile = .empty
     @Published private(set) var isSending = false
     @Published private(set) var isOnboardingBusy = false
@@ -41,6 +122,8 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var baselineSuggestionSessionId: String?
     @Published private(set) var isSwapBusy = false
     @Published var selectedTab: AppTab = .coach
+    /// The You screen, opened from the profile icon in each tab's corner.
+    @Published var showProfile = false
     @Published var errorMessage: String?
 
     private let sessionId = "general"
@@ -109,6 +192,7 @@ final class AppModel: NSObject, ObservableObject {
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
+    private var memoryFactListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
     // bakes in "today's" dailyOverride) can be recomputed when the calendar
     // date changes without a server round-trip.
@@ -128,6 +212,7 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkoutListener?.remove()
         workoutLogListener?.remove()
         progressListener?.remove()
+        memoryFactListener?.remove()
     }
 
     func start() {
@@ -151,6 +236,7 @@ final class AppModel: NSObject, ObservableObject {
                 self.listenForActiveWorkout(userId: user?.uid)
                 self.listenForWorkoutLogs(userId: user?.uid)
                 self.listenForProgressSummary(userId: user?.uid)
+                self.listenForMemoryFacts(userId: user?.uid)
             }
         }
     }
@@ -203,10 +289,42 @@ final class AppModel: NSObject, ObservableObject {
     func startPreviewSession() {
         isPreviewSession = true
         onboardingStatus = .complete
+        profileLoaded = true
         profile = Self.previewProfile
         currentWorkoutPlan = Self.previewPlan
+        // MYO_REST_DAY=1: today has nothing planned (as the backend stores a
+        // rest day: the day, with no exercises).
+        if ProcessInfo.processInfo.environment["MYO_REST_DAY"] == "1" {
+            currentWorkoutPlan = Self.previewPlan(restingToday: true)
+        }
         messages = Self.previewMessages
         workoutLogs = Self.previewLogs
+        memoryFacts = Self.previewMemoryFacts
+        // MYO_DEMO_PROPOSAL=1: a sample plan change, to check the review card.
+        // MYO_EMPTY_WORKOUT=1: open on an empty session, like the one a rest
+        // day used to create.
+        if ProcessInfo.processInfo.environment["MYO_EMPTY_WORKOUT"] == "1" {
+            let now = Self.isoString(from: Date())
+            activeWorkout = ActiveWorkoutSession(
+                userId: "preview", sessionId: "preview-empty", planId: "preview", dayKey: Self.currentDayKey(),
+                workoutName: "Rest", status: .active, startedAt: now, updatedAt: now, completedAt: nil, exercises: [])
+        }
+        if ProcessInfo.processInfo.environment["MYO_DEMO_PROPOSAL"] == "1" {
+            pendingPlanAdjustmentProposal = PlanAdjustmentProposalSummary(
+                id: "demo", proposalId: "demo", category: "pain", riskLevel: "low",
+                summary: "Swap overhead pressing for a shoulder-friendly push",
+                rationale: "Your left shoulder is still sore on presses. Landmine press and push-ups keep the work without the overhead angle.",
+                dayKey: "Wed", patchTitle: "Adjusted sessions", patchType: "day_patch", changes: [],
+                dayPatchDetails: [
+                    ProposalDayPatchDetail(dayKey: "Wed", name: "Upper Push", exerciseLines: [
+                        "Landmine Press 4×8 @ 45 lb", "Incline DB Press 4×10 @ 50 lb", "Push-up 3×12",
+                        "Cable Fly 3×12 @ 25 lb", "Triceps Pushdown 3×12 @ 40 lb"]),
+                    ProposalDayPatchDetail(dayKey: "Fri", name: "Full Body", exerciseLines: [
+                        "Goblet Squat 4×8 @ 50 lb", "Landmine Press 3×8 @ 45 lb", "Seated Row 3×10 @ 110 lb"]),
+                ],
+                safetyNotes: ["Stop if pain gets sharp or travels down the arm."],
+                sourceCorpusEntryIds: [], requiresFollowUp: false, createdAt: "", scope: nil)
+        }
     }
     #endif
 
@@ -271,12 +389,28 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    /// Coach's voice for a sentence or two: WAV bytes from Cloud TTS.
+    func synthesizeSpeech(_ text: String) async throws -> Data {
+        struct Speech: Decodable { let audio: String }
+        let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: ["text": text])
+        guard let data = Data(base64Encoded: speech.audio) else { throw CocoaError(.coderReadCorrupt) }
+        return data
+    }
+
     func sendCoachMessage(
         _ content: String,
-        structuredAnswer: [String: Any]? = nil
+        structuredAnswer: [String: Any]? = nil,
+        spoken: Bool = false
     ) async {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        #if DEBUG
+        if isPreviewSession {
+            await sendPreviewCoachMessage(trimmed)
+            return
+        }
+        #endif
 
         isSending = true
         defer { isSending = false }
@@ -291,6 +425,11 @@ final class AppModel: NSObject, ObservableObject {
                 "startedAt": now,
                 "toolCallIds": [],
                 "structuredAnswer": structuredAnswer ?? [:],
+                // Spoken turns get short, list-free replies made for the ear.
+                "inputMode": spoken ? "live_voice" : "text",
+                // How you've asked Coach to talk ("no tips", "calm down").
+                "coachTips": UserDefaults.standard.string(forKey: CoachingStyle.tipsKey) ?? CoachingStyle.Tips.full.rawValue,
+                "coachTone": UserDefaults.standard.string(forKey: CoachingStyle.toneKey) ?? CoachingStyle.Tone.hype.rawValue,
                 // Local calendar date — a chat-driven "yes, just today" keys
                 // its override to the user's day, not the server timezone.
                 "clientDate": Self.currentDateISO(),
@@ -407,11 +546,38 @@ final class AppModel: NSObject, ObservableObject {
     // nil to use whatever scope the proposal already carries (e.g. legacy
     // proposals with a single implicit target day, and every ramp — a ramp
     // pins its own scope server-side).
+    /// "Not now": marks Coach's pending plan change declined. Rules allow the
+    /// owner to move a proposal from pending to rejected and nothing else.
+    func declinePendingPlanAdjustmentProposal() async {
+        guard let proposal = pendingPlanAdjustmentProposal else { return }
+        #if DEBUG
+        if isPreviewSession { pendingPlanAdjustmentProposal = nil; return }
+        #endif
+        guard let userId = user?.uid else { return }
+        do {
+            try await db.collection("users").document(userId)
+                .collection("planAdjustmentProposals").document(proposal.id)
+                .updateData(["decision": "rejected", "decidedAt": Self.isoString(from: Date())])
+            pendingPlanAdjustmentProposal = nil
+        } catch {
+            errorMessage = "Couldn't dismiss that. \(error.localizedDescription)"
+        }
+    }
+
     func acceptPendingPlanAdjustmentProposal(scope: String? = nil) async {
         guard !isSending, let pendingPlanAdjustmentProposal else { return }
 
         isSending = true
         defer { isSending = false }
+        #if DEBUG
+        // Preview: accepting puts a session back on today.
+        if isPreviewSession {
+            self.pendingPlanAdjustmentProposal = nil
+            currentWorkoutPlan = Self.previewPlan
+            planChangesAccepted += 1
+            return
+        }
+        #endif
 
         do {
             var data: [String: Any] = [
@@ -426,10 +592,44 @@ final class AppModel: NSObject, ObservableObject {
             }
             try await callBackend(httpName: "acceptPlanAdjustmentProposalHttp", callableName: "acceptPlanAdjustmentProposal", data: data)
             try await refreshCurrentWorkoutPlan()
+            planChangesAccepted += 1
         } catch {
             errorMessage = Self.planAdjustmentErrorMessage(from: error)
         }
     }
+
+    // MARK: - Today
+
+    /// Today's planned session (with any just-today adjustment folded in),
+    /// or nil on a rest day.
+    var todayPlanDay: PlannedWorkoutDay? {
+        currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() && !$0.exercises.isEmpty }
+    }
+
+    /// There's a plan, and nothing in it today.
+    var isRestDay: Bool {
+        currentWorkoutPlan != nil && todayPlanDay == nil
+    }
+
+    /// The next planned session after today — what "skip my rest day" does.
+    var nextPlannedDay: PlannedWorkoutDay? {
+        let order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        guard let days = currentWorkoutPlan?.days, let index = order.firstIndex(of: Self.currentDayKey()) else { return nil }
+        for offset in 1...7 {
+            let key = order[(index + offset) % 7]
+            if let day = days.first(where: { $0.dayKey == key && !$0.exercises.isEmpty }) { return day }
+        }
+        return nil
+    }
+
+    /// A logged set anywhere in the session in progress.
+    var activeWorkoutHasProgress: Bool {
+        activeWorkout?.exercises.contains { $0.completedSets.contains(where: \.completed) } ?? false
+    }
+
+    /// Bumped when you accept a plan change, so the coach screen can say
+    /// what to do next.
+    @Published private(set) var planChangesAccepted = 0
 
     func startTodaysWorkout() async {
         await startWorkout(dayKey: Self.currentDayKey())
@@ -439,6 +639,31 @@ final class AppModel: NSObject, ObservableObject {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
+        #if DEBUG
+        // The preview has no backend: a small local session, enough to walk
+        // through starting, teaching and counting.
+        if isPreviewSession {
+            let now = Self.isoString(from: Date())
+            // The plan's own day when there is one — empty on a rest day,
+            // as the backend does.
+            let planned = currentWorkoutPlan?.days.first { $0.dayKey == dayKey }
+            let lifts: [(String, Int, Int, Double)] = planned.map { day in
+                day.exercises.map { ($0.name, $0.sets, $0.reps, $0.weight) }
+            } ?? [("Goblet Squat", 3, 10, 35), ("Barbell Bench Press", 3, 8, 135), ("KB Swing", 3, 15, 35)]
+            activeWorkout = ActiveWorkoutSession(
+                userId: "preview", sessionId: "preview-\(UUID().uuidString)", planId: "preview", dayKey: dayKey,
+                workoutName: planned?.name ?? "Full Body", status: .active, startedAt: now, updatedAt: now, completedAt: nil,
+                exercises: lifts.enumerated().map { index, lift in
+                    ActiveWorkoutExercise(exerciseIndex: index, name: lift.0, targetSets: lift.1, targetReps: lift.2,
+                                          targetWeight: lift.3,
+                                          completedSets: (0..<lift.1).map {
+                                              ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+                                          },
+                                          exerciseDone: false, notes: nil)
+                })
+            return
+        }
+        #endif
 
         do {
             let now = Self.isoString(from: Date())
@@ -457,6 +682,133 @@ final class AppModel: NSObject, ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - Changing the workout mid-session
+
+    /// The lift you're on: the one you jumped to, else the first not done.
+    var currentExerciseIndex: Int? {
+        guard let exercises = activeWorkout?.exercises else { return nil }
+        if let focus = focusedExerciseIndex, exercises.indices.contains(focus), !exercises[focus].exerciseDone {
+            return focus
+        }
+        return exercises.firstIndex { !$0.exerciseDone }
+    }
+
+    func focusExercise(_ index: Int) {
+        guard let exercises = activeWorkout?.exercises, exercises.indices.contains(index) else { return }
+        focusedExerciseIndex = index
+    }
+
+    /// Adds a lift to the end of today's workout. Returns its index.
+    @discardableResult
+    func addWorkoutExercise(name: String, sets: Int, reps: Int, weight: Double) -> Int? {
+        guard var workout = activeWorkout else { return nil }
+        let index = workout.exercises.count
+        workout.exercises.append(ActiveWorkoutExercise(
+            exerciseIndex: index, name: name, targetSets: sets, targetReps: reps, targetWeight: weight,
+            completedSets: (0..<sets).map { ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil) },
+            exerciseDone: false, notes: nil))
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("Added \(name), \(sets)×\(reps)\(weight > 0 ? " at \(Self.poundsText(weight)) lb" : "")")
+        return index
+    }
+
+    /// Replaces a lift with another, keeping its sets and reps. If sets were
+    /// already done on the old lift they stay logged with it, and the new
+    /// lift takes over only the sets left. Returns the new lift's index.
+    @discardableResult
+    func swapWorkoutExercise(_ index: Int, to name: String, weight: Double) -> Int? {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return nil }
+        let old = workout.exercises[index]
+        let done = old.completedSets.filter(\.completed)
+        let wasCurrent = currentExerciseIndex == index
+        let target: Int
+        if done.isEmpty {
+            workout.exercises[index].name = name
+            workout.exercises[index].targetWeight = weight
+            workout.exercises[index].completedSets = (0..<old.targetSets).map {
+                ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+            }
+            workout.exercises[index].exerciseDone = false
+            target = index
+        } else {
+            workout.exercises[index].completedSets = done.enumerated().map { position, set in
+                var kept = set
+                kept = ActiveWorkoutSet(setIndex: position, completed: kept.completed, reps: kept.reps, weight: kept.weight)
+                return kept
+            }
+            workout.exercises[index].targetSets = done.count
+            workout.exercises[index].exerciseDone = true
+            // Every set already done: the swap is a fresh lift at full sets.
+            let left = old.targetSets > done.count ? old.targetSets - done.count : old.targetSets
+            target = workout.exercises.count
+            workout.exercises.append(ActiveWorkoutExercise(
+                exerciseIndex: target, name: name, targetSets: left, targetReps: old.targetReps,
+                targetWeight: weight,
+                completedSets: (0..<left).map { ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil) },
+                exerciseDone: false, notes: nil))
+            if wasCurrent { focusedExerciseIndex = target }
+        }
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("Swapped \(old.name) for \(name)")
+        return target
+    }
+
+    /// Skips a lift today: it's crossed off and left out of the log.
+    func skipWorkoutExercise(_ index: Int) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+        workout.exercises[index].exerciseDone = true
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        skippedExercises.insert(index)
+        if focusedExerciseIndex == index { focusedExerciseIndex = nil }
+        sessionChanges.append("Skipped \(workout.exercises[index].name)")
+    }
+
+    /// New sets and/or reps for a lift; sets already done are kept.
+    func setWorkoutTargets(_ index: Int, sets: Int?, reps: Int?) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+        var exercise = workout.exercises[index]
+        let before = "\(exercise.targetSets)×\(exercise.targetReps)"
+        if let reps, reps > 0 { exercise.targetReps = reps }
+        if let sets, sets > 0 {
+            exercise.targetSets = sets
+            if exercise.completedSets.count < sets {
+                exercise.completedSets += (exercise.completedSets.count..<sets).map {
+                    ActiveWorkoutSet(setIndex: $0, completed: false, reps: nil, weight: nil)
+                }
+            } else {
+                // Drop open sets past the new count; never drop a done one.
+                let keep = max(sets, (exercise.completedSets.lastIndex(where: \.completed) ?? -1) + 1)
+                exercise.completedSets = Array(exercise.completedSets.prefix(keep))
+            }
+        }
+        exercise.exerciseDone = !exercise.completedSets.isEmpty && exercise.completedSets.allSatisfy(\.completed)
+        workout.exercises[index] = exercise
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("\(exercise.name): \(exercise.targetSets)×\(exercise.targetReps) instead of \(before)")
+    }
+
+    private static func poundsText(_ weight: Double) -> String {
+        weight.rounded() == weight ? String(Int(weight)) : String(format: "%.1f", weight)
+    }
+
+    /// "Keep them": Coach turns today's changes into a plan update for you
+    /// to approve, the same way any plan change works.
+    func keepSessionChanges() async {
+        let changes = pendingSessionChanges
+        pendingSessionChanges = []
+        guard !changes.isEmpty else { return }
+        let list = changes.joined(separator: "; ")
+        await sendCoachMessage("Keep these changes from today's workout in my plan from now on: \(list).", spoken: true)
+    }
+
+    func dismissSessionChanges() {
+        pendingSessionChanges = []
     }
 
     func toggleWorkoutSet(exerciseIndex: Int, setIndex: Int) {
@@ -486,6 +838,40 @@ final class AppModel: NSObject, ObservableObject {
 
         let allSetsDone = workout.exercises[exerciseIndex].completedSets.allSatisfy(\.completed)
         workout.exercises[exerciseIndex].exerciseDone = allSetsDone
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// Marks the next open set of an exercise done with the reps actually
+    /// done (counted out loud) at the current working weight. Returns the
+    /// set number completed (1-based), or nil if every set was already done.
+    @discardableResult
+    func completeNextSet(exerciseIndex: Int, reps: Int) -> Int? {
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex),
+              let setIndex = workout.exercises[exerciseIndex].completedSets.firstIndex(where: { !$0.completed })
+        else { return nil }
+        let weight = workingWeight(for: workout.exercises[exerciseIndex])
+        workout.exercises[exerciseIndex].completedSets[setIndex].completed = true
+        workout.exercises[exerciseIndex].completedSets[setIndex].reps = max(1, reps)
+        workout.exercises[exerciseIndex].completedSets[setIndex].weight = weight
+        workout.exercises[exerciseIndex].exerciseDone =
+            workout.exercises[exerciseIndex].completedSets.allSatisfy(\.completed)
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        return setIndex + 1
+    }
+
+    /// Raises a completed set's rep count — you kept counting past the
+    /// target. The extra reps are logged as done, so Coach sees you're
+    /// outgrowing the weight.
+    func updateSetReps(exerciseIndex: Int, setNumber: Int, reps: Int) {
+        let setIndex = setNumber - 1
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex),
+              workout.exercises[exerciseIndex].completedSets.indices.contains(setIndex)
+        else { return }
+        workout.exercises[exerciseIndex].completedSets[setIndex].reps = reps
         workout.updatedAt = Self.isoString(from: Date())
         activeWorkout = workout
     }
@@ -538,10 +924,51 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
     }
 
+    /// A workout started on an earlier day and never finished.
+    var activeWorkoutIsLeftover: Bool {
+        guard let started = activeWorkout?.startedAt else { return false }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = f.date(from: started) ?? ISO8601DateFormatter().date(from: started) else { return false }
+        // Not touched for four hours — you're not still in it. (Not "started
+        // another day": a workout that runs past midnight is still going.)
+        let touched = activeWorkout.flatMap { f.date(from: $0.updatedAt) ?? ISO8601DateFormatter().date(from: $0.updatedAt) } ?? date
+        return Date().timeIntervalSince(max(date, touched)) > 4 * 3600
+    }
+
+    /// Throws away the unfinished workout — nothing is logged.
+    func discardActiveWorkout() async {
+        guard !isWorkoutBusy, let workout = activeWorkout else { return }
+        isWorkoutBusy = true
+        defer { isWorkoutBusy = false }
+        #if DEBUG
+        if isPreviewSession { activeWorkout = nil; return }
+        #endif
+        do {
+            let _: EmptyFunctionResponse = try await callCallable(
+                "abandonWorkoutSessionCallable", data: ["sessionId": workout.sessionId])
+            activeWorkout = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func finishActiveWorkout() async {
         guard !isWorkoutBusy, let activeWorkout else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
+        let changes = sessionChanges
+        // Skipped lifts with nothing done aren't part of what you did.
+        let performed = activeWorkout.exercises.filter {
+            !skippedExercises.contains($0.exerciseIndex) || $0.completedSets.contains(where: \.completed)
+        }
+        #if DEBUG
+        if isPreviewSession {
+            self.activeWorkout = nil
+            pendingSessionChanges = changes
+            return
+        }
+        #endif
 
         do {
             let completedAt = Self.isoString(from: Date())
@@ -551,10 +978,11 @@ final class AppModel: NSObject, ObservableObject {
                 data: [
                     "sessionId": activeWorkout.sessionId,
                     "completedAt": completedAt,
-                    "exercises": try Self.jsonObject(from: activeWorkout.exercises),
+                    "exercises": try Self.jsonObject(from: performed),
                 ]
             )
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
+            pendingSessionChanges = changes
             // Surface the rebaseline card. Nothing has been written yet —
             // the server only proposes here, and applyBaselineSuggestions is
             // what commits.
@@ -877,6 +1305,7 @@ final class AppModel: NSObject, ObservableObject {
     private func listenForOnboardingState(userId: String?) {
         profileListener?.remove()
         onboardingStatus = .notStarted
+        profileLoaded = false
         onboardingStep = "goals"
         onboardingMissingFields = []
 
@@ -891,12 +1320,15 @@ final class AppModel: NSObject, ObservableObject {
                 Task { @MainActor in
                     if let error {
                         self?.errorMessage = error.localizedDescription
+                        // Don't strand them on the blank loading screen; the alert says what failed.
+                        self?.profileLoaded = true
                         return
                     }
 
                     let data = snapshot?.data() ?? [:]
                     let rawStatus = data["onboardingStatus"] as? String ?? "not_started"
                     self?.onboardingStatus = OnboardingStatus(rawValue: rawStatus) ?? .notStarted
+                    self?.profileLoaded = true
                     self?.onboardingStep = data["onboardingStep"] as? String ?? "goals"
                     self?.onboardingMissingFields = data["onboardingMissingFields"] as? [String] ?? []
                     // Full profile struct — Preferences view reads from this
@@ -1094,7 +1526,23 @@ final class AppModel: NSObject, ObservableObject {
                         return
                     }
 
-                    self?.activeWorkout = workout
+                    guard let self else { return }
+                    if self.activeWorkout?.sessionId == workout.sessionId,
+                       let mine = self.activeWorkout,
+                       let mineTime = Self.parseISO(mine.updatedAt),
+                       let serverTime = Self.parseISO(workout.updatedAt),
+                       mineTime > serverTime {
+                        // Our edits are newer than this snapshot; keep them.
+                        return
+                    }
+                    if self.activeWorkout == nil, let local = self.localCopy(of: workout) {
+                        // Relaunched mid-workout: pick up where you left off.
+                        self.activeWorkout = local.workout
+                        self.sessionChanges = local.changes
+                        self.skippedExercises = Set(local.skipped)
+                        return
+                    }
+                    self.activeWorkout = workout
                 }
             }
     }
@@ -1150,6 +1598,71 @@ final class AppModel: NSObject, ObservableObject {
                     self?.progressSummary = Self.makeProgressSummary(from: data)
                 }
             }
+    }
+
+    private func listenForMemoryFacts(userId: String?) {
+        memoryFactListener?.remove()
+        memoryFacts = []
+
+        guard let userId else { return }
+
+        // The live cap is 100 facts; soft-deleted ones stay in the collection,
+        // so read past the cap and filter client-side.
+        memoryFactListener = db
+            .collection("users")
+            .document(userId)
+            .collection("memoryFacts")
+            .order(by: "createdAt", descending: true)
+            .limit(to: 250)
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        // Advisory surface, like progress: keep the last list.
+                        NSLog("[IronBoi] Memory facts listener error: \(error.localizedDescription)")
+                        return
+                    }
+                    self?.memoryFacts = (snapshot?.documents ?? [])
+                        .compactMap { MemoryFact.make(id: $0.documentID, data: $0.data()) }
+                }
+            }
+    }
+
+    /// The user's calendar date, YYYY-MM-DD — what a fact's `until` is
+    /// compared against.
+    var todayISO: String { Self.currentDateISO() }
+
+    /// Keeps a proposed fact. The listener picks up the new state.
+    func confirmMemoryFact(_ factId: String) async -> Bool {
+        await mutateMemoryFact(callable: "confirmMemoryFact", factId: factId) { fact in
+            MemoryFact(id: fact.id, category: fact.category, content: fact.content,
+                       source: fact.source, state: "confirmed", happenedOn: fact.happenedOn,
+                       until: fact.until, createdAt: fact.createdAt, expiresAt: nil)
+        }
+    }
+
+    /// Soft-deletes a fact; Coach stops seeing it on the next reply.
+    func deleteMemoryFact(_ factId: String) async -> Bool {
+        await mutateMemoryFact(callable: "deleteMemoryFact", factId: factId) { _ in nil }
+    }
+
+    private func mutateMemoryFact(
+        callable: String,
+        factId: String,
+        preview: (MemoryFact) -> MemoryFact?
+    ) async -> Bool {
+        #if DEBUG
+        if isPreviewSession {
+            memoryFacts = memoryFacts.compactMap { $0.id == factId ? preview($0) : $0 }
+            return true
+        }
+        #endif
+        do {
+            let _: EmptyFunctionResponse = try await callCallable(callable, data: ["factId": factId])
+            return true
+        } catch {
+            errorMessage = "Couldn't update Coach's memory. \(error.localizedDescription)"
+            return false
+        }
     }
 
     private static func makeProgressSummary(from data: [String: Any]) -> ProgressSummaryModel? {
@@ -1808,7 +2321,24 @@ extension AppModel {
         return p
     }
 
-    static var previewPlan: WorkoutPlanSummary {
+    static var previewPlan: WorkoutPlanSummary { previewPlan(restingToday: false) }
+
+    /// `restingToday`: today's day is kept but emptied — a rest day.
+    static func previewPlan(restingToday: Bool) -> WorkoutPlanSummary {
+        let plan = basePreviewPlan
+        guard restingToday else { return plan }
+        let today = currentDayKey()
+        var days = plan.days.map { day in
+            day.dayKey == today ? PlannedWorkoutDay(dayKey: day.dayKey, name: "Rest", muscles: [], exercises: []) : day
+        }
+        if !days.contains(where: { $0.dayKey == today }) {
+            days.append(PlannedWorkoutDay(dayKey: today, name: "Rest", muscles: [], exercises: []))
+        }
+        return WorkoutPlanSummary(userId: plan.userId, planId: plan.planId, source: plan.source,
+                                  updatedAt: plan.updatedAt, days: days)
+    }
+
+    private static var basePreviewPlan: WorkoutPlanSummary {
         WorkoutPlanSummary(
             userId: "preview",
             planId: "current",
@@ -1832,6 +2362,20 @@ extension AppModel {
                 ]),
             ]
         )
+    }
+
+    /// Preview has no backend, so the coach answers locally — enough to
+    /// exercise the voice loop (listen → think → speak) on the simulator.
+    private func sendPreviewCoachMessage(_ content: String) async {
+        let stamp = Int(Date().timeIntervalSince1970 * 1000)
+        messages.append(CoachMessage(id: "pu\(stamp)", messageId: "pu\(stamp)", role: .user,
+            content: content, status: .complete, timestamp: Date(), riskLevel: nil))
+        isSending = true
+        try? await Task.sleep(nanoseconds: 1_400_000_000)
+        isSending = false
+        messages.append(CoachMessage(id: "pc\(stamp)", messageId: "pc\(stamp)", role: .coach,
+            content: "Got it. You said \u{201C}\(content)\u{201D}. In the real app I'd answer that with your plan in front of me. This is the preview, so I'm just showing you how talking to me feels.",
+            status: .complete, timestamp: Date(), riskLevel: nil))
     }
 
     static var previewMessages: [CoachMessage] {
@@ -1865,6 +2409,32 @@ extension AppModel {
                         title: "Pain and injury workout adjustment rule",
                         url: nil),
                 ]),
+        ]
+    }
+
+    static var previewMemoryFacts: [MemoryFact] {
+        let now = Date()
+        return [
+            MemoryFact(id: "pf1", category: "safety_note",
+                       content: "Tweaked my left shoulder last Tuesday, sore on overhead presses",
+                       source: "user_stated", state: "confirmed", happenedOn: "2026-06-16", until: nil,
+                       createdAt: now.addingTimeInterval(-86_400 * 4), expiresAt: nil),
+            MemoryFact(id: "pf2", category: "equipment",
+                       content: "Hotel gym with dumbbells only until the 30th",
+                       source: "coach_inferred", state: "confirmed", happenedOn: nil, until: "2026-06-30",
+                       createdAt: now.addingTimeInterval(-86_400 * 2), expiresAt: nil),
+            MemoryFact(id: "pf3", category: "exercise_response",
+                       content: "Seems to recover slowly from heavy deadlifts — RPE climbs on day 2",
+                       source: "log_derived", state: "proposed", happenedOn: nil, until: nil,
+                       createdAt: now.addingTimeInterval(-86_400), expiresAt: now.addingTimeInterval(86_400 * 13)),
+            MemoryFact(id: "pf4", category: "preference",
+                       content: "Prefers morning sessions before work",
+                       source: "user_stated", state: "confirmed", happenedOn: nil, until: nil,
+                       createdAt: now.addingTimeInterval(-86_400 * 9), expiresAt: nil),
+            MemoryFact(id: "pf5", category: "plan_change",
+                       content: "Swapped overhead press for landmine press for the rest of the week (shoulder)",
+                       source: "coach_inferred", state: "confirmed", happenedOn: nil, until: nil,
+                       createdAt: now.addingTimeInterval(-86_400 * 3), expiresAt: nil),
         ]
     }
 
