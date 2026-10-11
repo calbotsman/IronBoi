@@ -102,7 +102,7 @@ struct RecordView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label("Record", systemImage: "calendar.day.timeline.left")
+            Label("History", systemImage: "calendar.day.timeline.left")
         } description: {
             Text("No sessions recorded yet. Start a workout from Plan to begin building your history.")
         }
