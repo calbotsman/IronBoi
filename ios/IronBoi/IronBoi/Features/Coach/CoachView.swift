@@ -87,7 +87,8 @@ struct CoachView: View {
                     scale: 0.9,
                     demo: intro.demo,
                     // Rise from just above the wordmark, not through the text.
-                    bloopStart: geo.size.height * 0.56
+                    bloopStart: geo.size.height * 0.56,
+                    stagedBloops: true
                 )
             }
             .ignoresSafeArea()
@@ -136,6 +137,13 @@ struct CoachView: View {
                 #if DEBUG
                 HStack(spacing: MyoTheme.Spacing.lg) {
                     Button("Preview (no backend)") { appModel.startPreviewSession() }
+                        // MYO_PREVIEW=1: straight into the preview session on
+                        // launch, for scripted simulator runs (the physics reel).
+                        .onAppear {
+                            if ProcessInfo.processInfo.environment["MYO_PREVIEW"] == "1" {
+                                appModel.startPreviewSession()
+                            }
+                        }
                     Button("Dev sign-in") { Task { await appModel.signInAsDeveloper() } }
                 }
                 .font(.caption.weight(.semibold))

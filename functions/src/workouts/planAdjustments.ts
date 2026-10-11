@@ -234,8 +234,18 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // Joined with ". " (not spaces) so the negation mask in hasSevereMarkers
   // cannot bleed across utterance boundaries — a triage description ending
   // in a denial must not mask a severe phrase at the start of the raw turn.
-  const severeText = [originalUserText, input.painTriage?.description ?? "", rawText].join(". ");
-  const severeMarkersHit = hasSevereMarkers(severeText);
+  // The raw turn is screened as-is (absolute). The model's own summaries of
+  // the answers get their clinical denials stripped first: "denies sharp
+  // pain", "red flags (sharp, numbness, radiating) denied", "sharp pain:
+  // no" are how a model writes up CLEAN answers, and every one of them
+  // tripped the screen — the 2026-10 nightly failures.
+  const severeText = [
+    stripClinicalDenials(originalUserText),
+    stripClinicalDenials(input.painTriage?.description ?? ""),
+    rawText,
+  ].join(". ");
+  const severeMarker = severeMarkerHit(severeText);
+  const severeMarkersHit = severeMarker !== null;
   let riskLevel = riskForCategory(category, severeText);
   let requiresFollowUp = needsFollowUp(
     category,
@@ -255,6 +265,10 @@ export async function createPlanAdjustmentProposalFromTool(input: {
     requiresFollowUp = false;
     triageCleared = true;
   }
+  // On every return from here on, so a null proposalId is diagnosable
+  // from the adapt_plan_shape log (booleans and our own pattern source
+  // only — never user or model text).
+  const diag = () => ({ severeMarkersHit, severeMarker, triageCleared });
 
   // Re-entry ramp routing. A valid ramp only ever scales the user's OWN
   // baseline down and restores itself to 100% on a date they can see before
@@ -281,6 +295,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       requiresFollowUp,
       dayKey: undefined,
       needsScopeConfirmation: false,
+      ...diag(),
       error: "ramp_weeks_missing",
     };
   }
@@ -299,6 +314,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
         requiresFollowUp,
         dayKey: undefined,
         needsScopeConfirmation: false,
+        ...diag(),
         error: "ramp_not_valid_while_unwell",
       };
     }
@@ -320,6 +336,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
         requiresFollowUp,
         dayKey: undefined,
         needsScopeConfirmation: false,
+        ...diag(),
         error: "ramp_not_valid_for_this_category",
       };
     }
@@ -332,6 +349,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
         requiresFollowUp,
         dayKey: undefined,
         needsScopeConfirmation: false,
+        ...diag(),
         error: rampCheck.error,
       };
     }
@@ -356,6 +374,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       requiresFollowUp,
       dayKey: undefined,
       needsScopeConfirmation: false,
+      ...diag(),
       error: isReentryRamp ? "ramp_requires_reentry_ramp_scope" : "reentry_ramp_scope_requires_ramp_weeks",
     };
   }
@@ -372,6 +391,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       requiresFollowUp,
       dayKey: input.dayPatches?.[0]?.dayKey,
       needsScopeConfirmation: true,
+      ...diag(),
       error: "today_scope_is_single_day",
     };
   }
@@ -424,6 +444,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
         requiresFollowUp,
         dayKey: undefined,
         needsScopeConfirmation: false,
+        ...diag(),
         error: "ramp_has_no_training_days_to_scale",
       };
     }
@@ -474,6 +495,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
         persistedRamp.proposalId,
       ),
       needsScopeConfirmation: false,
+      ...diag(),
     };
   }
 
@@ -498,6 +520,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       requiresFollowUp,
       dayKey: input.dayPatches[0]?.dayKey,
       needsScopeConfirmation: false,
+      ...diag(),
       error: "no_patched_days_remain_this_week",
     };
   }
@@ -550,8 +573,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       requiresFollowUp,
       dayKey: appliesTo.dayKey,
       needsScopeConfirmation: true,
-      severeMarkersHit,
-      triageCleared,
+      ...diag(),
     };
   }
 
@@ -584,8 +606,7 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       persisted.proposalId,
     ),
     needsScopeConfirmation: false,
-    severeMarkersHit,
-    triageCleared,
+    ...diag(),
   };
 }
 
@@ -2034,27 +2055,72 @@ const NEGATION_SHAPED_SEVERE =
 const REPORT_CONTINUATION =
   /^[^\S\n]*(?:is|was|has|came|got|started|returned|keeps?|won'?t|again)\b/;
 
+/**
+ * Removes the ways a model writes up answers that were CLEAN, so the
+ * severe screen doesn't fire on the symptom words inside a denial. Only for
+ * model-authored text (userNote, painTriage.description); the user's raw
+ * turn is never passed through this — "without warning, sharp pain" from a
+ * user must stay severe. Each strip stops at a contrast word, so "denies
+ * sharp pain but has numbness" keeps "but has numbness".
+ */
+export function stripClinicalDenials(text: string): string {
+  const stop = String.raw`(?=\b(?:but|except|although|though|however|yet)\b|[.;!?]|$)`;
+  return (
+    text
+      // A whole list signed off at once: "sharp pain, numbness, radiating
+      // symptoms all denied." / "… none reported." — the sentence goes.
+      .replace(/[^.;!?]*\b(?:all|both)\s+(?:denied|absent|negative)\b|[^.;!?]*\bnone\s+(?:reported|present|endorsed)\b/gi, " ")
+      // "red flags (sharp, numbness, radiating) denied" / "(…) absent"
+      .replace(/\([^)]*\)\s*(?:denied|absent|negative|none|ruled out)\b/gi, " ")
+      // A trailing "… denied" takes its own clause back to the last comma
+      // or sentence break: "reports sharp pain, numbness denied" keeps the
+      // sharp pain.
+      .replace(/(^|[.;!?,])[^.;!?,]*?\b(?:denied|absent|negative)\b(?=\s*(?:[.;!?,)]|$))/gi, "$1 ")
+      // "denies sharp pain, numbness, or radiating pain" / "without sharp
+      // pain" / "negative for …" / "ruled out …" — up to a contrast word.
+      .replace(new RegExp(String.raw`\b(?:denies|denied|denying|deny|without|negative for|ruled out|ruling out|no history of|free of|absent of)\b[^.;!?]*?` + stop, "gi"), " ")
+      // One "no"/"not" covering a whole list — "no sharp pain, numbness or
+      // radiating symptoms" — negates everything up to the sentence break or
+      // a contrast word. (The user's raw text keeps the stricter mask, where
+      // a single "no" only reaches the next comma.)
+      .replace(new RegExp(String.raw`\b(?:no|not)\s+[^.;!?]*?` + stop, "gi"), " ")
+      // "no red flags reported (sharp, numbness, radiating)" / "no red flags: …"
+      .replace(new RegExp(String.raw`\b(?:no|without)\s+red\s+flags?\b[^.;!?]*?` + stop, "gi"), " ")
+      // "sharp pain: no" / "numbness: none" — only when the answer ends
+      // there; "lower back: no sharp pain" is left for the negation mask.
+      .replace(/\b[a-z][a-z /-]*:\s*(?:no|none|denied|negative|nil)\b(?=\s*(?:[;,.!?)]|$))/gi, " ")
+  );
+}
+
 export function hasSevereMarkers(content: string): boolean {
+  return severeMarkerHit(content) !== null;
+}
+
+/**
+ * Which of OUR severe patterns fired (its source, trimmed), or null. The
+ * pattern is vocabulary we wrote, never the user's or model's text, so it's
+ * safe to log — and it's what finally explains a locked proposal.
+ */
+export function severeMarkerHit(content: string): string | null {
   // iOS smart punctuation is on by default — normalize curly apostrophes so
   // "can’t feel" matches the same patterns as "can't feel".
   const lower = content.toLowerCase().replace(/[‘’]/g, "'");
   if (NEGATION_SHAPED_SEVERE.test(lower)) {
-    return true;
+    return "negation_shaped_severe";
   }
-  let reLock = false;
+  let reLock: string | null = null;
   const text = lower.replace(NEGATION_CLAUSE, (span, offset: number, whole: string) => {
-    if (
-      SEVERE_MARKER_PATTERNS.some((pattern) => pattern.test(span)) &&
-      REPORT_CONTINUATION.test(whole.slice(offset + span.length))
-    ) {
-      reLock = true;
+    const inside = SEVERE_MARKER_PATTERNS.find((pattern) => pattern.test(span));
+    if (inside && REPORT_CONTINUATION.test(whole.slice(offset + span.length))) {
+      reLock = `relock:${inside.source.slice(0, 40)}`;
     }
     return " ";
   });
   if (reLock) {
-    return true;
+    return reLock;
   }
-  return SEVERE_MARKER_PATTERNS.some((pattern) => pattern.test(text));
+  const hit = SEVERE_MARKER_PATTERNS.find((pattern) => pattern.test(text));
+  return hit ? hit.source.slice(0, 40) : null;
 }
 
 function riskForCategory(category: AdjustmentCategory, content: string): AdjustmentRiskLevel {

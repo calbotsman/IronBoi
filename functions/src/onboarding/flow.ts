@@ -499,6 +499,7 @@ export function buildWorkoutPlanFromProfile(
   userId: string,
   profile: {
     schedule: { daysPerWeek?: number; preferredDays?: string[] };
+    trainingFocus?: z.infer<typeof TrainingFocus>;
   },
   defaultPlan: Record<string, PlannedWorkoutDayType>,
   now: string,
@@ -511,40 +512,137 @@ export function buildWorkoutPlanFromProfile(
       defaultPlan,
       profile.schedule.daysPerWeek ?? 3,
       profile.schedule.preferredDays,
+      profile.trainingFocus,
     ),
     updatedAt: now,
   });
+}
+
+/**
+ * Which structure the plan takes. Onboarding recommends full-body for
+ * three days or fewer (and for anyone new) and a split for five or more —
+ * and until 2026-10-09 the generator ignored that answer and handed out
+ * the seed's push/pull rotation regardless: "I recommend full-body" then a
+ * Push day. The generator now follows the same rule as the recommendation.
+ */
+export function planStructure(
+  focus: z.infer<typeof TrainingFocus> | undefined,
+  daysPerWeek: number,
+): "full_body" | "split" {
+  switch (focus) {
+    case "full_body":
+    case "mobility_recovery":
+    case "endurance_conditioning":
+      return "full_body";
+    case "muscle_split":
+    case "strength_conditioning":
+      return "split";
+    default:
+      return daysPerWeek <= 3 ? "full_body" : "split";
+  }
 }
 
 export function selectPlanDays(
   defaultPlan: Record<string, PlannedWorkoutDayType>,
   daysPerWeek: number,
   preferredDays?: string[],
+  focus?: z.infer<typeof TrainingFocus>,
 ) {
   const clamped = Math.max(1, Math.min(7, daysPerWeek));
   const trainingDays = pickTrainingDays(clamped, preferredDays);
 
-  // For each training day, pull the next day-with-exercises from the seed
-  // plan in seed order. Seed Mon→Sun is a curated rotation so distributing
-  // it by index (not by exact day) keeps the muscle-group rhythm.
   const seedDaysWithExercises = WEEK_ORDER.map((day) => defaultPlan[day]).filter(
     (value) => value && (value.exercises?.length ?? 0) > 0,
   );
+  const sessions =
+    planStructure(focus, clamped) === "full_body"
+      ? fullBodySessions(seedDaysWithExercises)
+      : splitSessions(seedDaysWithExercises);
 
   const restDay = { name: "Rest", muscles: [], exercises: [] };
   const selected = Object.fromEntries(
     WEEK_ORDER.map((day) => {
       const trainingIdx = trainingDays.indexOf(day);
       if (trainingIdx === -1) return [day, restDay];
-      // Modulo so we wrap when daysPerWeek > seed-day-count.
-      const seed =
-        seedDaysWithExercises[trainingIdx % seedDaysWithExercises.length];
-      return [day, seed ?? restDay];
+      // Modulo so we wrap when daysPerWeek > session count.
+      const session = sessions[trainingIdx % sessions.length];
+      return [day, session ?? restDay];
     }),
   ) as Record<string, PlannedWorkoutDayType>;
   // Every loaded exercise the catalog knows gets a progression rule, so the
   // plan actually moves week to week (see workouts/progressionDefaults.ts).
   return attachDefaultProgression(selected).days;
+}
+
+function isLegsDay(day: PlannedWorkoutDayType) {
+  return day.muscles.some((m) => /leg|glute|quad|hamstring/i.test(m)) || /leg/i.test(day.name);
+}
+function isPushDay(day: PlannedWorkoutDayType) {
+  return day.muscles.some((m) => /chest|shoulder/i.test(m)) || /push/i.test(day.name);
+}
+function isPullDay(day: PlannedWorkoutDayType) {
+  return day.muscles.some((m) => /back/i.test(m)) || /pull/i.test(day.name);
+}
+
+/**
+ * The seed's distinct days (the seed pads Sat/Sun with a copy of Friday)
+ * in an order a coach would prescribe: a legs day inside the first three,
+ * so a three-day split is push / pull / legs and not push / pull / push.
+ */
+function splitSessions(seedDays: PlannedWorkoutDayType[]): PlannedWorkoutDayType[] {
+  const unique: PlannedWorkoutDayType[] = [];
+  const seen = new Set<string>();
+  for (const day of seedDays) {
+    const key = `${day.name}|${day.exercises.map((e) => e.name).join(",")}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(day);
+    }
+  }
+  const legsIdx = unique.findIndex(isLegsDay);
+  if (legsIdx > 2) {
+    const [legs] = unique.splice(legsIdx, 1);
+    unique.splice(2, 0, legs);
+  }
+  return unique.length ? unique : seedDays;
+}
+
+/**
+ * Full-body sessions built from the seed: each takes a lower-body lift, a
+ * push, a pull and a core or carry move from different seed days, rotating
+ * through them so A, B and C differ. Sets, reps and weights come with the
+ * exercise from the seed, so progression rules still attach.
+ */
+function fullBodySessions(seedDays: PlannedWorkoutDayType[]): PlannedWorkoutDayType[] {
+  const pool = (pick: (d: PlannedWorkoutDayType) => boolean) =>
+    seedDays.filter(pick).flatMap((d) => d.exercises);
+  const legs = pool(isLegsDay);
+  const push = pool(isPushDay);
+  const pull = pool(isPullDay);
+  const core = seedDays.flatMap((d) => d.exercises).filter((e) => /plank|leg raise|carry|dead bug|bird.?dog/i.test(e.name));
+  // Nothing to compose from (a seed with no legs or no push day): fall
+  // back to the split so the user still gets a plan.
+  if (!legs.length || !push.length || !pull.length) return splitSessions(seedDays);
+
+  // Compounds first in each pool: the seed lists them first on each day,
+  // and the big lift should open the session.
+  const nth = <T,>(list: T[], i: number) => list[i % list.length];
+  const sessions: PlannedWorkoutDayType[] = [];
+  const count = Math.min(3, Math.max(legs.length, push.length, pull.length));
+  const seen = new Set<string>();
+  for (let i = 0; i < count; i += 1) {
+    const picks = [nth(legs, i), nth(push, i), nth(pull, i), core.length ? nth(core, i) : undefined]
+      .filter((e): e is NonNullable<typeof e> => Boolean(e));
+    const key = picks.map((e) => e.name).join(",");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sessions.push({
+      name: `Full body · ${String.fromCharCode(65 + sessions.length)}`,
+      muscles: ["Legs", "Chest", "Back", "Core"],
+      exercises: picks,
+    });
+  }
+  return sessions;
 }
 
 // If the user listed preferred days in onboarding and they're well-formed

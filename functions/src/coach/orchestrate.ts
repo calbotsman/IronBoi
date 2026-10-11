@@ -13,6 +13,7 @@ import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { retrieveResearchCorpus } from "../corpus/researchCorpus.js";
 import { ModelBillingError, selectCoachModelProvider, type CoachToolExecutor } from "./modelProvider.js";
+import { spokenSummary } from "./spoken.js";
 import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import {
   classifyUserMessage,
@@ -43,11 +44,21 @@ export function isCoachToolLoopEnabled(): boolean {
 /** Appended to the system prompt when the user is talking out loud. */
 export const VOICE_MODE_RULES = [
   "VOICE MODE — the user is talking to you out loud and your reply is read aloud by a voice.",
-  "- Reply in 1–3 short spoken sentences, about 40 words at most. Say the one thing that matters; offer more only if they ask.",
+  "- Reply in 1–3 short spoken sentences, about 40 words at most. Say the one thing that matters; offer more only if they ask. Anything past the first 300 characters is not read aloud.",
   "- No lists, bullets, markdown, headings, or tables. Say numbers the way a coach would say them (\"three sets of eight at one fifty-five\").",
   "- Sound like a calm personal trainer standing next to them, not a document.",
-  "- You have a body on their screen that can demonstrate push-ups and a plank. When showing would help, say it plainly (\"Let's do push-ups.\" / \"Watch this plank.\").",
   "- Tools and safety rules are unchanged: still use the tools, still ask red-flag questions about pain.",
+].join("\n");
+
+/**
+ * Appended whenever the request comes from the app (any inputMode): the
+ * coach has a body on screen and should use it. Named moves are matched by
+ * the app (MoveCue in ExerciseMotion.swift), so the phrasing matters.
+ */
+export const BODY_RULES = [
+  "YOUR BODY — you have a body on the user's screen. It can demonstrate push-ups, a plank, squats and lunges.",
+  "- To show one, say it plainly in the reply: \"Let's do push-ups.\" / \"Watch this plank.\" / \"Try a squat with me.\" / \"Let's do lunges.\"",
+  "- Offer a demonstration when form, a warm-up, or a swap is the point. At most one per reply, and never when the user is mid-set.",
 ].join("\n");
 
 /**
@@ -249,6 +260,7 @@ export async function orchestrateCoachTurn({
     const system = [
       assembled.system,
       spoken ? VOICE_MODE_RULES : null,
+      inputMode ? BODY_RULES : null,
       styleRules,
     ].filter((part): part is string => Boolean(part)).join("\n\n");
     const userMessage = assembled.userMessage;
@@ -404,6 +416,9 @@ export async function orchestrateCoachTurn({
     await assistantRef.set(
       {
         content,
+        // Voice mode: what the voice reads is capped server-side; the full
+        // reply stays on screen.
+        ...(spoken ? { spokenContent: spokenSummary(content) } : {}),
         status: terminalStatusFor(postflight),
         riskLevel: preflight.riskTier === "high" ? "high" : "low",
         requiredUserAction:

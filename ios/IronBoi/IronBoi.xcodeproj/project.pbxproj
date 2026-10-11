@@ -29,6 +29,7 @@
 		5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 241473A5576E7F94D3F1BA1E /* README.md */; };
 		5E959043BE8381E22181D226 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F433BDABFADDC8C6D06785F7 /* RecordView.swift */; };
 		5E98F19676BE3E591B1B881B /* TypeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6486137A4FFFD180E600A3 /* TypeBar.swift */; };
+		6059BCCBAB9ECCB125267B5A /* OrbPhysics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */; };
 		61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8251B627C5781604E47176FE /* CoachView.swift */; };
 		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
 		6A4164630BA54C06E707A4CB /* OrbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF82FC6D6FEC44A6DBE3C92F /* OrbView.swift */; };
@@ -81,6 +82,7 @@
 		451607DCC308F24BECF26C07 /* LiveWorkoutCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWorkoutCard.swift; sourceTree = "<group>"; };
 		5041EB6152324AB118525DA6 /* IronBoiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IronBoiApp.swift; sourceTree = "<group>"; };
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
+		56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbPhysics.swift; sourceTree = "<group>"; };
 		58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneBodyMotion.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
 		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
@@ -226,6 +228,7 @@
 				D8BC768A7E4EB1E601050122 /* Gear.swift */,
 				60101B940C2222A85AFAE5E9 /* OneBody.metal */,
 				58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */,
+				56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */,
 				EF82FC6D6FEC44A6DBE3C92F /* OrbView.swift */,
 			);
 			path = Orb;
@@ -427,6 +430,7 @@
 				0F0571513F28E48AA8DA4986 /* OnboardingView.swift in Sources */,
 				8425C1E600C41691F5E2B92B /* OneBody.metal in Sources */,
 				56407351422DBC9891A5C08B /* OneBodyMotion.swift in Sources */,
+				6059BCCBAB9ECCB125267B5A /* OrbPhysics.swift in Sources */,
 				6A4164630BA54C06E707A4CB /* OrbView.swift in Sources */,
 				1F427C3553FD7EDA6A281A8A /* PaperBackground.swift in Sources */,
 				DDE287948E75C936D7F8D05A /* PlanReviewCard.swift in Sources */,
@@ -575,7 +579,7 @@
 				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 36;
 				DEVELOPMENT_TEAM = SGQ2WLB6M9;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
@@ -606,7 +610,7 @@
 				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 34;
+				CURRENT_PROJECT_VERSION = 36;
 				DEVELOPMENT_TEAM = SGQ2WLB6M9;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;

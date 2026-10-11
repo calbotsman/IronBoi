@@ -82,7 +82,7 @@ Not collected: location, contacts, photos, HealthKit (none yet), audio. Speech r
 
 ## Screenshots (6.9" required — 1320×2868 or 1290×2796)
 
-The Coach screen was rebuilt around the voice orb on 2026-10-05, so every shot is retaken from the current build:
+A full set from the 2026-10-09 build is in `docs/app-store/screenshots/2026-10-09/` (iPhone 17 Pro Max simulator, 1320×2868, preview session with seeded data): 01 coach reply, 02 live workout with the rest timer (02b expanded set list), 03 plan-change card, 04 memory, 05 history. Retake after the icon lands and after any Coach-screen change. The plan:
 1. **Coach** — the orb mid-reply with a sentence subtitle. Caption: "Just talk to it."
 2. **Coach, live workout** — the expanded set list with counted reps. Caption: "Count your reps. It logs the set."
 3. **Coach** — a session reworked for a short day (proposal card). Caption: "Short on time? It adapts."

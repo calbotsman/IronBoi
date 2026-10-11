@@ -108,6 +108,25 @@ final class OrbModel {
     private var lift: Float = 0.05
     private(set) var squash: Float = 1
     private var squashVelocity: Float = 0
+    /// Unit vector the squash acts along (see the shader). Vertical at rest.
+    private(set) var squashAxis = SIMD2<Float>(0, 1)
+    private var previousCenter: SIMD2<Float>?
+    /// Speed and direction the blob is moving, in shader units per second,
+    /// smoothed a touch so a single late frame doesn't twitch it.
+    private var blobVelocity = SIMD2<Float>(0, 0)
+    /// The hips' velocity as the person started gathering into the blob —
+    /// the arrival speed, before the gather-in springs bleed it off.
+    private var arrival: SIMD2<Float>?
+    /// The hips' fastest recent velocity while the body is a person,
+    /// decaying over about a quarter second. Exits ease to a stop before
+    /// the gather-in starts, so the speed at that instant is nearly zero;
+    /// this is the speed the landing should answer to.
+    private var hipsPeak = SIMD2<Float>(0, 0)
+    /// Jelly: the 2- and 3-lobe surface modes, each a spring at rest at 0.
+    private(set) var jelly = SIMD2<Float>(0, 0)
+    private var jellyVelocity = SIMD2<Float>(0, 0)
+    private var liftVelocity: Float = 0
+    private let physics = OrbPhysics.shared
     /// The person is gathered into the blob's shape, ready to grow out of it.
     private var folded = false
     private(set) var lobes = SIMD3<Float>(0, 0, 0)
@@ -118,10 +137,16 @@ final class OrbModel {
     private(set) var tint: Float = 0
     private var agentPresence: Float = 0
     private var agentLevelSlow: Float = 0
+    private var restBlend: Float = 0
 
     // x, y, radius, alive — the layout the shader reads.
     private var drops = [SIMD4<Float>](repeating: .zero, count: OrbModel.maxDrops)
     private var velocity = [Float](repeating: 0, count: OrbModel.maxDrops)
+    private var dropVelocity = [SIMD2<Float>](repeating: .zero, count: OrbModel.maxDrops)
+    /// Inside the body: it stays put and shrinks. Without this a fast drop
+    /// crossed the centre in a frame, flew out the top and fell back on.
+    private var dropAbsorbed = [Bool](repeating: false, count: OrbModel.maxDrops)
+    private static let dropMaxSpeed: Float = 2.0
     private var nextDrop = 0
     private var lastYouOnsets = 0
 
@@ -162,7 +187,7 @@ final class OrbModel {
               loop: ExerciseMotion? = nil, inWorkout: Bool = false, setsDone: Int = 0,
               demo: ExerciseMotion? = nil, ambient: Bool = false,
               lesson: LessonCue? = nil, counting: Bool = false, youTalking: Bool = false,
-              spawnY: Float? = nil,
+              spawnY: Float? = nil, stagedBloops: Bool = false, resting: Bool = false,
               scale: Float = 1, reduceMotion: Bool) {
         bodyScale += (scale - bodyScale) * 0.15
         let now = CACurrentMediaTime()
@@ -176,12 +201,31 @@ final class OrbModel {
         agentPresence += (((phase == .speaking) ? 1 : 0) - agentPresence) * k
         agentLevelSlow += (agent.level * agentPresence - agentLevelSlow) * k * 0.5
 
-        let breathe: Float = reduceMotion ? 0 : 0.012 * sin(time * 0.9)
+        // Resting between sets: a slower, deeper breath — the blob is the
+        // rest timer you can see without looking at a number.
+        restBlend += ((resting ? 1 : 0) - restBlend) * min(1, dt * 1.5)
+        let breathe: Float = reduceMotion ? 0
+            : (0.012 + 0.014 * restBlend) * sin(time * (0.9 - 0.5 * restBlend))
         // `scale` shrinks the body when a card takes the space below it.
         radius += ((baseR + agentLevelSlow * levelR + agent.peak * agentPresence * 0.05 + breathe) * scale - radius) * k
-        // Leans down toward you and squashes only while you're actually talking.
-        lift += ((0.05 - you.presence * lean) * scale - lift) * k
+        // Leans down toward you and squashes only while you're actually
+        // talking — on a spring, so it settles back with a small overshoot
+        // instead of sliding.
+        let liftTarget = (0.05 - you.presence * lean) * scale
+        if reduceMotion {
+            lift += (liftTarget - lift) * k
+        } else {
+            let w = physics.leanStiffness, z = physics.leanDamping
+            liftVelocity += (-(w * w) * (lift - liftTarget) - 2 * z * w * liftVelocity) * dt
+            lift += liftVelocity * dt
+        }
         center = anchor + SIMD2(0, lift)
+        // Mass: where the blob is going, and how fast.
+        if let previous = previousCenter, dt > 0 {
+            let v = (center - previous) / dt
+            blobVelocity += (v - blobVelocity) * min(1, dt * 20)
+        }
+        previousCenter = center
         let pitch: Float = 0.5 + (agent.bands.y - 0.5) * 0.4
         let squashBase = 1 - you.presence * squashGain + agentPresence * (pitch - 0.5) * 0.2
         let lobeTarget = agent.bands * lobeGains * agentPresence + SIMD3(repeating: agent.peak * agentPresence * 0.02)
@@ -190,32 +234,74 @@ final class OrbModel {
         spin += dt * (0.25 + think * 1.2) * (reduceMotion ? 0.25 : 1)
         if spin > 2 * .pi * 1000 { spin -= 2 * .pi * 1000 }
 
-        // Your syllables → droplets rising from just below the screen.
+        // Talk mode: you're speaking to the coach and it's listening as a
+        // blob — not counting reps with you, not mid-lesson, and not just
+        // hearing the gym through the workout's always-open mic.
+        let talkMode = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
+
+        // Your syllables → droplets rising from just below the screen. Only
+        // in talk mode (or the intro's staged words): the blob fills up with
+        // what you say to it, nothing else.
         let bottom = spawnY ?? -Float(size.height / max(min(size.width, size.height), 1)) - 0.1
         if you.onsets != lastYouOnsets {
-            if you.active, !reduceMotion {
-                drops[nextDrop] = SIMD4(anchor.x + Float.random(in: -0.5...0.5) * 0.9, bottom,
-                                        dropSize * (0.6 + you.peak * 1.2), 1)
+            if you.active, !reduceMotion, talkMode || stagedBloops {
+                let x = anchor.x + Float.random(in: -0.5...0.5) * 0.9
+                drops[nextDrop] = SIMD4(x, bottom, dropSize * (0.6 + you.peak * 1.2), 1)
                 velocity[nextDrop] = 0
+                dropAbsorbed[nextDrop] = false
+                // Thrown up and a little sideways; gravity and the pull do the rest.
+                dropVelocity[nextDrop] = SIMD2(Float.random(in: -0.35...0.35) * physics.bloopLaunch,
+                                               physics.bloopLaunch * Float.random(in: 0.85...1.15))
                 nextDrop = (nextDrop + 1) % Self.maxDrops
             }
             lastYouOnsets = you.onsets
         }
         for i in drops.indices where drops[i].z > 0 {
-            // Accelerate toward the body's centre; absorbed once inside.
-            velocity[i] = min(dropSpeed, velocity[i] + dt * dropSpeed * 2)
             let dx = center.x - drops[i].x
             let dy = center.y - drops[i].y
             let dist = max(hypot(dx, dy), 0.0001)
-            drops[i].x += dx / dist * velocity[i] * dt * 0.6
-            drops[i].y += dy / dist * velocity[i] * dt
+            if dropAbsorbed[i] {
+                // Landed: drift the last bit in and let the shrink finish.
+                drops[i].x += dx * min(1, dt * 6)
+                drops[i].y += dy * min(1, dt * 6)
+            } else if physics.bloopLaunch > 0.001 {
+                // A thrown drop: gravity bends it, the body pulls it in, drag
+                // keeps it from flying off. Near the body the pull wins, but
+                // never so hard that it crosses the body in one frame.
+                var v = dropVelocity[i]
+                let toward = SIMD2(dx, dy) / dist
+                let pull = physics.bloopPull * (1 + 2 / max(dist, 0.3))
+                v += (toward * pull + SIMD2(0, -physics.bloopGravity) - v * physics.bloopDrag) * dt
+                let speed = simd_length(v)
+                if speed > Self.dropMaxSpeed { v *= Self.dropMaxSpeed / speed }
+                dropVelocity[i] = v
+                drops[i].x += v.x * dt
+                drops[i].y += v.y * dt
+            } else {
+                // Accelerate toward the body's centre; absorbed once inside.
+                velocity[i] = min(dropSpeed, velocity[i] + dt * dropSpeed * 2)
+                drops[i].x += dx / dist * velocity[i] * dt * 0.6
+                drops[i].y += dy / dist * velocity[i] * dt
+            }
             // Blue in flight; the instant it touches the body it's amber.
             // Any blend between the two passes through grey.
             // "Touch" is where the soft bridge starts: the edges within the fuse
             // distance (0.16), not the centres.
             let warm: Float = dist > radius + drops[i].z + 0.2 ? 1 : 0
             drops[i].w = min(drops[i].w, warm)
-            if dist < radius * 0.6 {
+            if dropAbsorbed[i] || dist < radius * 0.6 {
+                if !dropAbsorbed[i] {
+                    dropAbsorbed[i] = true
+                    // It lands: a nudge along the way it came, and the
+                    // surface rings.
+                    let arrivalDir = -SIMD2(dx, dy) / dist
+                    let size = drops[i].z / dropSize
+                    if !reduceMotion {
+                        squashAxis = simd_dot(arrivalDir, squashAxis) < 0 ? -arrivalDir : arrivalDir
+                        squashVelocity -= physics.bloopNudge * size
+                        jellyVelocity.y += physics.jellyBloop * size * physics.jellyStiffness * 2
+                    }
+                }
                 drops[i].z *= pow(0.85, dt * 60)
                 tint = min(1, tint + dt * 3 * tintGain)
                 if drops[i].z < 0.004 { drops[i] = .zero }
@@ -229,7 +315,7 @@ final class OrbModel {
         // blob only while words are actually being heard — not for gym
         // noise, not while you count (it does the reps with you), and not
         // mid-lesson.
-        let listening = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
+        let listening = talkMode
         if listening { life.rest(until: time + 2) }
         if phase != .rest { ambientLife.rest(until: time + 1.2) }
         let blob = BodyPose(joints: OneBodyMotion.standing(reduceMotion ? 0 : time), form: 0, side: 0, label: "")
@@ -265,6 +351,16 @@ final class OrbModel {
         // two trade places without a visible crossfade.
         let sphereRadius = radius / max(bodyScale * Self.size, 0.01)
         let sphere = [Joint](repeating: Joint(0, 0, sphereRadius), count: joints.count)
+        if form > 0 {
+            let hips = jointVelocity[2] * bodyScale * Self.size
+            if simd_length(hips) >= simd_length(hipsPeak) {
+                hipsPeak = hips
+            } else {
+                hipsPeak *= exp(-dt * physics.arrivalMemory)
+            }
+        } else {
+            hipsPeak = .zero
+        }
         if reduceMotion {
             form += (pose.form - form)
             moveJoints(toward: pose.joints, dt: dt, reduceMotion: true)
@@ -272,12 +368,14 @@ final class OrbModel {
             if form > 0 {
                 // Becoming the blob: gather into its shape first, then hand
                 // over — with a little plop.
-                moveJoints(toward: sphere, dt: dt, reduceMotion: false, stiffness: 1.5)
+                if arrival == nil { arrival = hipsPeak }
+                gatherJoints(into: sphere, dt: dt)
                 let spread = joints.map { simd_length(SIMD2($0.x, $0.y)) + abs($0.z - sphereRadius) }.max() ?? 0
                 if spread < 0.09 {
                     form = max(0, form - dt * 7)
                     if form == 0 {
-                        squashVelocity -= 2.4
+                        land(from: arrival ?? .zero)
+                        arrival = nil
                         folded = true
                     }
                 }
@@ -293,25 +391,74 @@ final class OrbModel {
                 jointVelocity = jointVelocity.map { _ in .zero }
                 folded = false
             }
+            arrival = nil
             form += (pose.form - form) * (1 - exp(-dt * 14))
             moveJoints(toward: pose.joints, dt: dt, reduceMotion: false)
         }
         // The blob's squash is a loose spring: a landing presses it flat and
-        // it wobbles back round.
-        let squashTarget = pose.squash ?? squashBase
+        // it wobbles back round. Moving, it stretches along its direction of
+        // travel; the axis follows the motion and holds when it stops, so a
+        // landing flattens the blob along the way it arrived.
+        let speed = simd_length(blobVelocity)
+        if speed > physics.restSpeed, !reduceMotion {
+            let direction = blobVelocity / speed
+            // Axis and -axis are the same squash; turn toward the nearer one.
+            let goal = simd_dot(direction, squashAxis) < 0 ? -direction : direction
+            squashAxis += (goal - squashAxis) * min(1, dt * physics.axisFollow)
+            squashAxis = simd_normalize(squashAxis)
+        }
+        let stretch = min(physics.stretchMax, 1 + max(0, speed - physics.restSpeed) * physics.stretchGain)
+        let squashTarget = pose.squash ?? (squashBase * stretch)
         if reduceMotion {
             squash += (squashTarget - squash) * k
         } else {
-            squashVelocity += (-(13 * 13) * (squash - squashTarget) - 2 * 0.35 * 13 * squashVelocity) * dt
-            squash = min(max(squash + squashVelocity * dt, 0.55), 1.4)
+            let w = physics.squashStiffness, z = physics.squashDamping
+            let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+            let h = dt / Float(steps)
+            for _ in 0..<steps {
+                squashVelocity += (-(w * w) * (squash - squashTarget) - 2 * z * w * squashVelocity) * h
+                squash += squashVelocity * h
+            }
+            squash = min(max(squash, 0.5), 1.6)
+        }
+        // Jelly: the surface modes ring down on their own springs.
+        if reduceMotion {
+            jelly = .zero
+            jellyVelocity = .zero
+        } else {
+            let wj = physics.jellyStiffness, zj = physics.jellyDamping
+            let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+            let h = dt / Float(steps)
+            for _ in 0..<steps {
+                jellyVelocity += (-(wj * wj) * jelly - 2 * zj * wj * jellyVelocity) * h
+                jelly += jellyVelocity * h
+            }
+            jelly = simd_clamp(jelly, SIMD2(repeating: -0.14), SIMD2(repeating: 0.14))
         }
         updateGear(for: pose, dt: dt, reduceMotion: reduceMotion)
-        // Eased: acts switch between side-on and front-on.
-        armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * 6))
+        // Eased: acts switch between side-on and front-on. Gathering into
+        // the blob it drops fast, or the tucked-elbow shading draws a dark
+        // ring on the ball for the last few frames of being a person.
+        let armRate: Float = pose.form < 0.01 ? 30 : 6
+        armDepth += (form * pose.side - armDepth) * (reduceMotion ? 1 : 1 - exp(-dt * armRate))
     }
 }
 
 extension OrbModel {
+    /// The person has just gathered into the blob: it lands along the way it
+    /// came, flattening harder the faster it arrived. `arrival` is the hips'
+    /// velocity at the moment of folding, in shader units per second.
+    fileprivate func land(from arrival: SIMD2<Float>) {
+        let speed = simd_length(arrival)
+        if speed > 0.02 {
+            let direction = arrival / speed
+            squashAxis = simd_dot(direction, squashAxis) < 0 ? -direction : direction
+        }
+        let kick = physics.landKick + physics.landKickPerSpeed * speed
+        squashVelocity -= kick
+        jellyVelocity.x -= physics.jellyLand * kick * physics.jellyStiffness
+    }
+
     /// Each joint is a damped spring with its own weight: the hips and chest
     /// are heavy and settle without fuss, elbows and hands are light and
     /// carry on a little past where they're going, the head nods after the
@@ -373,6 +520,28 @@ extension OrbModel {
         gearArray = flat
     }
 
+    /// Becoming the blob: the whole body contracts as one mass. Every joint
+    /// gets the same critically damped spring, so they all arrive together
+    /// and nothing overshoots — the opposite of a demonstration, where the
+    /// per-joint weights are what make the person feel alive.
+    fileprivate func gatherJoints(into targets: [Joint], dt: Float) {
+        let w = physics.gatherStiffness
+        let steps = max(1, Int((dt / (1 / 240)).rounded(.up)))
+        let h = dt / Float(steps)
+        for i in joints.indices {
+            var position = SIMD2(joints[i].x, joints[i].y)
+            var velocity = jointVelocity[i]
+            let goal = SIMD2(targets[i].x, targets[i].y)
+            for _ in 0..<steps {
+                velocity += (-(w * w) * (position - goal) - 2 * w * velocity) * h
+                position += velocity * h
+            }
+            jointVelocity[i] = velocity
+            joints[i] = Joint(position.x, position.y,
+                              joints[i].z + (targets[i].z - joints[i].z) * (1 - exp(-dt * w)))
+        }
+    }
+
     fileprivate func moveJoints(toward targets: [Joint], dt: Float, reduceMotion: Bool, stiffness: Float = 1) {
         guard !reduceMotion else {
             joints = targets
@@ -430,6 +599,11 @@ struct OrbView: View {
     var youTalking = false
     /// Where bloops start, in points from the top. Default: below the screen.
     var bloopStart: CGFloat? = nil
+    /// Bloops arrive whenever `you` has onsets, not only in talk mode — the
+    /// intro's staged words.
+    var stagedBloops = false
+    /// Between sets: breathe slow and deep.
+    var resting = false
     var setsDone = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -446,6 +620,7 @@ struct OrbView: View {
                                    loop: loop, inWorkout: inWorkout, setsDone: setsDone, demo: demo,
                                    ambient: ambient, lesson: lesson, counting: counting, youTalking: youTalking,
                                    spawnY: bloopStart.map { -Float(($0 - size.height / 2) / (min(size.width, size.height) / 2)) },
+                                   stagedBloops: stagedBloops, resting: resting,
                                    scale: Float(scale), reduceMotion: reduceMotion)
                 Rectangle()
                     .fill(Color.white)
@@ -454,6 +629,8 @@ struct OrbView: View {
                         .float(model.time),
                         .float(model.radius),
                         .float(model.squash),
+                        // Axis in xy, jelly amplitudes in zw (argument-count limit).
+                        .float4(model.squashAxis.x, model.squashAxis.y, model.jelly.x, model.jelly.y),
                         .float2(model.center.x, model.center.y),
                         .float3(model.lobes.x, model.lobes.y, model.lobes.z),
                         .float(model.spin),

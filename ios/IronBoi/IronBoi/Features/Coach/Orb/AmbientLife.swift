@@ -82,7 +82,51 @@ struct AmbientLife {
         }
     }
 
+    #if DEBUG
+    /// MYO_REEL=1: the same stunts in the same order, forever, so a physics
+    /// change can be judged against the last build. Each exit lands in the
+    /// middle from a different direction and speed.
+    private static let reel: [String] = [
+        "walkLeft", "dive", "still", "walkRight", "cannonball", "still",
+        "jump", "somersault", "still", "shadowBox", "melt", "still",
+    ]
+    private static let reelOn = ProcessInfo.processInfo.environment["MYO_REEL"] == "1"
+    private var reelIndex = 0
+
+    private mutating func nextFromReel(at t: Float) -> Act {
+        if case .walk(_, _, let to, _) = act { x = to }
+        // Every exit ends in the middle — that's where the blob is.
+        if Self.exits.contains(lastKind) { x = 0 }
+        let kind = Self.reel[reelIndex % Self.reel.count]
+        reelIndex += 1
+        lastKind = kind
+        switch kind {
+        case "walkLeft":
+            facing = -1
+            return .walk(start: t, from: x, to: -0.28, duration: max(1.4, abs(-0.28 - x) / 0.22 + 0.5))
+        case "walkRight":
+            facing = 1
+            return .walk(start: t, from: x, to: 0.28, duration: max(1.4, abs(0.28 - x) / 0.22 + 0.5))
+        case "dive": facing = x > 0 ? -1 : 1; return .dive(start: t, from: x)
+        case "cannonball": facing = x > 0 ? -1 : 1; return .cannonball(start: t, from: x)
+        case "somersault": facing = 1; return .somersault(start: t, from: x)
+        case "melt": return .melt(start: t, from: x)
+        case "jump": return .jump(start: t, count: 2, star: false)
+        case "shadowBox":
+            return .shadowBox(start: t, duration: 3.2, punches: [
+                Punch(at: 0.5, arm: 1), Punch(at: 0.72, arm: 0), Punch(at: 1.6, arm: 1),
+                Punch(at: 1.82, arm: 1), Punch(at: 2.04, arm: 0),
+            ])
+        default:
+            return .still(until: t + 1.8)
+        }
+    }
+    #endif
+
     private mutating func next(at t: Float) -> Act {
+        #if DEBUG
+        if Self.reelOn { return nextFromReel(at: t) }
+        #endif
         if case .walk(_, _, let to, _) = act { x = to }
         // Just went back into the blob: stay one for a beat, in the middle.
         if Self.exits.contains(lastKind) {
@@ -277,7 +321,15 @@ struct AmbientLife {
         let eased = smooth(u)
         let angle = -(0.35 + 0.95 * eased)
         let center = SIMD2<Float>(travel * 0.8 * eased, -0.04 + 0.16 * sin(u * .pi))
-        return ExitFrame(joints: OneBodyMotion.turned(superman, by: angle, offset: center), form: 1)
+        let straight = OneBodyMotion.turned(superman, by: angle, offset: center)
+        // A diver tucks on the way in: over the second half of the flight the
+        // long body curls into a ball that keeps rolling forward, so it
+        // arrives at the middle already round and the blob has nothing to
+        // gather. Without this it landed as a rod and every joint sprang to
+        // the centre on its own schedule — rod, lumps, ball.
+        let curl = smooth((u - 0.45) / 0.55)
+        let ball = OneBodyMotion.turned(OneBodyMotion.tucked(), by: angle - 1.6 * curl, offset: center)
+        return ExitFrame(joints: zip(straight, ball).map { $0 + ($1 - $0) * curl }, form: 1)
     }
 
     /// Knees go, then everything slumps into a puddle — which then pulls

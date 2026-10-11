@@ -134,6 +134,18 @@ export function refusalForVerdict(verdict: SafetyVerdict): {
           "Pain or a possible injury is a stop signal, not something to push through. I can't diagnose it here. Pause the aggravating movement and consider seeing a clinician, especially if it is persistent or sharp.",
         requiredUserAction: "seek_clinician",
       };
+    case "underage_weight_loss":
+      return {
+        content:
+          "I don't set calorie targets or weight-loss plans for anyone under 18 — bodies are still growing, and that needs a professional. Please talk to a parent or guardian, your doctor, or a registered dietitian about this. I'm glad to help with training that builds strength and skill.",
+        requiredUserAction: "seek_clinician",
+      };
+    case "drug_or_supplement_protocol":
+      return {
+        content:
+          "I can't give cycles, stacks, or dosing for SARMs, steroids, or other performance drugs. Questions about those belong with a doctor or sports medicine clinician who can check your health and bloodwork. I can help you gain muscle with training, protein, sleep, and consistency.",
+        requiredUserAction: "seek_clinician",
+      };
     case "cross_user_probe":
       return {
         content:

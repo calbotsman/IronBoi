@@ -109,7 +109,7 @@ targets:
         PRODUCT_NAME: IronBoi
         GENERATE_INFOPLIST_FILE: YES
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 34
+        CURRENT_PROJECT_VERSION: 36
         INFOPLIST_KEY_CFBundleDisplayName: MYO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
@@ -151,3 +151,30 @@ targets:
         # App Store. The Firebase AppAttestProvider reads this and routes
         # to Apple's matching attestation endpoint.
         com.apple.developer.devicecheck.appattest-environment: production
+
+# A second scheme for tuning the blob's physics in the simulator: no backend,
+# no mic, the stunt reel on loop and the live tuner (DEBUG only). Pick
+# "IronBoi Reel" in Xcode and Run; see docs/design/orb-physics-tuning.md.
+schemes:
+  IronBoi Reel:
+    build:
+      targets:
+        IronBoi: all
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: FIRAAppCheckDebugToken
+          value: 7B49E8DA-2CDA-4A4C-8C9E-93D1C5A40F11
+          isEnabled: true
+        - variable: MYO_PREVIEW
+          value: "1"
+          isEnabled: true
+        - variable: MYO_REEL
+          value: "1"
+          isEnabled: true
+        - variable: MYO_NO_MIC
+          value: "1"
+          isEnabled: true
+        - variable: MYO_TUNER
+          value: "1"
+          isEnabled: true

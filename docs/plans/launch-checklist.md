@@ -27,7 +27,7 @@ Re-audited from the repo, GitHub, the Firebase CLI and staging logs on 2026-10-0
 
 **Still open — Josh, in a web console:**
 1. `gcloud auth login` (expired; firebase CLI auth was fine on 10-07).
-2. Create the `ironboi-prod` Firebase project → add the iOS app → replace `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` with the real download → set `OPENROUTER_API_KEY` and `GEMINI_API_KEY` secrets → enable the Cloud Text-to-Speech API on the project → deploy. (As of 10-07 the only Firebase projects are ironboi-ac586, ironboi-fe18f and ironboi-staging.)
+2. Create the `ironboi-prod` Firebase project → add the iOS app → replace `ios/IronBoi/IronBoi/Firebase/GoogleService-Info-Prod.plist` with the real download → set `OPENROUTER_API_KEY` and `GEMINI_API_KEY` secrets → enable the Cloud Text-to-Speech API on the project → deploy. (2026-10-11: `ironboi-prod` created by CLI, iOS app registered, real `GoogleService-Info-Prod.plist` in the repo. **Billing not linked** — upgrade the project to Blaze in the console before Firestore, Functions or secrets can exist there.)
 3. Register App Attest for the app in Firebase App Check — **and verify in logs before enforcing.** On 2026-10-07 build 34 every callable logged `Failed to validate AppCheck token … Decoding App Check token failed` and `app_check_presence outcome=absent`. With enforcement off this costs nothing; with it on, every call fails. Flip `IRONBOI_ENFORCE_APP_CHECK` only after `app_check_presence` reports `outcome:present` from a real build.
 4. Host the privacy policy and pick a support URL (both required).
 5. In App Store Connect: paste the listing, answer App Privacy (declare OpenRouter and Google as processors), age rating, category, contacts.
@@ -37,9 +37,9 @@ Re-audited from the repo, GitHub, the Firebase CLI and staging logs on 2026-10-0
 
 **Still open — repo work:**
 - App icon. A kettlebell-stamp draft was rejected (2026-10-05); Zara recommends direction A — an M drawn in one ink stroke that reads as shoulders. Awaiting Josh's pick. `docs/design/app-icon/myo-icon.svg` is sitting untracked.
-- Screenshots. Retake all five from the current build (plan in `app-store-listing.md`); two untracked drafts are in `docs/app-store/screenshots/`.
+- Screenshots: a full set from the 2026-10-09 build is in `docs/app-store/screenshots/2026-10-09/`; retake after the icon lands.
 - Proposed memory facts aren't swept after 14 days (`decayProposedMemory` is still a nice-to-have).
-- Safety evals aren't run in CI (`functions/src/evals/safety-evals.json` has `releaseGate: true`, nothing runs it). Needs a runner with an LLM judge; not a one-liner.
+- Safety evals now have a runner: `node scripts/safety-evals.mjs` sends every case in `functions/src/evals/safety-evals.json` to the staging coach and a judge model scores the `must` / `mustNot` tags; `.github/workflows/safety-evals.yml` runs it weekly and on demand. **Josh: add the repository secret `OPENROUTER_API_KEY`** (a small-limit key of its own) or the workflow can't judge.
 - No iOS unit tests. `AppModel.swift` ~2.3k lines, `CoachStageView.swift` ~1.8k.
 - Then run `scripts/preflight-appstore.sh` — it must exit 0 before a public submission.
 

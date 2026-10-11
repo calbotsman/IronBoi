@@ -441,6 +441,9 @@ export function buildCoachToolRegistry(
         painTriageRedFlagsAsked: parsed.data.painTriage?.redFlagsAsked ?? null,
         painTriageUserReportsSevere: parsed.data.painTriage?.userReportsSevere ?? null,
         severeMarkersHit: "severeMarkersHit" in result ? result.severeMarkersHit : null,
+        severeMarker: "severeMarker" in result ? result.severeMarker : null,
+        triageCleared: "triageCleared" in result ? result.triageCleared : null,
+        adjustmentError: "error" in result ? result.error : null,
         rampWeekCount: parsed.data.rampWeeks?.length ?? 0,
         // Percentages only — the per-week `note` is model-authored text and
         // stays off the wire.

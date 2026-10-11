@@ -126,6 +126,10 @@ final class VoiceInputEngine: ObservableObject {
                 if let text = result?.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
                    !text.isEmpty, text != self.transcript {
                     self.transcript = text
+                    // Every partial, so a device test shows exactly what the
+                    // recogniser made of a count. DEBUG-only, like the rest
+                    // of the audio log.
+                    AudioHub.log("heard: \(text.suffix(80))")
                     self.schedulePauseCheck()
                 }
 
