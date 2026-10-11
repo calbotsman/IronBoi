@@ -234,7 +234,16 @@ export async function createPlanAdjustmentProposalFromTool(input: {
   // Joined with ". " (not spaces) so the negation mask in hasSevereMarkers
   // cannot bleed across utterance boundaries — a triage description ending
   // in a denial must not mask a severe phrase at the start of the raw turn.
-  const severeText = [originalUserText, input.painTriage?.description ?? "", rawText].join(". ");
+  // The raw turn is screened as-is (absolute). The model's own summaries of
+  // the answers get their clinical denials stripped first: "denies sharp
+  // pain", "red flags (sharp, numbness, radiating) denied", "sharp pain:
+  // no" are how a model writes up CLEAN answers, and every one of them
+  // tripped the screen — the 2026-10 nightly failures.
+  const severeText = [
+    stripClinicalDenials(originalUserText),
+    stripClinicalDenials(input.painTriage?.description ?? ""),
+    rawText,
+  ].join(". ");
   const severeMarkersHit = hasSevereMarkers(severeText);
   let riskLevel = riskForCategory(category, severeText);
   let requiresFollowUp = needsFollowUp(
@@ -2033,6 +2042,38 @@ const NEGATION_SHAPED_SEVERE =
 // cost is conservative ("no numbness or tingling is present" locks).
 const REPORT_CONTINUATION =
   /^[^\S\n]*(?:is|was|has|came|got|started|returned|keeps?|won'?t|again)\b/;
+
+/**
+ * Removes the ways a model writes up answers that were CLEAN, so the
+ * severe screen doesn't fire on the symptom words inside a denial. Only for
+ * model-authored text (userNote, painTriage.description); the user's raw
+ * turn is never passed through this — "without warning, sharp pain" from a
+ * user must stay severe. Each strip stops at a contrast word, so "denies
+ * sharp pain but has numbness" keeps "but has numbness".
+ */
+export function stripClinicalDenials(text: string): string {
+  const stop = String.raw`(?=\b(?:but|except|although|though|however|yet)\b|[.;!?]|$)`;
+  return (
+    text
+      // A whole list signed off at once: "sharp pain, numbness, radiating
+      // symptoms all denied." / "… none reported." — the sentence goes.
+      .replace(/[^.;!?]*\b(?:all|both)\s+(?:denied|absent|negative)\b|[^.;!?]*\bnone\s+(?:reported|present|endorsed)\b/gi, " ")
+      // "red flags (sharp, numbness, radiating) denied" / "(…) absent"
+      .replace(/\([^)]*\)\s*(?:denied|absent|negative|none|ruled out)\b/gi, " ")
+      // A trailing "… denied" takes its own clause back to the last comma
+      // or sentence break: "reports sharp pain, numbness denied" keeps the
+      // sharp pain.
+      .replace(/(^|[.;!?,])[^.;!?,]*?\b(?:denied|absent|negative)\b(?=\s*(?:[.;!?,)]|$))/gi, "$1 ")
+      // "denies sharp pain, numbness, or radiating pain" / "without sharp
+      // pain" / "negative for …" / "ruled out …" — up to a contrast word.
+      .replace(new RegExp(String.raw`\b(?:denies|denied|denying|deny|without|negative for|ruled out|ruling out|no history of|free of|absent of)\b[^.;!?]*?` + stop, "gi"), " ")
+      // "no red flags reported (sharp, numbness, radiating)" / "no red flags: …"
+      .replace(new RegExp(String.raw`\b(?:no|without)\s+red\s+flags?\b[^.;!?]*?` + stop, "gi"), " ")
+      // "sharp pain: no" / "numbness: none" — only when the answer ends
+      // there; "lower back: no sharp pain" is left for the negation mask.
+      .replace(/\b[a-z][a-z /-]*:\s*(?:no|none|denied|negative|nil)\b(?=\s*(?:[;,.!?)]|$))/gi, " ")
+  );
+}
 
 export function hasSevereMarkers(content: string): boolean {
   // iOS smart punctuation is on by default — normalize curly apostrophes so
