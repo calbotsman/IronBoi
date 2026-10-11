@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectPlanDays } from "../../../src/onboarding/flow.js";
+import { planStructure, selectPlanDays } from "../../../src/onboarding/flow.js";
 
 // Fixture: a minimal 7-day seed with distinguishable names so the test can
 // see which seed day ended up where. Each "training" day has at least one
@@ -97,5 +97,41 @@ describe("selectPlanDays — distributes training days across the week", () => {
       "Sat",
       "Sun",
     ]);
+  });
+});
+
+describe("selectPlanDays — the structure follows the recommended focus", () => {
+  const names = (plan: ReturnType<typeof selectPlanDays>) =>
+    Object.values(plan).filter((d) => d.exercises.length).map((d) => d.name);
+
+  it("full_body builds full-body sessions from the seed, not the push/pull rotation", () => {
+    const plan = selectPlanDays(SEED, 3, undefined, "full_body");
+    expect(names(plan)).toEqual(["Full body · A", "Full body · B", "Full body · C"]);
+    const monday = plan.Mon.exercises.map((e) => e.name);
+    // A lower-body lift, a push and a pull, each from a different seed day.
+    expect(monday).toContain("Squat");
+    expect(monday).toContain("Bench");
+    expect(monday).toContain("Row");
+  });
+
+  it("myo_recommended on three days is full body, same as the recommendation says", () => {
+    expect(planStructure("myo_recommended", 3)).toBe("full_body");
+    expect(planStructure(undefined, 3)).toBe("full_body");
+    expect(selectPlanDays(SEED, 3).Mon.name).toBe("Full body · A");
+  });
+
+  it("myo_recommended on five days is a split", () => {
+    expect(planStructure("myo_recommended", 5)).toBe("split");
+    expect(selectPlanDays(SEED, 5, undefined, "myo_recommended").Mon.name).toBe("Push");
+  });
+
+  it("a three-day split has a legs day, not push / pull / push", () => {
+    const plan = selectPlanDays(SEED, 3, undefined, "muscle_split");
+    expect(names(plan)).toEqual(["Push", "Pull", "Legs"]);
+  });
+
+  it("a split never hands out the seed's padded duplicate days", () => {
+    const plan = selectPlanDays(SEED, 7, undefined, "muscle_split");
+    expect(names(plan).slice(0, 5)).toEqual(["Push", "Pull", "Legs", "Push2", "Pull2"]);
   });
 });

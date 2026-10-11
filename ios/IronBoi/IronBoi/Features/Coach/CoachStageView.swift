@@ -93,6 +93,14 @@ struct CoachStageView: View {
     @State private var countBase = 0
     /// Closes the count after a quiet stretch.
     @State private var closeCountTask: Task<Void, Never>?
+    /// Resting between sets: when the rest ends. The status line counts it
+    /// down and the blob breathes slow until "go".
+    @State private var restEndsAt: Date?
+    @State private var restTask: Task<Void, Never>?
+    /// What Coach hadn't said yet when you cut in — offered back once the
+    /// set is logged ("want the rest of what I was saying?").
+    @State private var interruptedSpeech: String?
+    @State private var resumeOffered = false
     @State private var lastSpokenText = ""
     /// The body's resting place, measured from the layout.
     @State private var orbSlot: CGRect?
@@ -149,12 +157,21 @@ struct CoachStageView: View {
     private var debugLift: ExerciseMotion? {
         ProcessInfo.processInfo.environment["MYO_LIFT"].flatMap(ExerciseMotion.match)
     }
+    /// MYO_REEL=1: the physics reel — stunts on loop, fake syllables as
+    /// staged bloops every twelve seconds so bloop physics can be tuned.
+    private static let reelOn = ProcessInfo.processInfo.environment["MYO_REEL"] == "1"
     #else
     private var debugLift: ExerciseMotion? { nil }
+    private static let reelOn = false
     #endif
 
     var body: some View {
         stage
+        #if DEBUG
+        .overlay(alignment: .topTrailing) {
+            if ProcessInfo.processInfo.environment["MYO_TUNER"] == "1" { OrbPhysicsTuner() }
+        }
+        #endif
         .coordinateSpace(name: Self.space)
         .animation(MyoTheme.Motion.fade, value: showTodayCard)
         .animation(.easeInOut(duration: 0.35), value: workoutExpanded)
@@ -181,6 +198,27 @@ struct CoachStageView: View {
             if let raw = ProcessInfo.processInfo.environment["MYO_BODY_MOVE"],
                let move = BodyMove(rawValue: raw) {
                 director.perform(move)
+            }
+            if Self.reelOn {
+                Task { [meter = voiceInput.meter] in
+                    var reading = VoiceReading()
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 12_000_000_000)
+                        reading.active = true
+                        reading.level = 0.5
+                        for _ in 0..<7 {
+                            reading.onsets += 1
+                            reading.peak = Float.random(in: 0.45...0.95)
+                            reading.presence = min(1, reading.presence + 0.35)
+                            meter.set(reading)
+                            try? await Task.sleep(nanoseconds: UInt64.random(in: 180_000_000...380_000_000))
+                        }
+                        try? await Task.sleep(nanoseconds: 900_000_000)
+                        reading.active = false
+                        reading.presence = 0
+                        meter.set(reading)
+                    }
+                }
             }
             #endif
         }
@@ -244,11 +282,19 @@ struct CoachStageView: View {
             }
             guard !speaking else { return }
             // Coach finished on its own: whatever the open mic caught under
-            // it was echo or noise — start your turn clean. If you cut in,
-            // keep what you're saying.
+            // it was echo or noise — start your turn clean. Unless it was
+            // you: a count, or "set done", said under Coach is kept (and it
+            // can't be Coach's own words — those fail the echo test). If
+            // you cut in, keep what you're saying.
             if !cutIn, voiceInput.isListening {
-                markRestartHandled()
-                voiceInput.stop()
+                let heard = voiceInput.transcript
+                let yours = !heard.isEmpty && !Self.echoes(heard, of: voice.spokenText)
+                    && (WorkoutVoice.looksLikeCounting(heard)
+                        || (appModel.activeWorkout != nil && repCount > 0 && WorkoutVoice.saysSetDone(heard)))
+                if !yours {
+                    markRestartHandled()
+                    voiceInput.stop()
+                }
             }
             cutIn = false
             resumeListening()
@@ -257,15 +303,35 @@ struct CoachStageView: View {
         // silence): pick back up, unless it stopped on an error.
         // Counting reps out loud: the count updates as you say each number.
         .onChange(of: voiceInput.transcript) { _, transcript in
-            // Only with echo cancellation on: without it the mic would hear
-            // Coach and Coach would cut itself off.
-            if voice.isSpeaking, conversationActive, AudioHub.shared.canTalkOver,
-               !voice.speakingOnDevice, !Self.echoes(transcript, of: voice.caption),
-               transcript.split(separator: " ").count >= 2 {
-                // You started talking: Coach stops and listens.
-                cutIn = true
-                voice.stop()
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            // You started talking over Coach: Coach stops and listens. Two
+            // ways in. Mid-workout, the next number of your count or "done"
+            // cuts in on its own — one word, no waiting — and it can't be
+            // Coach cutting itself off, because Coach saying "eight" only
+            // counts if you were on seven. Otherwise two words that aren't
+            // an echo of what Coach is saying. The echo test is what keeps
+            // this safe without echo cancellation (speaker + music); the
+            // on-device fallback voice can't be cancelled at all, so only
+            // the count route is open under it.
+            if voice.isSpeaking, conversationActive, !Self.echoes(transcript, of: voice.spokenText) {
+                var counted = appModel.activeWorkout != nil
+                    && WorkoutVoice.cutsIn(transcript, repCount: repCount, countBase: countBase)
+                // Starting a count from nothing is the one case a single
+                // number can't prove is you: "one" is in half of Coach's
+                // sentences. Without echo cancellation it takes "one, two".
+                if counted, repCount == 0, !AudioHub.shared.canTalkOver,
+                   WorkoutVoice.repCount(in: transcript, from: countBase) < 2 {
+                    counted = false
+                }
+                let spoke = !voice.speakingOnDevice && transcript.split(separator: " ").count >= 2
+                if counted || spoke {
+                    cutIn = true
+                    AudioHub.log("cut in (\(counted ? "count" : "speech")): \"\(transcript.suffix(40))\" echo=\(AudioHub.shared.canTalkOver)")
+                    // Counting over an instruction: keep the rest of it for
+                    // after the set. Talking over it: you've moved on.
+                    interruptedSpeech = counted ? voice.remainingSpeech : nil
+                    voice.stop()
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                }
             }
             trackReps(in: transcript)
         }
@@ -319,6 +385,8 @@ struct CoachStageView: View {
                     lesson: lessonCue,
                     counting: repCount > 0,
                     youTalking: !voiceInput.transcript.isEmpty,
+                    stagedBloops: Self.reelOn,
+                    resting: restEndsAt != nil,
                     setsDone: appModel.activeWorkout?.exercises.reduce(0) { $0 + $1.completedSetCount } ?? 0
                 )
             }
@@ -580,15 +648,20 @@ struct CoachStageView: View {
         send(line, spoken: true)
     }
 
-    /// The mic is hearing Coach's own sentence (a Bluetooth speaker, a car)
-    /// rather than you: most of what it heard is in what Coach is saying.
+    /// The mic is hearing Coach's own voice (the speaker with no echo
+    /// cancellation, a Bluetooth speaker, a car) rather than you: most of
+    /// what it heard is in what Coach is saying. Compared against the WHOLE
+    /// reply, not just the current sentence, and with number words left
+    /// out — Coach's instructions are full of them ("three sets of eight"),
+    /// and that made your own "one, two, three" look like echo.
     private static func echoes(_ heard: String, of spoken: String) -> Bool {
         func words(_ s: String) -> [String] {
-            s.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { $0.count > 2 }
+            s.lowercased().components(separatedBy: CharacterSet.letters.inverted)
+                .filter { $0.count > 2 && !WorkoutVoice.isNumberWord($0) }
         }
         let said = Set(words(spoken))
         let got = words(heard)
-        guard !said.isEmpty, !got.isEmpty else { return false }
+        guard !said.isEmpty, got.count >= 2 else { return false }
         return Double(got.filter(said.contains).count) / Double(got.count) >= 0.5
     }
 
@@ -909,6 +982,10 @@ struct CoachStageView: View {
     }
 
     private var statusLine: String {
+        if let restEndsAt, appModel.activeWorkout != nil {
+            let left = max(0, Int(restEndsAt.timeIntervalSinceNow.rounded(.up)))
+            return String(format: "Rest · %d:%02d", left / 60, left % 60)
+        }
         switch phase {
         case .listening: return "Listening"
         case .thinking: return "Thinking"
@@ -979,6 +1056,22 @@ struct CoachStageView: View {
         let addressed = typedTurn || Self.addressesCoach(heard)
         let text = Self.addressesCoach(heard) ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
+        // "Want the rest of what I was saying?" — yes reads it, no drops it.
+        if resumeOffered, questionIsFresh, let yes = Self.yesOrNo(text) {
+            resumeOffered = false
+            let rest = interruptedSpeech
+            interruptedSpeech = nil
+            if yes, let rest, !rest.isEmpty {
+                markRestartHandled()
+                voice.speak(rest, messageId: "local-\(UUID().uuidString)")
+                try? AudioHub.shared.start()
+                voiceInput.listen()
+            } else {
+                confirm(yes ? "Nothing more to add." : "Okay.")
+            }
+            return
+        }
+        if appModel.activeWorkout != nil, handleRestCommand(text) { return }
         if let choice = swapChoice, questionIsFresh, let pick = Self.pickSwap(text, from: choice.options) {
             chooseSwap(pick)
             return
@@ -1117,7 +1210,11 @@ struct CoachStageView: View {
         guard count > repCount else { return }
         repCount = count
         voiceInput.holdOpen = true
+        // You're lifting again: the rest is over, quietly.
+        if restEndsAt != nil { cancelRest() }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // A tick you can hear without looking; two notes at the target.
+        AudioHub.shared.play(cue: countedSet == nil && count >= exercise.targetReps ? .target : .tick)
         if let done = countedSet {
             appModel.updateSetReps(exerciseIndex: done.exercise, setNumber: done.set, reps: count)
         } else if count >= exercise.targetReps,
@@ -1181,12 +1278,93 @@ struct CoachStageView: View {
         } else {
             head = "Set \(setNumber) done."
         }
-        let line = setDoneLine(head, exerciseIndex: countedIndex)
+        var line = setDoneLine(head, exerciseIndex: countedIndex)
+        line += restLine(afterSetOn: countedIndex)
+        if let interrupted = interruptedSpeech, !interrupted.isEmpty {
+            line += " Want the rest of what I was saying?"
+            resumeOffered = true
+            askedAt = Date()
+        }
         // Clear the counted words before Coach speaks, so they don't carry
         // into the next utterance.
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
+    }
+
+    // MARK: - Rest between sets
+
+    /// Heavy compounds get a minute and a half, everything else a minute.
+    private static func restSeconds(for exercise: ActiveWorkoutExercise) -> Int {
+        switch ExerciseMotion.match(exercise.name)?.lift {
+        case .squat, .hinge, .benchPress, .overheadPress, .pullDown: return 90
+        default: return 60
+        }
+    }
+
+    /// Starts the rest if there's more work after this set, and returns the
+    /// words for it. Nothing if the workout is done.
+    private func restLine(afterSetOn index: Int?) -> String {
+        guard let workout = appModel.activeWorkout, let index, workout.exercises.indices.contains(index) else { return "" }
+        let exercise = workout.exercises[index]
+        let moreOnThis = exercise.completedSetCount < exercise.targetSets
+        let moreToCome = workout.exercises.indices.contains(index + 1)
+        guard moreOnThis || moreToCome else { return "" }
+        let seconds = Self.restSeconds(for: exercise)
+        startRest(seconds: seconds)
+        return tips == .quiet ? "" : " Rest \(seconds == 90 ? "ninety" : "sixty") seconds."
+    }
+
+    private func startRest(seconds: Int) {
+        restTask?.cancel()
+        let ends = Date().addingTimeInterval(TimeInterval(seconds))
+        restEndsAt = ends
+        restTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            guard !Task.isCancelled, restEndsAt == ends else { return }
+            restEndsAt = nil
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            if conversationActive, speaksReplies, tips != .quiet {
+                confirm(tone == .hype ? "Go!" : "Go.")
+            }
+        }
+    }
+
+    private func cancelRest() {
+        restTask?.cancel()
+        restTask = nil
+        restEndsAt = nil
+    }
+
+    /// "Skip rest" / "go" / "ready" ends it; "thirty more" / "add a minute"
+    /// extends it. Only while resting.
+    private func handleRestCommand(_ text: String) -> Bool {
+        guard restEndsAt != nil else { return false }
+        let t = text.lowercased()
+        func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        if says(#"\b(skip|skip rest|skip the rest|go|ready|let's go|lets go|next set|i'm ready|im ready)\b"#), t.split(separator: " ").count <= 5 {
+            cancelRest()
+            confirm(tone == .hype ? "Go!" : "Go.")
+            return true
+        }
+        if says(#"\b(more|add|extend|longer)\b"#) {
+            let number = WorkoutVoice.numberWords.first { t.range(of: #"\b"# + $0.key + #"\b"#, options: .regularExpression) != nil }?.value
+                ?? Int(t.components(separatedBy: CharacterSet.decimalDigits.inverted).joined())
+            let extra = says(#"\bminute\b"#) ? 60 : (number ?? 30)
+            restEndsAt = (restEndsAt ?? Date()).addingTimeInterval(TimeInterval(extra))
+            let ends = restEndsAt!
+            restTask?.cancel()
+            restTask = Task {
+                try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
+                guard !Task.isCancelled, restEndsAt == ends else { return }
+                restEndsAt = nil
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                if conversationActive, speaksReplies, tips != .quiet { confirm(tone == .hype ? "Go!" : "Go.") }
+            }
+            confirm("\(extra) more seconds.")
+            return true
+        }
+        return false
     }
 
     /// A lift you called out: add, swap, skip, jump, new sets or reps, or
@@ -1396,6 +1574,7 @@ struct CoachStageView: View {
     /// The workout ended: ask about keeping changes, else the mic goes off.
     private func workoutEnded() {
         endLesson()
+        cancelRest()
         swapChoice = nil
         if !appModel.pendingSessionChanges.isEmpty, conversationActive {
             // Ask out loud too; "yes" / "just today" answers it.
@@ -1536,7 +1715,7 @@ struct CoachStageView: View {
             voice.speak(lines: lines, messageId: plan.id)
             try? AudioHub.shared.start()
             // Only in talk mode — typing means the mic stays off.
-            if AudioHub.shared.canTalkOver, conversationActive { voiceInput.listen() }
+            if conversationActive { voiceInput.listen() }
         } else {
             // Muted: the body still walks through it, a beat every few seconds.
             Task {
@@ -1612,6 +1791,9 @@ struct CoachStageView: View {
     }
 
     private func endConversation() {
+        cancelRest()
+        interruptedSpeech = nil
+        resumeOffered = false
         swapChoice = nil
         closeCountTask?.cancel()
         closeCountTask = nil
@@ -1695,11 +1877,14 @@ struct CoachStageView: View {
         guard conversationActive, !voiceInput.isListening else { return }
         if reply.content.contains("?") { askedAt = Date() }
         if speaksReplies {
-            voice.speak(reply.content, messageId: reply.id)
-            // Keep the mic open under Coach only where its voice is cancelled
-            // from the mic; elsewhere listening resumes when Coach finishes.
+            voice.speak(reply.speech, messageId: reply.id)
+            // The mic stays open under Coach so you can cut in. Where its
+            // voice is cancelled from the mic (echo cancellation on, or
+            // headphones) that's clean; on the speaker with music playing
+            // the mic hears Coach too, and the echo test in the transcript
+            // handler is what tells you apart.
             try? AudioHub.shared.start()
-            if AudioHub.shared.canTalkOver { voiceInput.listen() }
+            voiceInput.listen()
         } else {
             // Muted: the reply is on screen; go straight back to listening.
             resumeListening()

@@ -14,11 +14,24 @@ typealias Joint = SIMD3<Float> // x, y, radius
 enum BodyMove: String, CaseIterable {
     case pushups
     case plank
+    case squats
+    case lunges
 
     var name: String {
         switch self {
         case .pushups: return "Push-ups"
         case .plank: return "Plank"
+        case .squats: return "Squats"
+        case .lunges: return "Lunges"
+        }
+    }
+
+    /// The lift-based moves borrow the workout demonstration's motion.
+    private var lift: ExerciseMotion? {
+        switch self {
+        case .squats: return ExerciseMotion(.squat, .none)
+        case .lunges: return ExerciseMotion(.lunge, .none)
+        default: return nil
         }
     }
 
@@ -26,6 +39,7 @@ enum BodyMove: String, CaseIterable {
         switch self {
         case .pushups: return OneBodyMotion.pushupDuration
         case .plank: return OneBodyMotion.plankDuration
+        case .squats, .lunges: return OneBodyMotion.liftDuration(lift!)
         }
     }
 
@@ -33,6 +47,8 @@ enum BodyMove: String, CaseIterable {
         switch self {
         case .pushups: return OneBodyMotion.pushupFrame(t, reducedMotion: reducedMotion)
         case .plank: return OneBodyMotion.plankFrame(t, reducedMotion: reducedMotion)
+        case .squats, .lunges:
+            return OneBodyMotion.liftFrame(lift!, name: name, t, reducedMotion: reducedMotion)
         }
     }
 }
@@ -244,6 +260,30 @@ enum OneBodyMotion {
         return BodyPose(joints: stand, form: form, side: 0, label: "Back to a blob")
     }
 
+    /// A lift from the workout vocabulary as a demonstration: take shape,
+    /// three slow reps, back to a blob.
+    static let liftReps = 3
+    static func liftDuration(_ motion: ExerciseMotion) -> Float {
+        1.8 + Float(liftReps) * motion.repDuration + 1.4
+    }
+
+    static func liftFrame(_ motion: ExerciseMotion, name: String, _ t: Float, reducedMotion: Bool) -> BodyPose {
+        if reducedMotion {
+            return BodyPose(joints: standing(), form: 1, side: 0, label: "\(name) · motion reduced")
+        }
+        let total = liftDuration(motion)
+        let form = smooth(t / 1.4) * (1 - smooth((t - (total - 1.6)) / 1.2))
+        if t < 1.8 { return BodyPose(joints: standing(t), form: form, side: 0, label: "Taking shape") }
+        let working = t - 1.8
+        if working < Float(liftReps) * motion.repDuration {
+            var pose = motion.frame(at: working)
+            pose.form = form
+            pose.label = "\(min(liftReps, Int(working / motion.repDuration) + 1)) / \(liftReps) · \(name)"
+            return pose
+        }
+        return BodyPose(joints: standing(t), form: form, side: 0, label: "Back to a blob")
+    }
+
     /// The push-up's way in and out, with an eight-second breathing hold.
     static func plankFrame(_ t: Float, reducedMotion: Bool) -> BodyPose {
         let stand = standing(t)
@@ -282,9 +322,16 @@ enum MoveCue {
         // Push-ups first: a push-up instruction mentions "plank" too.
         (.pushups, #"\bpush[\s-]*ups?\b"#),
         (.plank, #"\bplanks?\b"#),
+        (.squats, #"\bsquats?\b"#),
+        (.lunges, #"\blunges?\b"#),
     ]
+    /// Squats and lunges are in half the plans ("your squat day", "back
+    /// squat at one thirty-five"), so for them the sentence has to be an
+    /// invitation to watch or join, not just mention the lift.
+    private static let demonstrated: Set<BodyMove> = [.squats, .lunges]
     private static let negation = #"\b(not|no|never|avoid|skip|stop|don't|dont|cannot|can't|shouldn't|shouldnt|won't|wouldn't|if|whether)\b"#
     private static let affirmative = #"\b(let'?s|let us|do|try|show|start|begin|demonstrate|how)\b"#
+    private static let invitation = #"\b(with me|watch|show|demonstrate|like this|try a|try one|let'?s do)\b"#
 
     static func move(in text: String) -> BodyMove? {
         let normalized = text.lowercased().replacingOccurrences(of: "[’‘]", with: "'", options: .regularExpression)
@@ -294,7 +341,10 @@ enum MoveCue {
         }
         for sentence in sentences {
             guard matches(sentence, negation) == false, matches(sentence, affirmative) else { continue }
-            if let move = patterns.first(where: { matches(sentence, $0.1) })?.0 { return move }
+            if let move = patterns.first(where: { matches(sentence, $0.1) })?.0 {
+                if demonstrated.contains(move), !matches(sentence, invitation) { continue }
+                return move
+            }
         }
         return nil
     }

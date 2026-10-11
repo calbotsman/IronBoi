@@ -763,6 +763,8 @@ export const CoachMessage = z.object({
   messageId: z.string().min(1),
   role: z.enum(["user", "coach", "tool", "system"]),
   content: z.string(),
+  /** Coach replies in voice mode: the part the voice reads (coach/spoken.ts). */
+  spokenContent: z.string().optional(),
   timestamp: ISODateTime,
   riskLevel: RiskLevel.optional(),
   inputMode: CoachInputMode.optional(),

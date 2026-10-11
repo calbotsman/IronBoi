@@ -17,6 +17,11 @@ struct CoachMessage: Identifiable, Equatable {
     let timestamp: Date
     let riskLevel: String?
     var sources: [CoachSource] = []
+    /// Voice mode: the part the voice reads (server-capped); nil = read it all.
+    var spokenContent: String? = nil
+
+    /// What Coach says out loud for this reply.
+    var speech: String { spokenContent ?? content }
 
     enum Role: String {
         case user

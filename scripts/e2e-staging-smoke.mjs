@@ -340,6 +340,14 @@ function canonicalJson(value) {
   return JSON.stringify(value ?? null);
 }
 
+/** "2026-W41"-style key for the Monday-anchored week an ISO date falls in. */
+function mondayWeekKey(isoDate) {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const day = (d.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  d.setUTCDate(d.getUTCDate() - day);
+  return d.toISOString().slice(0, 10);
+}
+
 function looksLikeQuestion(text) {
   return typeof text === "string" && text.includes("?");
 }
@@ -671,7 +679,10 @@ async function scenarioReentryRamp() {
   info(`dailyOverrides: ${overrideDates.length} date(s) ${overrideDates[0]} → ${overrideDates.at(-1)}`);
 
   // THE regression assertion. The original bug wrote a single day; a ramp must
-  // reach past the current week.
+  // reach past the current week. Measured in Monday-anchored weeks, not
+  // days: a ramp on a Mon/Wed/Fri plan that starts on a Friday spans
+  // exactly seven days (Fri → next Fri) and "> 7 days" failed every run
+  // that landed on a Friday (2026-10-09 among them) for no real reason.
   const spanDays =
     overrideDates.length >= 2
       ? Math.round(
@@ -679,10 +690,11 @@ async function scenarioReentryRamp() {
             Date.parse(`${overrideDates[0]}T00:00:00Z`)) / 86_400_000,
         )
       : 0;
+  const weeksTouched = new Set(overrideDates.map(mondayWeekKey)).size;
   check("HARD", overrideDates.length > 1,
     `ramp wrote ${overrideDates.length} dated sessions, not just one`);
-  check("HARD", spanDays > 7,
-    `ramp reaches beyond a single week (${spanDays} days from first to last)`);
+  check("HARD", weeksTouched >= 2,
+    `ramp reaches beyond a single week (${weeksTouched} weeks touched, ${spanDays} days from first to last)`);
 
   // And it must be TEMPORARY — the repeating template is what it returns to.
   // Compared canonically: Firestore returns map keys in arbitrary order, so a

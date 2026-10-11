@@ -10,6 +10,11 @@ final class AudioHub {
 
     let engine = AVAudioEngine()
     let player = AVAudioPlayerNode()
+    /// Short cues (a tick per counted rep, a two-note at target) on their
+    /// own node, so they never queue behind Coach's sentences.
+    private let cuePlayer = AVAudioPlayerNode()
+    private lazy var tickBuffer = Self.tone([(1046, 0.06)], gain: 0.22)
+    private lazy var targetBuffer = Self.tone([(880, 0.08), (1318, 0.12)], gain: 0.26)
     /// Coach's audio format: Cloud TTS LINEAR16 at 24 kHz, mono.
     static let voiceFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
 
@@ -119,6 +124,8 @@ final class AudioHub {
         if !configured {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: Self.voiceFormat)
+            engine.attach(cuePlayer)
+            engine.connect(cuePlayer, to: engine.mainMixerNode, format: Self.voiceFormat)
             configured = true
         }
 
@@ -212,6 +219,39 @@ final class AudioHub {
 
     func stopPlayback() {
         player.stop()
+    }
+
+    enum Cue { case tick, target }
+
+    /// A rep was heard (tick) or the set reached its target (two notes).
+    /// Plays over Coach's voice and your music; silent if the engine is
+    /// down, which only happens outside a conversation.
+    func play(cue: Cue) {
+        guard engine.isRunning, let buffer = cue == .tick ? tickBuffer : targetBuffer else { return }
+        cuePlayer.scheduleBuffer(buffer, at: nil, options: .interrupts)
+        if !cuePlayer.isPlaying { cuePlayer.play() }
+    }
+
+    /// Sine notes in a row, each with a quick attack and an exponential
+    /// tail, in Coach's own format so they share the mixer.
+    private static func tone(_ notes: [(hz: Double, seconds: Double)], gain: Float) -> AVAudioPCMBuffer? {
+        let rate = voiceFormat.sampleRate
+        let frames = notes.reduce(0) { $0 + Int($1.seconds * rate) }
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: voiceFormat, frameCapacity: AVAudioFrameCount(frames)),
+              let out = buffer.floatChannelData?[0] else { return nil }
+        var i = 0
+        for note in notes {
+            let n = Int(note.seconds * rate)
+            for k in 0..<n {
+                let t = Double(k) / rate
+                let attack = min(1, t / 0.004)
+                let decay = exp(-t * 28)
+                out[i] = Float(sin(2 * .pi * note.hz * t) * attack * decay) * gain
+                i += 1
+            }
+        }
+        buffer.frameLength = AVAudioFrameCount(i)
+        return buffer
     }
 
     /// Lets the mic indicator go out when the conversation is over, and
