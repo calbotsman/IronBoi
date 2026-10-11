@@ -53,7 +53,9 @@ export const allowedLogKeys = new Set([
   "painTriageRedFlagsAsked",
   "painTriageUserReportsSevere",
   "severeMarkersHit",
+  "severeMarker",
   "triageCleared",
+  "adjustmentError",
   // synthesizeSpeechCallable daily cap (usage/cap.ts) — counts only.
   "ttsChars",
 ]);
