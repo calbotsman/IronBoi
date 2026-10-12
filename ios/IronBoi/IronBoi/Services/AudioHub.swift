@@ -74,7 +74,7 @@ final class AudioHub {
     private func routeChanged(_ reason: AVAudioSession.RouteChangeReason?, previous: AVAudioSessionRouteDescription?) {
         let current = AVAudioSession.sharedInstance().currentRoute
         defer {
-            Self.log("route change \(reason.map { String($0.rawValue) } ?? "?") from [\(previous.map(Self.describe) ?? "-")] to [\(Self.describe(current))] headphones=\(headphonesConnected)")
+            Self.log("route change \(reason.map { String($0.rawValue) } ?? "?") from [\(previous.map(Self.describe) ?? "-")] to [\(Self.describe(current))] headphones=\(headphonesConnected) engine=\(engine.isRunning) session=\(sessionActive) other=\(AVAudioSession.sharedInstance().isOtherAudioPlaying)")
         }
         let before = headphonesConnected
         switch reason {
@@ -114,8 +114,9 @@ final class AudioHub {
             headphonesConnected = Self.headphones(in: session.currentRoute)
             Self.log("start: system route [\(Self.describe(session.currentRoute))] headphones=\(headphonesConnected) otherAudio=\(session.isOtherAudioPlaying)")
         }
-        if session.category != .playAndRecord {
-            try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
+        let options = ducking ? Self.categoryOptions.union(.duckOthers) : Self.categoryOptions
+        if session.category != .playAndRecord || session.categoryOptions != options {
+            try session.setCategory(.playAndRecord, mode: .default, options: options)
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         sessionActive = true
@@ -155,6 +156,24 @@ final class AudioHub {
             engine.prepare()
             try engine.start()
             engineStarted = true
+        }
+    }
+
+    /// Your music comes down a step while Coach is talking and back up
+    /// after, without the session going anywhere (the mic stays open).
+    private(set) var ducking = false
+    func setDucking(_ on: Bool) {
+        guard on != ducking else { return }
+        ducking = on
+        guard sessionActive else { return }
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .default,
+                                    options: on ? Self.categoryOptions.union(.duckOthers) : Self.categoryOptions)
+            try session.setActive(true)
+            Self.log("ducking \(on ? "on" : "off") other=\(session.isOtherAudioPlaying)")
+        } catch {
+            Self.log("ducking \(on ? "on" : "off") failed: \(error.localizedDescription)")
         }
     }
 

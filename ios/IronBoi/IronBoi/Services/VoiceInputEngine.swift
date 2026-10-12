@@ -50,6 +50,13 @@ final class VoiceInputEngine: ObservableObject {
     /// Bumped on every new recognition request; a callback from an older
     /// request is ignored (its "final" must not stop a fresh one).
     private var requestGeneration = 0
+    /// The recogniser (iOS 26, on device) hands over each utterance on its
+    /// own: after a pause, the next result is just "Two", not "One two".
+    /// Everything downstream reads a running transcript, so finished
+    /// utterances are kept here and the live one is appended.
+    private var settledUtterances = ""
+    private var liveUtterance = ""
+    private var liveUtteranceStart: TimeInterval = -1
     private var hasInstalledTap = false
     /// Bumped on every stop; callbacks and starts carry the value they began
     /// with and drop out if it's moved on.
@@ -190,6 +197,9 @@ final class VoiceInputEngine: ObservableObject {
         request.contextualStrings = Self.workoutWords
         self.request = request
         transcript = ""
+        settledUtterances = ""
+        liveUtterance = ""
+        liveUtteranceStart = -1
 
         recognitionTask = recognizer?.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
@@ -197,13 +207,25 @@ final class VoiceInputEngine: ObservableObject {
                 // request must not touch this one.
                 guard let self, self.session == mine, self.requestGeneration == generation else { return }
 
-                if let text = result?.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !text.isEmpty, text != self.transcript {
-                    self.transcript = text
-                    // Every partial, so a device test shows exactly what the
-                    // recogniser made of a count.
-                    AudioHub.log("heard: \(text.suffix(80))")
-                    self.schedulePauseCheck()
+                if let result,
+                   case let text = result.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !text.isEmpty, text != self.liveUtterance {
+                    let start = result.bestTranscription.segments.first?.timestamp ?? -1
+                    if !self.liveUtterance.isEmpty,
+                       Self.isNewUtterance(text, after: self.liveUtterance, start: start, previousStart: self.liveUtteranceStart) {
+                        self.settledUtterances = (self.settledUtterances + " " + self.liveUtterance)
+                            .trimmingCharacters(in: .whitespaces)
+                    }
+                    self.liveUtterance = text
+                    self.liveUtteranceStart = start
+                    let whole = (self.settledUtterances + " " + text).trimmingCharacters(in: .whitespaces)
+                    if whole != self.transcript {
+                        self.transcript = whole
+                        // Every partial, so a device test shows exactly what the
+                        // recogniser made of a count.
+                        AudioHub.log("heard: \(text.suffix(60)) @\(String(format: "%.1f", start)) → \(whole.suffix(60))")
+                        self.schedulePauseCheck()
+                    }
                 }
 
                 if error != nil || result?.isFinal == true {
@@ -220,6 +242,27 @@ final class VoiceInputEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Is this result a new utterance, or a revision of the one in
+    /// progress? A revision keeps the same start time and most of its
+    /// opening words ("one two tree" → "one two three"); a new utterance
+    /// starts later, or shares nothing with what it replaces ("One" →
+    /// "Two"). Start times are used when the recogniser gives them.
+    static func isNewUtterance(_ text: String, after current: String, start: TimeInterval, previousStart: TimeInterval) -> Bool {
+        if start >= 0, previousStart >= 0, abs(start - previousStart) > 0.75 { return true }
+        let new = text.lowercased(), cur = current.lowercased()
+        if new.hasPrefix(cur) { return false }
+        let newWords = new.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        let curWords = cur.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        guard !newWords.isEmpty, !curWords.isEmpty else { return false }
+        // A revision doesn't lose most of its words; "One two three" → "One"
+        // is the next utterance starting with the same word.
+        if newWords.count * 2 < curWords.count { return true }
+        let shared = zip(newWords, curWords).prefix { $0 == $1 }.count
+        if shared >= max(1, curWords.count / 2) { return false }
+        if newWords.count >= 3, newWords.count == curWords.count, newWords.dropFirst() == curWords.dropFirst() { return false }
+        return true
     }
 
     /// Swaps the open request for a fresh one without touching the tap.

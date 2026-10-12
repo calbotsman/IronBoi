@@ -181,7 +181,12 @@ struct CoachStageView: View {
         .onPreferenceChange(OrbSlotKey.self) { orbSlot = $0 }
         .animation(MyoTheme.Motion.fade, value: askingSkipRestDay)
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
+        // The screen must not sleep mid-set: a locked phone drops the mic.
+        .onChange(of: conversationActive) { _, _ in keepAwake() }
+        .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .onAppear {
+            keepAwake()
             voiceInput.onPause = { text in
                 if voice.isSpeaking {
                     if conversationActive { voiceInput.listen() }
@@ -1791,6 +1796,10 @@ struct CoachStageView: View {
     /// The next mic stop is ours (we're about to restart it), so the
     /// silence handler should leave it alone. Expires on its own, so a stop
     /// that never comes can't swallow a real one later.
+    private func keepAwake() {
+        UIApplication.shared.isIdleTimerDisabled = conversationActive || appModel.activeWorkout != nil
+    }
+
     private func markRestartHandled() {
         restartHandledLocally = true
         restartMarks += 1

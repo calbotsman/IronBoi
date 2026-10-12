@@ -13,6 +13,12 @@ targets:
     platform: iOS
     sources:
       - path: IronBoi
+    info:
+      path: IronBoi/Info.plist
+      properties:
+        # Coach keeps talking and listening with the screen off or the
+        # phone in a pocket; the audio session carries the app.
+        UIBackgroundModes: [audio]
     preBuildScripts:
       - name: "Select GoogleService-Info.plist for $CONFIGURATION"
         script: |

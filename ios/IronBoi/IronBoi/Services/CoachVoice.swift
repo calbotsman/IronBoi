@@ -64,6 +64,7 @@ final class CoachVoice: NSObject, ObservableObject {
         caption = ""
         lineIndex = 0
         isSpeaking = true
+        hub.setDucking(true)
 
         guard let fetchAudio else {
             speakOnDevice(spoken)
@@ -129,6 +130,7 @@ final class CoachVoice: NSObject, ObservableObject {
         isSpeaking = false
         caption = ""
         meter.reset()
+        hub.setDucking(false)
     }
 
     /// The orb reacts to what you actually hear: loudness, syllables and
