@@ -114,9 +114,8 @@ final class AudioHub {
             headphonesConnected = Self.headphones(in: session.currentRoute)
             Self.log("start: system route [\(Self.describe(session.currentRoute))] headphones=\(headphonesConnected) otherAudio=\(session.isOtherAudioPlaying)")
         }
-        let options = ducking ? Self.categoryOptions.union(.duckOthers) : Self.categoryOptions
-        if session.category != .playAndRecord || session.categoryOptions != options {
-            try session.setCategory(.playAndRecord, mode: .default, options: options)
+        if session.category != .playAndRecord || session.categoryOptions != Self.categoryOptions {
+            try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         sessionActive = true
@@ -156,24 +155,6 @@ final class AudioHub {
             engine.prepare()
             try engine.start()
             engineStarted = true
-        }
-    }
-
-    /// Your music comes down a step while Coach is talking and back up
-    /// after, without the session going anywhere (the mic stays open).
-    private(set) var ducking = false
-    func setDucking(_ on: Bool) {
-        guard on != ducking else { return }
-        ducking = on
-        guard sessionActive else { return }
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .default,
-                                    options: on ? Self.categoryOptions.union(.duckOthers) : Self.categoryOptions)
-            try session.setActive(true)
-            Self.log("ducking \(on ? "on" : "off") other=\(session.isOtherAudioPlaying)")
-        } catch {
-            Self.log("ducking \(on ? "on" : "off") failed: \(error.localizedDescription)")
         }
     }
 
@@ -223,10 +204,16 @@ final class AudioHub {
         return route.outputs.contains { ports.contains($0.portType) }
     }
 
-    /// Plays alongside your music rather than stopping it. Bluetooth stays
-    /// in its full-quality music mode (A2DP) — the hands-free mode turned
-    /// Spotify into phone-call audio — so the phone's own mic listens.
-    private static let categoryOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers, .allowBluetoothA2DP]
+    /// Plays alongside your music rather than stopping it, with the music
+    /// lowered while the conversation is on. Bluetooth stays in its
+    /// full-quality music mode (A2DP) — the hands-free mode turned Spotify
+    /// into phone-call audio — so the phone's own mic listens.
+    ///
+    /// The music is lowered for the whole conversation, not only while
+    /// Coach speaks: iOS brings other audio back up only when an app
+    /// releases its session, and that closes the mic. Raising it after
+    /// every sentence meant a deaf mic after every sentence.
+    private static let categoryOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .duckOthers, .allowBluetoothA2DP]
 
     /// Plays one buffer of Coach's voice; returns when it has been heard (or
     /// playback was stopped).

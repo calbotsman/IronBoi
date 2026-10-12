@@ -57,7 +57,13 @@ final class VoiceInputEngine: ObservableObject {
     private var settledUtterances = ""
     private var liveUtterance = ""
     private var liveUtteranceStart: TimeInterval = -1
+    /// The mic tap stays installed for a whole conversation: taking it off
+    /// between sentences made iOS shut the microphone down and bring it
+    /// back each time (the indicator blinking, a deaf moment after every
+    /// pause). Between listens its buffers simply go nowhere.
     private var hasInstalledTap = false
+    private var tapFormat: AVAudioFormat?
+    private var resetObserver: NSObjectProtocol?
     /// Bumped on every stop; callbacks and starts carry the value they began
     /// with and drop out if it's moved on.
     private var session = 0
@@ -106,6 +112,18 @@ final class VoiceInputEngine: ObservableObject {
         }
     }
 
+    init() {
+        // Audio was rebuilt under us (AirPods in or out, a call): the tap's
+        // format is stale, so take it off; the next listen puts a new one on.
+        resetObserver = NotificationCenter.default.addObserver(
+            forName: AudioHub.resetNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.removeTap() }
+        }
+    }
+
+    /// Ends this listen. The microphone itself stays open (see
+    /// `hasInstalledTap`); `release()` closes it when the conversation ends.
     func stop() {
         // Anything still in flight from this listen is now stale.
         session += 1
@@ -114,16 +132,24 @@ final class VoiceInputEngine: ObservableObject {
         rotationTask?.cancel()
         rotationTask = nil
         meter.reset()
-        // The engine stays up — Coach may be mid-sentence on it.
-        if hasInstalledTap {
-            audioEngine.inputNode.removeTap(onBus: 0)
-            hasInstalledTap = false
-        }
         request?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         request = nil
         isListening = false
+    }
+
+    /// The conversation is over: stop listening and close the microphone.
+    func release() {
+        stop()
+        removeTap()
+    }
+
+    private func removeTap() {
+        guard hasInstalledTap else { return }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        hasInstalledTap = false
+        tapFormat = nil
     }
 
     private func start() async throws {
@@ -138,9 +164,10 @@ final class VoiceInputEngine: ObservableObject {
         stop()
         let mine = session
 
-        // Our tap is off (stop() above): the hub may retune echo
-        // cancellation for whatever's plugged in now.
-        try AudioHub.shared.start(reconfigure: true)
+        // Only when our tap is off (a new conversation, or audio was
+        // rebuilt) may the hub retune echo cancellation; with the tap on,
+        // retuning would pull the format out from under it.
+        try AudioHub.shared.start(reconfigure: !hasInstalledTap)
         guard !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty else {
             throw VoiceInputError.microphoneUnavailable
         }
@@ -154,14 +181,22 @@ final class VoiceInputEngine: ObservableObject {
             throw VoiceInputError.microphoneUnavailable
         }
 
-        let meter = self.meter
-        let analyzer = MicAnalyzer()
-        let box = requestBox
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
-            box.current?.append(buffer)
-            analyzer.process(buffer, into: meter)
+        if hasInstalledTap, let tapFormat, tapFormat != format { removeTap() }
+        if !hasInstalledTap {
+            let meter = self.meter
+            let analyzer = MicAnalyzer()
+            let box = requestBox
+            inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+                // Between listens the mic is open but nothing is listening:
+                // the buffers go nowhere, and the orb doesn't react.
+                guard let request = box.current else { return }
+                request.append(buffer)
+                analyzer.process(buffer, into: meter)
+            }
+            hasInstalledTap = true
+            tapFormat = format
+            AudioHub.log("mic opened")
         }
-        hasInstalledTap = true
         isListening = true
         if holdOpen { scheduleRotation() }
     }

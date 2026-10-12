@@ -1823,7 +1823,7 @@ struct CoachStageView: View {
         voiceInput.holdOpen = false
         conversationActive = false
         awaitingReplyAfter = nil
-        voiceInput.stop()
+        voiceInput.release()
         voice.stop()
         AudioHub.shared.stop()
     }
