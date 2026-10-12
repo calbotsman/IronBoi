@@ -102,6 +102,7 @@
 		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AC8A7F0156E886437433E203 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
+		B4E60CD7DDA97B7D6E1C118C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		CD792AC9EF71C813B550654E /* CoachStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachStageView.swift; sourceTree = "<group>"; };
 		D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Prod.plist"; sourceTree = "<group>"; };
@@ -167,6 +168,7 @@
 			children = (
 				ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */,
 				8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */,
+				B4E60CD7DDA97B7D6E1C118C /* Info.plist */,
 				967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */,
 				5041EB6152324AB118525DA6 /* IronBoiApp.swift */,
 				FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */,
@@ -580,9 +582,10 @@
 				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = SGQ2WLB6M9;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = IronBoi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-staging.cloudfunctions.net";
@@ -611,9 +614,10 @@
 				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 39;
+				CURRENT_PROJECT_VERSION = 40;
 				DEVELOPMENT_TEAM = SGQ2WLB6M9;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = IronBoi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-prod.cloudfunctions.net";
