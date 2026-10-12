@@ -1118,15 +1118,26 @@ struct CoachStageView: View {
         if appModel.activeWorkout != nil {
             if repCount > 0 {
                 // Mid-count: "set done" (tapped, typed or said) closes the
-                // set at the count so far; anything else is just a pause.
+                // set at the count so far. A question or a request closes
+                // the count too and is then handled like any other turn —
+                // it used to be swallowed as "just a pause". Anything else
+                // (a grunt, a stray word) is a pause.
                 if WorkoutVoice.saysSetDone(text) || WorkoutVoice.setsLogged(in: text) != nil {
                     finishCount()
                     return
                 }
-                markRestartHandled()
-                resumeListening()
-                return
-            } else if short, let logged = WorkoutVoice.setsLogged(in: text), let index = currentExerciseIndex,
+                if !WorkoutVoice.isQuestionOrRequest(text) {
+                    markRestartHandled()
+                    resumeListening()
+                    return
+                }
+                finishCount()
+                if CoachingStyle.asksForDemo(text), let index = currentExerciseIndex {
+                    introduce(exercise: index, first: false, teach: true)
+                    return
+                }
+            }
+            if short, let logged = WorkoutVoice.setsLogged(in: text), let index = currentExerciseIndex,
                       let exercise = currentExercise {
                 // You didn't count — "set done", "two sets done".
                 // Sets still open (not targetSets − done: those can disagree

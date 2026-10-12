@@ -71,7 +71,7 @@ final class OrbPhysics: ObservableObject {
     // MARK: Lean (round 4) — toward you, on a spring
 
     @Published var leanStiffness: Float = 8
-    @Published var leanDamping: Float = 0.55
+    @Published var leanDamping: Float = 0.75
 
     var reduceMotionScale: Float = 1
 
@@ -109,7 +109,7 @@ final class OrbPhysics: ObservableObject {
         gatherStiffness = 16
         jellyStiffness = 18; jellyDamping = 0.12; jellyLand = 0.03; jellyBloop = 0.03
         bloopLaunch = 1.0; bloopGravity = 1.2; bloopPull = 3.0; bloopDrag = 1.6; bloopNudge = 0.5
-        leanStiffness = 8; leanDamping = 0.55
+        leanStiffness = 8; leanDamping = 0.75
     }
 }
 

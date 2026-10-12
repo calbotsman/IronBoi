@@ -63,6 +63,8 @@ struct BodyPose {
     /// What's held, and whether there's a bench underneath.
     var gear: Gear = .none
     var bench = false
+    /// Bench tilt in radians (incline positive), applied with the body.
+    var benchAngle: Float = 0
     /// Squash the blob toward this (1 = round) — a landing. It springs back
     /// with a wobble on its own.
     var squash: Float? = nil

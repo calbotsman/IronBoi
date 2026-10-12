@@ -102,7 +102,7 @@ struct GearShape {
 
     /// Everything held and stood on for this pose, each piece grown `g` of
     /// the way out of the hand (or the back, for the bench) it comes from.
-    static func build(gear: Gear, bench: Bool, sideOn: Bool, joints: [Joint], grow g: Float) -> [GearShape] {
+    static func build(gear: Gear, bench: Bool, benchAngle: Float = 0, sideOn: Bool, joints: [Joint], grow g: Float) -> [GearShape] {
         let left = SIMD2(joints[5].x, joints[5].y), right = SIMD2(joints[8].x, joints[8].y)
         let middle = (left + right) / 2
         var out: [GearShape] = []
@@ -149,13 +149,24 @@ struct GearShape {
         }
 
         if bench {
-            // Grows down out of the back it's under.
+            // Grows down out of the back it's under. An incline tips the pad
+            // about the hips (the body is tipped the same way by the pose);
+            // the legs stay vertical and the head-end one gets taller.
             let back = SIMD2<Float>(-0.16, -0.22)
+            let hips = SIMD2<Float>(0.12, -0.15)
+            func tipped(_ p: SIMD2<Float>) -> SIMD2<Float> {
+                let c = cos(benchAngle), sn = sin(benchAngle)
+                let d = p - hips
+                return hips + SIMD2(d.x * c - d.y * sn, d.x * sn + d.y * c)
+            }
+            let padCentre = tipped(SIMD2(-0.16, -0.315))
+            let headLeg = tipped(SIMD2(-0.42, -0.33))
+            let footLeg = tipped(SIMD2(0.10, -0.33))
             out += [
-                GearShape(kind: .box, a: SIMD2(-0.16, -0.315), b: SIMD2(0.36, 0.032), r: 0.025, depth: .behind),
-                GearShape(kind: .capsule, a: SIMD2(-0.42, -0.33), b: SIMD2(-0.42, -0.48), r: 0.022, depth: .behind),
-                GearShape(kind: .capsule, a: SIMD2(0.10, -0.33), b: SIMD2(0.10, -0.48), r: 0.022, depth: .behind),
-            ].map { $0.grown(from: back, by: g) }
+                GearShape(kind: .box, a: padCentre, b: SIMD2(0.36, 0.032), r: 0.025, angle: benchAngle, depth: .behind),
+                GearShape(kind: .capsule, a: headLeg, b: SIMD2(headLeg.x, -0.48), r: 0.022, depth: .behind),
+                GearShape(kind: .capsule, a: footLeg, b: SIMD2(footLeg.x, -0.48), r: 0.022, depth: .behind),
+            ].map { $0.grown(from: tipped(back), by: g) }
         }
         return out
     }

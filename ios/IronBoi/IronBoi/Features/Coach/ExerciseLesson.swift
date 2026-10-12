@@ -199,7 +199,7 @@ enum CoachingStyle {
     /// that's a request to walk through the current lift again.
     static func asksForDemo(_ text: String) -> Bool {
         let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
-        return t.range(of: #"\b(show me( how)?|how do i do (this|it|these|that)|what's the form|demonstrate|demo it|teach me)\b"#,
+        return t.range(of: #"\b(show me( how)?|how do i do (this|it|these|that)|what's the form|demonstrate|demo it|teach me|(show|do) (me )?(the |that |this )?[a-z -]{0,30}(move|lift|exercise|form|rep)( again)?)\b"#,
                        options: .regularExpression) != nil
     }
 

@@ -8,23 +8,51 @@ import simd
 struct ExerciseMotion: Equatable {
     let lift: Lift
     let gear: Gear
+    /// Bench angle in radians for a pressing lift: positive = incline
+    /// (head up), negative = decline. 0 is flat.
+    var incline: Float = 0
 
-    init(_ lift: Lift, _ gear: Gear) {
+    init(_ lift: Lift, _ gear: Gear, incline: Float = 0) {
         self.lift = lift
         self.gear = gear
+        self.incline = incline
     }
 
     /// Best guess from an exercise name, or nil when nothing fits.
     static func match(_ name: String) -> ExerciseMotion? {
         guard let lift = Lift.match(name) else { return nil }
-        return ExerciseMotion(lift, Gear.match(name, lift: lift))
+        let n = name.lowercased()
+        let incline: Float = lift == .benchPress ? (n.contains("incline") ? 0.5 : n.contains("decline") ? -0.3 : 0) : 0
+        return ExerciseMotion(lift, Gear.match(name, lift: lift), incline: incline)
     }
 
     var repDuration: Float { lift.repDuration }
 
-    func frame(at t: Float) -> BodyPose { lift.frame(at: t, gear: gear) }
+    func frame(at t: Float) -> BodyPose { Self.inclined(lift.frame(at: t, gear: gear), by: incline) }
 
-    func frame(holding p: Float, time t: Float) -> BodyPose { lift.frame(holding: p, time: t, gear: gear) }
+    func frame(holding p: Float, time t: Float) -> BodyPose {
+        Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline)
+    }
+
+    /// Tips the lying body and its bench together about the hips. The arms
+    /// keep their world-space direction: a press goes straight up against
+    /// gravity whatever the bench angle, so each arm is re-hung from its
+    /// tipped shoulder with the original elbow and hand offsets.
+    private static func inclined(_ pose: BodyPose, by angle: Float) -> BodyPose {
+        guard angle != 0 else { return pose }
+        var out = pose
+        let hips = SIMD2(pose.joints[2].x, pose.joints[2].y)
+        var turned = OneBodyMotion.turned(pose.joints, by: angle, about: hips)
+        for (shoulder, elbow, hand) in [(3, 4, 5), (6, 7, 8)] {
+            let dx = turned[shoulder].x - pose.joints[shoulder].x
+            let dy = turned[shoulder].y - pose.joints[shoulder].y
+            turned[elbow] = Joint(pose.joints[elbow].x + dx, pose.joints[elbow].y + dy, pose.joints[elbow].z)
+            turned[hand] = Joint(pose.joints[hand].x + dx, pose.joints[hand].y + dy, pose.joints[hand].z)
+        }
+        out.joints = turned
+        out.benchAngle = angle
+        return out
+    }
 }
 
 /// One movement family. Same joint space as OneBodyMotion (blob centre at
@@ -206,8 +234,12 @@ enum Lift: Equatable {
         case .lunge:
             return (Self.lungePose(depth: 0), Self.lungePose(depth: 1))
         case .benchPress:
-            return (lying(elbow: [-0.21, 0.10], hand: [-0.20, 0.32]),
-                    lying(elbow: [-0.27, -0.06], hand: [-0.18, 0.02]))
+            // Side-on, head to the left. Top: arm straight up from the
+            // shoulder. Bottom: the forearm stays vertical over the elbow and
+            // the elbow sits level with the chest, a touch toward the feet —
+            // never toward the head, which read as the elbow bending backward.
+            return (lying(elbow: [-0.19, 0.12], hand: [-0.19, 0.33]),
+                    lying(elbow: [-0.17, -0.09], hand: [-0.17, 0.06]))
         case .skullCrusher:
             return (lying(elbow: [-0.22, 0.20], hand: [-0.21, 0.42]),
                     lying(elbow: [-0.20, 0.21], hand: [-0.37, 0.10]))

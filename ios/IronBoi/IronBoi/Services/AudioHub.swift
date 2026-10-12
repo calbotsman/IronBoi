@@ -165,15 +165,24 @@ final class AudioHub {
     }
 
     /// Audio decisions, for testing on a phone over the Xcode console.
+    /// On in every build (TestFlight included — that's where the real
+    /// evidence is), local only, capped at ~512 KB by dropping the oldest
+    /// half when it grows past that. Transcripts are in here, so it never
+    /// leaves the phone unless you hand it over.
     static func log(_ message: String) {
+        let line = "\(Date().formatted(date: .abbreviated, time: .standard)) [audio] \(message)"
         #if DEBUG
-        let line = "\(Date().formatted(date: .omitted, time: .standard)) [audio] \(message)"
         print(line)
+        #endif
         // Also to a file in the app's Documents, so it can be pulled off a
         // phone after a test even when the console connection drops.
         if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("audio-log.txt"),
            let data = (line + "\n").data(using: .utf8) {
+            if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+               size > 512_000, let whole = try? Data(contentsOf: url) {
+                try? whole.suffix(256_000).write(to: url)
+            }
             if let handle = try? FileHandle(forWritingTo: url) {
                 handle.seekToEndOfFile()
                 handle.write(data)
@@ -182,7 +191,6 @@ final class AudioHub {
                 try? data.write(to: url)
             }
         }
-        #endif
     }
 
     private static func describe(_ route: AVAudioSessionRouteDescription) -> String {

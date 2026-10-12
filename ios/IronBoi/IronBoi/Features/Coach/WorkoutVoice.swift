@@ -35,9 +35,15 @@ enum WorkoutVoice {
             let value = Int(token) ?? numberWords[token] ?? soundAlikes[token]
             guard let value else { continue }
             let isSoundAlike = Int(token) == nil && numberWords[token] == nil
-            if value == count + 1 || (!isSoundAlike && value == count + 2 && count > 0) {
-                count = value
-            }
+            // The recogniser drops words mid-set. Once a count is running, a
+            // clear number up to three ahead resyncs it ("…six, [seven lost],
+            // eight, nine" lands on nine); a sound-alike may only skip one.
+            // Before the count starts, only a real "one" starts it.
+            let ahead = value - count
+            let accepted = count == 0
+                ? value == 1
+                : (isSoundAlike ? (1...2).contains(ahead) : (1...3).contains(ahead))
+            if accepted { count = value }
         }
         return count
     }
@@ -45,7 +51,18 @@ enum WorkoutVoice {
     /// "Done", "that's the set", "finished" — the set is over at whatever count.
     static func saysSetDone(_ transcript: String) -> Bool {
         let t = normalized(transcript)
-        return t.range(of: #"\b(done|finished|that's it|that is it|set complete|that's the set|got it|last one)\b"#,
+        // "sat down", "shut down", "set down", "said done" are what the
+        // recogniser makes of "set done" in a gym.
+        return t.range(of: #"\b(done|finished|that's it|that is it|set complete|that's the set|got it|last one|sat down|shut down|set down|said done|said that|sit down|sets done|set's done|that's done|all done)\b"#,
+                       options: .regularExpression) != nil
+    }
+
+    /// Mid-count, something that isn't a number and isn't "done": a question
+    /// or a request Coach should act on, rather than a pause to ignore.
+    static func isQuestionOrRequest(_ transcript: String) -> Bool {
+        let t = normalized(transcript)
+        if transcript.contains("?") { return true }
+        return t.range(of: #"\b(show me|how do|how many|what|what's|when|why|can you|could you|should i|explain|again|swap|skip|add|change|remind|tell me|myo)\b"#,
                        options: .regularExpression) != nil
     }
 

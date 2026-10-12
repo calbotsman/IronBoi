@@ -159,6 +159,7 @@ final class OrbModel {
     // The equipment: what's out, whether side-on, and how far grown.
     private var gearShown: Gear = .none
     private var benchShown = false
+    private var benchAngleShown: Float = 0
     private var gearSideOn = false
     private var gearGrow: Float = 0
     private var gearGrowVelocity: Float = 0
@@ -208,10 +209,17 @@ final class OrbModel {
             : (0.012 + 0.014 * restBlend) * sin(time * (0.9 - 0.5 * restBlend))
         // `scale` shrinks the body when a card takes the space below it.
         radius += ((baseR + agentLevelSlow * levelR + agent.peak * agentPresence * 0.05 + breathe) * scale - radius) * k
+        // Talk mode: you're speaking to the coach and it's listening as a
+        // blob — not counting reps with you, not mid-lesson, and not just
+        // hearing the gym through the workout's always-open mic.
+        let talkMode = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
+
         // Leans down toward you and squashes only while you're actually
-        // talking — on a spring, so it settles back with a small overshoot
-        // instead of sliding.
-        let liftTarget = (0.05 - you.presence * lean) * scale
+        // talking to it, and only as a blob — on a spring, so it settles
+        // back with a small overshoot instead of sliding. Gym noise through
+        // the open mic used to bob the whole person up and down mid-lift.
+        let leanAmount = talkMode ? you.presence * (1 - form) : 0
+        let liftTarget = (0.05 - leanAmount * lean) * scale
         if reduceMotion {
             lift += (liftTarget - lift) * k
         } else {
@@ -227,17 +235,12 @@ final class OrbModel {
         }
         previousCenter = center
         let pitch: Float = 0.5 + (agent.bands.y - 0.5) * 0.4
-        let squashBase = 1 - you.presence * squashGain + agentPresence * (pitch - 0.5) * 0.2
+        let squashBase = 1 - leanAmount * squashGain + agentPresence * (pitch - 0.5) * 0.2
         let lobeTarget = agent.bands * lobeGains * agentPresence + SIMD3(repeating: agent.peak * agentPresence * 0.02)
         lobes += (lobeTarget - lobes) * k
         think += (((phase == .thinking) ? 1 : 0) - think) * k * 0.5
         spin += dt * (0.25 + think * 1.2) * (reduceMotion ? 0.25 : 1)
         if spin > 2 * .pi * 1000 { spin -= 2 * .pi * 1000 }
-
-        // Talk mode: you're speaking to the coach and it's listening as a
-        // blob — not counting reps with you, not mid-lesson, and not just
-        // hearing the gym through the workout's always-open mic.
-        let talkMode = phase == .listening && !counting && lesson == nil && (!inWorkout || youTalking)
 
         // Your syllables → droplets rising from just below the screen. Only
         // in talk mode (or the intro's staged words): the blob fills up with
@@ -490,6 +493,7 @@ extension OrbModel {
             benchShown = wantsBench
             gearSideOn = pose.side > 0.5
         }
+        if wantsBench { benchAngleShown = pose.benchAngle }
         let hasGear = gearShown != .none || benchShown
         let target: Float = !changing && hasGear && form > 0.75 ? 1 : 0
         if reduceMotion {
@@ -511,8 +515,8 @@ extension OrbModel {
         var flat = [Float](repeating: -1, count: Self.maxGearShapes * 8)
         if gearGrow > 0.02 {
             let s = bodyScale * Self.size
-            let shapes = GearShape.build(gear: gearShown, bench: benchShown, sideOn: gearSideOn,
-                                         joints: joints, grow: gearGrow)
+            let shapes = GearShape.build(gear: gearShown, bench: benchShown, benchAngle: benchAngleShown,
+                                         sideOn: gearSideOn, joints: joints, grow: gearGrow)
             for (i, shape) in shapes.prefix(Self.maxGearShapes).enumerated() {
                 flat.replaceSubrange(i * 8 ..< i * 8 + 8, with: shape.scaled(s).floats)
             }
