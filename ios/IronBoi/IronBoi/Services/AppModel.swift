@@ -347,9 +347,40 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     /// Coach's voice for a sentence or two: WAV bytes from Cloud TTS.
-    /// A single-use, prompt-locked Gemini Live token (live voice beta).
-    func startLiveCoachSession() async throws -> LiveVoiceSession.Ticket {
-        try await callCallable("startLiveCoachSession", data: ["clientDate": Self.currentDateISO()])
+    /// Live voice (beta), wired to the server: tokens with the whole coach
+    /// brain locked in, every exchange saved to the shared conversation,
+    /// tools run with the text coach's gates.
+    var liveBackend: LiveVoiceSession.Backend {
+        LiveVoiceSession.Backend(
+            mint: { [weak self] handle in
+                guard let self else { throw CancellationError() }
+                var data: [String: Any] = ["clientDate": Self.currentDateISO()]
+                if let handle { data["resumeHandle"] = handle }
+                return try await self.callCallable("startLiveCoachSession", data: data)
+            },
+            recordTurn: { [weak self] user, coach, startedAt, interrupted in
+                guard let self else { throw CancellationError() }
+                return try await self.callCallable("recordLiveTurnCallable", data: [
+                    "userText": String(user.prefix(4000)),
+                    "coachText": String(coach.prefix(4000)),
+                    "startedAt": Self.isoString(from: startedAt),
+                    "interrupted": interrupted,
+                    "clientDate": Self.currentDateISO(),
+                ])
+            },
+            runTool: { [weak self] name, args, turnId, raw in
+                guard let self else { throw CancellationError() }
+                guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
+                let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
+                    "name": name,
+                    "args": args,
+                    "turnId": String(turnId.prefix(100)),
+                    "rawUserText": String(raw.prefix(4000)),
+                    "clientDate": Self.currentDateISO(),
+                ])
+                return result.data as? [String: Any] ?? [:]
+            }
+        )
     }
 
     func synthesizeSpeech(_ text: String) async throws -> Data {

@@ -154,6 +154,23 @@ final class VoiceInputEngine: ObservableObject {
         isListening = false
     }
 
+    /// Live voice owns the mic tap during a workout and hands every buffer
+    /// here, so counting and local commands keep working on the phone.
+    private(set) var externalFeed = false
+    lazy var audioSink: (AVAudioPCMBuffer) -> Void = { [box = requestBox, meter = self.meter] in
+        let analyzer = MicAnalyzer()
+        return { buffer in
+            guard let request = box.current else { return }
+            request.append(buffer)
+            analyzer.process(buffer, into: meter)
+        }
+    }()
+
+    func useExternalFeed(_ on: Bool) {
+        if on { removeTap() }
+        externalFeed = on
+    }
+
     /// The conversation is over: stop listening and close the microphone.
     func release() {
         stop()
@@ -182,7 +199,7 @@ final class VoiceInputEngine: ObservableObject {
         // Only when our tap is off (a new conversation, or audio was
         // rebuilt) may the hub retune echo cancellation; with the tap on,
         // retuning would pull the format out from under it.
-        try AudioHub.shared.start(reconfigure: !hasInstalledTap)
+        try AudioHub.shared.start(reconfigure: !hasInstalledTap && !externalFeed)
         guard !AVAudioSession.sharedInstance().currentRoute.inputs.isEmpty else {
             throw VoiceInputError.microphoneUnavailable
         }
@@ -197,7 +214,7 @@ final class VoiceInputEngine: ObservableObject {
         }
 
         if hasInstalledTap, let tapFormat, tapFormat != format { removeTap() }
-        if !hasInstalledTap {
+        if !hasInstalledTap, !externalFeed {
             let meter = self.meter
             let analyzer = MicAnalyzer()
             let box = requestBox

@@ -201,6 +201,9 @@ struct CoachStageView: View {
         .onChange(of: conversationActive) { _, _ in keepAwake() }
         .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
+        .onChange(of: liveWorkoutNote) { _, note in
+            if live.isActive, let note { live.note(note) }
+        }
         .onDisappear {
             live.stop()
             UIApplication.shared.isIdleTimerDisabled = false
@@ -1053,22 +1056,11 @@ struct CoachStageView: View {
         // only (counting stays on the regular loop for now). If it can't
         // connect, the regular coach takes over, so a tap always works.
         if live.isActive {
-            live.stop()
+            endConversation()
             return
         }
-        if LiveVoiceSession.enabled, !conversationActive, appModel.activeWorkout == nil {
-            voice.stop()
-            director.rest()
-            voiceInput.release()
-            Task {
-                let started = await live.start { try await appModel.startLiveCoachSession() }
-                if !started {
-                    AudioHub.log("live: falling back to the regular coach")
-                    conversationActive = true
-                    silentRestarts = []
-                    voiceInput.toggle()
-                }
-            }
+        if LiveVoiceSession.enabled, !conversationActive {
+            startLive()
             return
         }
         if conversationActive, phase == .speaking, !fromMic {
@@ -1084,6 +1076,57 @@ struct CoachStageView: View {
             director.rest()
             voiceInput.toggle()
         }
+    }
+
+    // MARK: - Live voice
+
+    /// Live voice (beta). Outside a workout it's the whole conversation.
+    /// In a workout the phone keeps its own ears on the same mic for
+    /// counting and quick commands; the coach's mic is muted while you
+    /// count, it gets a silent note each time the exercise or set changes,
+    /// and lines the app used to say in its own voice go to the live coach.
+    private func startLive() {
+        voice.stop()
+        director.rest()
+        voiceInput.release()
+        let inWorkout = appModel.activeWorkout != nil
+        live.sideTap = inWorkout ? voiceInput.audioSink : nil
+        voiceInput.useExternalFeed(inWorkout)
+        live.onSafetyStop = { line in
+            // The server's severe screen fired: the live session is over
+            // and the regular voice says the stop line.
+            endConversation()
+            voice.speak(line, messageId: "live-safety-\(UUID().uuidString)")
+        }
+        Task {
+            let started = await live.start(appModel.liveBackend)
+            guard started else {
+                AudioHub.log("live: falling back to the regular coach")
+                voiceInput.useExternalFeed(false)
+                conversationActive = true
+                silentRestarts = []
+                voiceInput.toggle()
+                return
+            }
+            if inWorkout {
+                voice.redirect = { [live] text in live.say(text) }
+                conversationActive = true
+                silentRestarts = []
+                voiceInput.toggle()
+                if let note = liveWorkoutNote { live.note(note) }
+            }
+        }
+    }
+
+    /// Where you are, for the live coach: "Now: Dumbbell Shoulder Press,
+    /// set 2 of 3, 10 reps at 40 lb (exercise 2 of 5)."
+    private var liveWorkoutNote: String? {
+        guard let state = appModel.liveWorkoutState(), let exercise = state["exercise"] as? String else { return nil }
+        let set = state["setNumber"] as? Int ?? 1, sets = state["totalSets"] as? Int ?? 1
+        let reps = state["targetReps"] as? Int ?? 0
+        let weight = (state["weightLb"] as? Double).map { " at \(LiveWorkoutCard.pounds($0)) lb" } ?? ""
+        let order = state["exerciseNumber"] as? Int ?? 1, count = (state["exercises"] as? [String])?.count ?? 1
+        return "Now: \(exercise), set \(set) of \(sets), \(reps) reps\(weight) (exercise \(order) of \(count))."
     }
 
     // MARK: - Workout voice
@@ -1301,6 +1344,10 @@ struct CoachStageView: View {
         let count = WorkoutVoice.repCount(in: transcript, from: countBase)
         guard count > repCount else { return }
         AudioHub.log("count \(repCount) → \(count) (heard: \(transcript.suffix(40)))")
+        if live.isActive {
+            if repCount == 0 { live.hush() }
+            live.setUplinkMuted(true)
+        }
         repCount = count
         voiceInput.holdOpen = true
         // You're lifting again: the rest is over, quietly.
@@ -1339,6 +1386,7 @@ struct CoachStageView: View {
         countBase = 0
         countedSet = nil
         voiceInput.holdOpen = false
+        if live.isActive { live.setUplinkMuted(false) }
         // A stray "one, two" that never became a set: drop what was heard so
         // it isn't sent to Coach as a message when the pause check fires.
         func discardHeard() {
@@ -1913,7 +1961,10 @@ struct CoachStageView: View {
         heldUtterances = []
         heldReply = nil
         voiceInput.release()
+        voiceInput.useExternalFeed(false)
+        voice.redirect = nil
         voice.stop()
+        if live.isActive { live.stop() }
         AudioHub.shared.stop()
     }
 
@@ -1932,6 +1983,16 @@ struct CoachStageView: View {
     private func send(_ text: String, spoken: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        if live.isActive {
+            // The live coach heard it already — unless its mic was muted for
+            // a count when you said it, or you typed it: then pass it on.
+            if !spoken || live.uplinkMuted || Date().timeIntervalSince(live.unmutedAt) < 4 {
+                live.forwardUserText(trimmed)
+            }
+            markRestartHandled()
+            resumeListening()
+            return
+        }
         // Said while Coach is still answering the last thing: hold it, so
         // the two never cross (the second message would go without the
         // first reply in its history). It's sent once the answer is heard.

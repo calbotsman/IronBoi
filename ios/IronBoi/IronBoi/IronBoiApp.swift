@@ -70,14 +70,24 @@ struct AppRootView: View {
         // token, audio and captions without clicking through onboarding.
         .task(id: appModel.user?.uid) {
             guard ProcessInfo.processInfo.environment["MYO_LIVE_PROBE"] == "1", appModel.user != nil else { return }
-            let live = LiveVoiceSession()
-            let started = await live.start { try await appModel.startLiveCoachSession() }
-            AudioHub.log("probe: started=\(started)")
-            for _ in 0..<40 where live.state == .connecting { try? await Task.sleep(nanoseconds: 250_000_000) }
-            live.debugSay("Quick one: how many sets should I do today?")
-            for _ in 0..<80 { try? await Task.sleep(nanoseconds: 250_000_000) }
-            AudioHub.log("probe: done state=\(live.state) caption=\"\(live.caption.suffix(120))\"")
-            live.stop()
+            // Two separate sessions: say something to remember, hang up,
+            // then ask for it back. Proves memory crosses sessions.
+            @MainActor func turn(_ line: String) async -> String {
+                let live = LiveVoiceSession()
+                let started = await live.start(appModel.liveBackend)
+                AudioHub.log("probe: started=\(started)")
+                for _ in 0..<60 where live.state == .connecting { try? await Task.sleep(nanoseconds: 250_000_000) }
+                live.debugSay(line)
+                for _ in 0..<80 { try? await Task.sleep(nanoseconds: 250_000_000) }
+                let said = live.caption
+                live.stop()
+                return said
+            }
+            let first = await turn("Remember this for next week: I only have dumbbells and a bench at home, no barbell.")
+            AudioHub.log("probe 1 reply: \"\(first.suffix(140))\"")
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            let second = await turn("What equipment do I have at home right now?")
+            AudioHub.log("probe 2 reply: \"\(second.suffix(140))\"")
         }
         #endif
     }
