@@ -53,14 +53,21 @@ targets:
           # A warning nobody reads is not a safeguard. `scripts/preflight-appstore.sh`
           # is the deliberate pre-submission check; this is the backstop for
           # when that is skipped.
-          if [ "$SUFFIX" = "Prod" ] && grep -q "REPLACE_WITH_PROD" "$SOURCE"; then
+          # Two things must be true before a Release build may use prod:
+          # the prod plist is real, AND ironboi-prod is actually serving
+          # (Auth providers on, Firestore + Functions deployed, secrets
+          # set) — recorded by the marker file Firebase/PROD_READY. A real
+          # plist on its own just routes testers into an empty project
+          # ("internal error" at sign-in; build 38, 2026-10-12).
+          READY="$PROJECT_DIR/IronBoi/Firebase/PROD_READY"
+          if [ "$SUFFIX" = "Prod" ] && { grep -q "REPLACE_WITH_PROD" "$SOURCE" || [ ! -f "$READY" ]; }; then
             case "${MARKETING_VERSION:-0}" in
               0|0.*) PRERELEASE=1 ;;
               *)     PRERELEASE=0 ;;
             esac
 
             if [ "$PRERELEASE" = "0" ]; then
-              echo "error: MARKETING_VERSION is ${MARKETING_VERSION:-unset} (1.0 or later) but GoogleService-Info-Prod.plist is still a REPLACE_WITH_PROD_* placeholder."
+              echo "error: MARKETING_VERSION is ${MARKETING_VERSION:-unset} (1.0 or later) but prod is not ready (placeholder GoogleService-Info-Prod.plist, or no Firebase/PROD_READY marker)."
               echo "error: A 1.x build is a public release, and the staging fallback would point real users at the ironboi-staging Firebase project."
               echo "error: Create the ironboi-prod project, drop in its real GoogleService-Info.plist, and run scripts/preflight-appstore.sh. See ios/IronBoi/IronBoi/Firebase/README.md."
               exit 1
@@ -68,7 +75,7 @@ targets:
 
             FALLBACK="$PROJECT_DIR/IronBoi/Firebase/GoogleService-Info-Staging.plist"
             if [ -f "$FALLBACK" ]; then
-              echo "warning: GoogleService-Info-Prod.plist still contains REPLACE_WITH_PROD_* sentinels. Falling back to STAGING for this Release build. Fine for TestFlight; run scripts/preflight-appstore.sh before any public App Store submission. See ios/IronBoi/IronBoi/Firebase/README.md."
+              echo "warning: ironboi-prod is not ready (placeholder plist or no Firebase/PROD_READY marker). Falling back to STAGING for this Release build. Fine for TestFlight; run scripts/preflight-appstore.sh before any public App Store submission. See ios/IronBoi/IronBoi/Firebase/README.md."
               SOURCE="$FALLBACK"
             else
               echo "error: Prod plist is a placeholder AND staging fallback is missing. See ios/IronBoi/IronBoi/Firebase/README.md."
@@ -85,6 +92,7 @@ targets:
         inputFiles:
           - $(PROJECT_DIR)/IronBoi/Firebase/GoogleService-Info-Staging.plist
           - $(PROJECT_DIR)/IronBoi/Firebase/GoogleService-Info-Prod.plist
+          - $(PROJECT_DIR)/IronBoi/Firebase/PROD_READY
         outputFiles:
           - $(PROJECT_DIR)/IronBoi/GoogleService-Info.plist
     dependencies:

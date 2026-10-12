@@ -43,6 +43,13 @@ elif grep -q "REPLACE_WITH_PROD" "$PROD_PLIST"; then
   fail "GoogleService-Info-Prod.plist still has REPLACE_WITH_PROD_* placeholders — the build would silently ship STAGING credentials to real users"
 else
   pass "GoogleService-Info-Prod.plist has no placeholders"
+fi
+
+READY_MARKER="$REPO_ROOT/ios/IronBoi/IronBoi/Firebase/PROD_READY"
+if [ ! -f "$READY_MARKER" ]; then
+  fail "Firebase/PROD_READY marker is missing — Release builds fall back to STAGING until ironboi-prod has Auth, Firestore, Functions and secrets live (create the marker when it does)"
+else
+  pass "Firebase/PROD_READY marker present"
 
   PLIST_PROJECT="$(/usr/libexec/PlistBuddy -c "Print :PROJECT_ID" "$PROD_PLIST" 2>/dev/null || echo "")"
   if [ "$PLIST_PROJECT" = "$PROD_PROJECT" ]; then

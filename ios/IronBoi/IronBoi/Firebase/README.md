@@ -8,7 +8,7 @@ This directory holds the per-build-configuration `GoogleService-Info.plist` vari
 $CONFIGURATION    Source plist                          Bundle name
 ─────────────     ────────────────────────────────      ─────────────────────────
 Debug             GoogleService-Info-Staging.plist  →   GoogleService-Info.plist
-Release           GoogleService-Info-Prod.plist     →   GoogleService-Info.plist
+Release           GoogleService-Info-Prod.plist     →   GoogleService-Info.plist   (only once `PROD_READY` exists; otherwise Staging)
 ```
 
 The script lives in `project.yml` under `preBuildScripts`. It runs at the start of every build, copies the right source file over the canonical bundle name, and warns if the prod plist still contains placeholder sentinels.
@@ -41,3 +41,12 @@ Add a new `GoogleService-Info-<Config>.plist` here, then extend the `case "$CONF
 ## Why not bundle both files directly?
 
 Apple's reviewer guideline (and the Firebase SDK) expects exactly one `GoogleService-Info.plist` at the root of the `.app` bundle. Shipping both confuses the SDK and would let observers see the staging credentials in a Release build.
+
+## `PROD_READY` — the switch for Release builds
+
+A real `GoogleService-Info-Prod.plist` is not enough: a Release build that
+points at `ironboi-prod` before that project has Auth providers, Firestore,
+Functions and secrets live strands testers at sign-in ("internal error",
+build 38). So Release builds use **staging** until the empty file
+`Firebase/PROD_READY` exists. Create it (and commit it) the day prod is fully
+deployed; `scripts/preflight-appstore.sh` checks for it.
