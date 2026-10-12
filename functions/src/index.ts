@@ -22,6 +22,7 @@ import {
   CoachMemoryFact,
   CoachTips,
   CoachTone,
+  LiveWorkoutState,
   TrainingFocus,
   ConsentRecord,
   DailyCheck,
@@ -944,6 +945,7 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       inputMode: typeof data.inputMode === "string" ? data.inputMode : undefined,
       coachTips: CoachTips.safeParse(data.coachTips).data,
       coachTone: CoachTone.safeParse(data.coachTone).data,
+      liveWorkout: LiveWorkoutState.safeParse(data.liveWorkout).data,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
       openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });

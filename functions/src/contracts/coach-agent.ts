@@ -72,6 +72,25 @@ export const CoachTips = z.enum(["full", "brief", "quiet"]);
 export type CoachTips = z.infer<typeof CoachTips>;
 /** The coach's voice/energy; absent = default tone. */
 export const CoachTone = z.enum(["hype", "calm"]);
+
+/**
+ * Where the user is in a workout at the moment they speak, sent by iOS with
+ * every message while a session is open — so "can I do this one seated?"
+ * means the exercise they're on. The user's own plan data; bounded so it
+ * can't crowd the prompt.
+ */
+export const LiveWorkoutState = z.object({
+  workoutName: z.string().max(80).optional(),
+  exercise: z.string().min(1).max(80),
+  exerciseNumber: z.number().int().min(1).max(30),
+  setNumber: z.number().int().min(1).max(30),
+  totalSets: z.number().int().min(1).max(30),
+  targetReps: z.number().int().min(0).max(200),
+  weightLb: z.number().min(0).max(2000).optional(),
+  repsCountedThisSet: z.number().int().min(0).max(200).optional(),
+  exercises: z.array(z.string().min(1).max(80)).max(30),
+}).strict();
+export type LiveWorkoutState = z.infer<typeof LiveWorkoutState>;
 export type CoachTone = z.infer<typeof CoachTone>;
 export const OnboardingStatus = z.enum([
   "not_started",
@@ -770,6 +789,7 @@ export const CoachMessage = z.object({
   inputMode: CoachInputMode.optional(),
   coachTips: CoachTips.optional(),
   coachTone: CoachTone.optional(),
+  liveWorkout: LiveWorkoutState.optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().optional(),
   toolCallIds: z.array(z.string()).default([]),

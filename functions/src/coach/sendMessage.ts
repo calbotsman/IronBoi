@@ -1,7 +1,7 @@
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
-import { CoachInputMode, CoachTips, CoachTone } from "../contracts/coach-agent.js";
+import { CoachInputMode, CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
 import {
   coachSessionMessagePath,
   coachSessionPath,
@@ -28,6 +28,8 @@ export const IosCoachMessageRequest = z.object({
   // onUserCoachMessageCreated trigger passes them to the prompt).
   coachTips: CoachTips.optional(),
   coachTone: CoachTone.optional(),
+  // Mid-workout: the exercise, set and weight the user is on right now.
+  liveWorkout: LiveWorkoutState.optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().min(1).optional(),
   startedAt: z.string().datetime().optional(),
@@ -218,6 +220,9 @@ export async function handleSendCoachMessage(
   }
   if (parsed.coachTone !== undefined) {
     messageData.coachTone = parsed.coachTone;
+  }
+  if (parsed.liveWorkout !== undefined) {
+    messageData.liveWorkout = parsed.liveWorkout;
   }
 
   await db

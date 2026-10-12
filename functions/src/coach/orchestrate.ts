@@ -27,7 +27,8 @@ import {
   publishDraftProposals,
 } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
-import type { CoachTips, CoachTone } from "../contracts/coach-agent.js";
+import type { CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
+import { liveWorkoutRules } from "./liveWorkout.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
@@ -103,6 +104,8 @@ type OrchestrateCoachTurnArgs = {
   coachTips?: CoachTips;
   /** The coach's tone; absent = default. */
   coachTone?: CoachTone;
+  /** Mid-workout: where the user is right now. */
+  liveWorkout?: LiveWorkoutState;
   geminiApiKey?: string;
   openRouterApiKey?: string;
 };
@@ -136,6 +139,7 @@ export async function orchestrateCoachTurn({
   inputMode,
   coachTips,
   coachTone,
+  liveWorkout,
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
@@ -262,6 +266,7 @@ export async function orchestrateCoachTurn({
       spoken ? VOICE_MODE_RULES : null,
       inputMode ? BODY_RULES : null,
       styleRules,
+      liveWorkoutRules(liveWorkout),
     ].filter((part): part is string => Boolean(part)).join("\n\n");
     const userMessage = assembled.userMessage;
     const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });
