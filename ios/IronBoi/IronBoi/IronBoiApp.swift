@@ -64,6 +64,22 @@ struct AppRootView: View {
         .task {
             appModel.start()
         }
+        #if DEBUG
+        // MYO_LIVE_PROBE=1: once signed in, open a live voice session, say
+        // one line to it, and log what comes back — tests the real socket,
+        // token, audio and captions without clicking through onboarding.
+        .task(id: appModel.user?.uid) {
+            guard ProcessInfo.processInfo.environment["MYO_LIVE_PROBE"] == "1", appModel.user != nil else { return }
+            let live = LiveVoiceSession()
+            let started = await live.start { try await appModel.startLiveCoachSession() }
+            AudioHub.log("probe: started=\(started)")
+            for _ in 0..<40 where live.state == .connecting { try? await Task.sleep(nanoseconds: 250_000_000) }
+            live.debugSay("Quick one: how many sets should I do today?")
+            for _ in 0..<80 { try? await Task.sleep(nanoseconds: 250_000_000) }
+            AudioHub.log("probe: done state=\(live.state) caption=\"\(live.caption.suffix(120))\"")
+            live.stop()
+        }
+        #endif
     }
 }
 

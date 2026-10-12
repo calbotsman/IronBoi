@@ -58,6 +58,7 @@
 		D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */; };
 		D6444B3E1D84C06921141B78 /* GoogleService-Info-Staging.plist in Resources */ = {isa = PBXBuildFile; fileRef = 213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */; };
 		DDE287948E75C936D7F8D05A /* PlanReviewCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */; };
+		DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */; };
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
 		EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
 		EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */; };
@@ -84,6 +85,7 @@
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
 		56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbPhysics.swift; sourceTree = "<group>"; };
 		58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneBodyMotion.swift; sourceTree = "<group>"; };
+		5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
 		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
 		73C5EE0407EB961F5B79622A /* DossierComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DossierComponents.swift; sourceTree = "<group>"; };
@@ -188,6 +190,7 @@
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
 				7701CCF07727848BE39DE49A /* AudioHub.swift */,
 				FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */,
+				5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */,
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
 			);
@@ -424,6 +427,7 @@
 				302EFB0F1A9C9E4BFC2C13F6 /* FlowLayout.swift in Sources */,
 				8C0DBA5370D46A7D67B5553B /* Gear.swift in Sources */,
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
+				DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */,
 				7FFE32B5ACB8BB3E25F08D85 /* LiveWorkoutCard.swift in Sources */,
 				7CE0660BBEDC99B11BB65681 /* MemoryFact.swift in Sources */,
 				AB88E520959883D65800468A /* MemoryReviewView.swift in Sources */,

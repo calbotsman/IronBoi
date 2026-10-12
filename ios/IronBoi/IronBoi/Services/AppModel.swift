@@ -347,6 +347,11 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     /// Coach's voice for a sentence or two: WAV bytes from Cloud TTS.
+    /// A single-use, prompt-locked Gemini Live token (live voice beta).
+    func startLiveCoachSession() async throws -> LiveVoiceSession.Ticket {
+        try await callCallable("startLiveCoachSession", data: ["clientDate": Self.currentDateISO()])
+    }
+
     func synthesizeSpeech(_ text: String) async throws -> Data {
         struct Speech: Decodable { let audio: String }
         let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: ["text": text])

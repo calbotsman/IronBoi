@@ -14,6 +14,9 @@ struct CoachStageView: View {
     @ObservedObject var voiceInput: VoiceInputEngine
     @ObservedObject var voice: CoachVoice
     @ObservedObject var director: BodyDirector
+    /// Live voice (beta): Gemini Live instead of the regular loop, outside
+    /// a workout, when switched on in Your coach.
+    @StateObject private var live = LiveVoiceSession()
     var askedForWorkout = 0
     /// The latest typed message — handled exactly like the same words said
     /// out loud (set logging, workout changes, rest day, style…).
@@ -139,6 +142,13 @@ struct CoachStageView: View {
     @State private var lastCueCheckedReplyId: String?
 
     private var phase: OrbPhase {
+        if live.isActive {
+            switch live.state {
+            case .speaking: return .speaking
+            case .connecting: return .thinking
+            default: return .listening
+            }
+        }
         if voice.isSpeaking { return .speaking }
         // While Coach thinks the mic stays open; it only reads as listening
         // once you actually say something.
@@ -190,7 +200,11 @@ struct CoachStageView: View {
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
         .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
-        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .onChange(of: live.isActive) { _, _ in keepAwake() }
+        .onDisappear {
+            live.stop()
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
         .onAppear {
             keepAwake()
             voiceInput.onPause = { text in
@@ -395,8 +409,8 @@ struct CoachStageView: View {
                 let origin = geo.frame(in: .named(Self.space)).origin
                 OrbView(
                     phase: phase,
-                    you: voiceInput.meter,
-                    agent: voice.meter,
+                    you: live.isActive ? live.youMeter : voiceInput.meter,
+                    agent: live.isActive ? live.agentMeter : voice.meter,
                     focus: centered
                         ? CGPoint(x: restFocus.x - origin.x, y: restFocus.y - origin.y)
                         : orbSlot.map { CGPoint(x: $0.midX - origin.x, y: $0.midY - origin.y) },
@@ -597,13 +611,14 @@ struct CoachStageView: View {
         case .speaking:
             // A subtitle: only the sentence being said, gone when it's done.
             // The whole reply lives in Conversation.
-            Text(voice.caption.isEmpty ? " " : voice.caption)
+            let said = live.isActive ? Self.lastSentence(of: live.caption) : voice.caption
+            Text(said.isEmpty ? " " : said)
                 .myoStyle(.title)
                 .foregroundStyle(MyoColor.Text.primary.color)
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
                 .frame(minHeight: 88, alignment: .top)
-                .id(voice.caption)
+                .id(said)
                 .transition(.opacity)
         case .rest where textReply != nil:
             TypedReplyText(message: textReply!, shownAt: textReplyShownAt)
@@ -1034,6 +1049,28 @@ struct CoachStageView: View {
         textReply = nil
         AudioHub.log("talk tapped (mic button: \(fromMic))")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // Live voice (beta): a tap starts or ends it. Outside a workout
+        // only (counting stays on the regular loop for now). If it can't
+        // connect, the regular coach takes over, so a tap always works.
+        if live.isActive {
+            live.stop()
+            return
+        }
+        if LiveVoiceSession.enabled, !conversationActive, appModel.activeWorkout == nil {
+            voice.stop()
+            director.rest()
+            voiceInput.release()
+            Task {
+                let started = await live.start { try await appModel.startLiveCoachSession() }
+                if !started {
+                    AudioHub.log("live: falling back to the regular coach")
+                    conversationActive = true
+                    silentRestarts = []
+                    voiceInput.toggle()
+                }
+            }
+            return
+        }
         if conversationActive, phase == .speaking, !fromMic {
             cutIn = true
             voice.stop()
@@ -1837,7 +1874,17 @@ struct CoachStageView: View {
     /// silence handler should leave it alone. Expires on its own, so a stop
     /// that never comes can't swallow a real one later.
     private func keepAwake() {
-        UIApplication.shared.isIdleTimerDisabled = conversationActive || appModel.activeWorkout != nil
+        UIApplication.shared.isIdleTimerDisabled = conversationActive || live.isActive || appModel.activeWorkout != nil
+    }
+
+    /// The sentence being said now, from a live caption that grows as it's
+    /// spoken.
+    static func lastSentence(of caption: String) -> String {
+        let trimmed = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let body = trimmed.last.map { ".?!".contains($0) } == true ? String(trimmed.dropLast()) : trimmed
+        guard let cut = body.lastIndex(where: { ".?!".contains($0) }) else { return trimmed }
+        return String(trimmed[trimmed.index(after: cut)...]).trimmingCharacters(in: .whitespaces)
     }
 
     private func markRestartHandled() {

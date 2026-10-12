@@ -4,6 +4,9 @@ import SwiftUI
 /// brick/ochre selection, sticky save bar. No stock Form chrome.
 /// Built to docs/design/myo-you-tab-layout-spec.md.
 struct PreferencesView: View {
+    /// Live voice (beta): talk to the coach over Gemini Live outside a
+    /// workout. Off by default; the regular coach is unchanged.
+    @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = false
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
 
@@ -403,6 +406,10 @@ struct PreferencesView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+            }
+
+            MyoValueRow(label: "Live voice (beta)") {
+                Toggle("Live voice (beta)", isOn: $liveVoiceBeta).labelsHidden()
             }
 
             MyoValueRow(label: "Methodology") {
