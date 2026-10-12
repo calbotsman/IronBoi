@@ -79,6 +79,10 @@ struct CoachStageView: View {
     /// When listening last restarted on its own; three restarts inside ten
     /// seconds with nothing heard means the recognizer is failing — stop.
     @State private var silentRestarts: [Date] = []
+    /// What you said while Coach was still answering, sent after.
+    @State private var heldUtterances: [String] = []
+    /// A reply that arrived while you were mid-sentence.
+    @State private var heldReply: CoachMessage?
     /// Reps counted out loud in the current utterance.
     @State private var repCount = 0
     /// The set this count already closed (exercise index, 1-based set) —
@@ -136,7 +140,9 @@ struct CoachStageView: View {
 
     private var phase: OrbPhase {
         if voice.isSpeaking { return .speaking }
-        if voiceInput.isListening { return .listening }
+        // While Coach thinks the mic stays open; it only reads as listening
+        // once you actually say something.
+        if voiceInput.isListening, awaitingReplyAfter == nil || !voiceInput.transcript.isEmpty { return .listening }
         if appModel.isSending || awaitingReplyAfter != nil || typedReplyAfter != nil
             || appModel.messages.last?.isPendingCoachReply == true {
             return .thinking
@@ -302,6 +308,15 @@ struct CoachStageView: View {
                 }
             }
             cutIn = false
+            if conversationActive, !heldUtterances.isEmpty {
+                // What you added while Coach was thinking, now that it has
+                // answered the first part — one message, in order.
+                let text = heldUtterances.joined(separator: " ")
+                heldUtterances = []
+                AudioHub.log("sending held: \"\(text.suffix(60))\"")
+                send(text, spoken: true)
+                return
+            }
             resumeListening()
         }
         // Listening stopped without a send (the recognizer timed out on
@@ -342,7 +357,12 @@ struct CoachStageView: View {
         }
         .onChange(of: voiceInput.isListening) { _, listening in
             if !listening, restartHandledLocally { restartHandledLocally = false; return }
-            guard !listening, conversationActive, awaitingReplyAfter == nil, !voice.isSpeaking else { return }
+            guard !listening, conversationActive, !voice.isSpeaking else { return }
+            if awaitingReplyAfter != nil {
+                // Coach is thinking: keep the mic open for anything you add.
+                if voiceInput.errorMessage == nil { listenWhileThinking() }
+                return
+            }
             let now = Date()
             silentRestarts = silentRestarts.filter { now.timeIntervalSince($0) < 10 } + [now]
             if voiceInput.errorMessage != nil {
@@ -1843,6 +1863,8 @@ struct CoachStageView: View {
         voiceInput.holdOpen = false
         conversationActive = false
         awaitingReplyAfter = nil
+        heldUtterances = []
+        heldReply = nil
         voiceInput.release()
         voice.stop()
         AudioHub.shared.stop()
@@ -1863,6 +1885,20 @@ struct CoachStageView: View {
     private func send(_ text: String, spoken: Bool) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Said while Coach is still answering the last thing: hold it, so
+        // the two never cross (the second message would go without the
+        // first reply in its history). It's sent once the answer is heard.
+        if spoken, conversationActive, awaitingReplyAfter != nil || heldReply != nil {
+            heldUtterances.append(trimmed)
+            AudioHub.log("held while coach answers: \"\(trimmed.suffix(60))\"")
+            if let reply = heldReply {
+                heldReply = nil
+                speak(reply)
+            } else {
+                listenWhileThinking()
+            }
+            return
+        }
         if !spoken, applyStyleChange(in: trimmed) { return }
         // A new turn: the old typed reply has had its moment.
         textReply = nil
@@ -1880,6 +1916,18 @@ struct CoachStageView: View {
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
         let counted = repCount
         Task { await appModel.sendCoachMessage(trimmed, spoken: spoken, repsCounted: counted) }
+        // Keep listening while Coach thinks: anything you add is held.
+        if spoken, conversationActive { listenWhileThinking() }
+    }
+
+    /// Opens the mic while Coach works on a reply, after a breath.
+    private func listenWhileThinking() {
+        guard conversationActive else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard conversationActive, awaitingReplyAfter != nil, !voiceInput.isListening, !voice.isSpeaking else { return }
+            voiceInput.toggle()
+        }
     }
 
     /// Coach named a move in a new reply: step into it. Once per reply, and
@@ -1915,7 +1963,23 @@ struct CoachStageView: View {
             $0.role == .coach && !known.contains($0.id) && finished.contains($0.status) && !$0.content.isEmpty
         }) else { return }
         awaitingReplyAfter = nil
-        guard conversationActive, !voiceInput.isListening else { return }
+        guard conversationActive else { return }
+        if voiceInput.isListening {
+            // You're mid-sentence: the reply waits for you to finish.
+            // (It used to be dropped silently, which read as Coach losing
+            // the thread.)
+            if !voiceInput.transcript.isEmpty {
+                heldReply = reply
+                AudioHub.log("reply waits: you're talking")
+                return
+            }
+            markRestartHandled()
+            voiceInput.stop()
+        }
+        speak(reply)
+    }
+
+    private func speak(_ reply: CoachMessage) {
         if reply.content.contains("?") { askedAt = Date() }
         if speaksReplies {
             voice.speak(reply.speech, messageId: reply.id)

@@ -29,6 +29,17 @@ final class VoiceInputEngine: ObservableObject {
         }
     }
     private static let pauseSeconds: UInt64 = 1_400_000_000
+
+    /// How long a quiet stretch ends your turn. A finished sentence ("…
+    /// seated?") goes quickly; a short command ("set done") nearly as
+    /// quickly; anything mid-thought ("the dumbbell shoulder press, the
+    /// one that I'm…") gets room, so one thought isn't sent as two.
+    static func pauseDelay(after text: String) -> UInt64 {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let last = t.last, ".?!".contains(last) { return 1_100_000_000 }
+        if t.split(separator: " ").count <= 2 { return pauseSeconds }
+        return 2_100_000_000
+    }
     /// A set can run a minute or more on one open request, and the
     /// recogniser goes quiet on a request that old: while a count is held
     /// open, the request is swapped for a fresh one this often. The tap
@@ -359,8 +370,9 @@ final class VoiceInputEngine: ObservableObject {
     private func schedulePauseCheck() {
         pauseTask?.cancel()
         guard !holdOpen else { return }
+        let wait = Self.pauseDelay(after: transcript)
         pauseTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.pauseSeconds)
+            try? await Task.sleep(nanoseconds: wait)
             guard let self, !Task.isCancelled, self.isListening else { return }
             let text = self.transcript
             guard !text.isEmpty else { return }
