@@ -73,6 +73,19 @@ import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
 import { checkDailyTtsCap, recordTtsUsage } from "./usage/cap.js";
+import {
+  LIVE_MINTS_PER_DAY_DEFAULT,
+  LIVE_MODEL_DEFAULT,
+  LIVE_VOICE_DEFAULT,
+  StartLiveCoachSessionRequest,
+  liveAllowedForSignInProvider,
+  liveCoachPrompt,
+  liveSetup,
+  liveVoiceEnabled,
+  loadLivePromptInputs,
+  mintLiveToken,
+  takeLiveMint,
+} from "./coach/liveSession.js";
 
 // Phase 3 Task 3.2 — App Check enforcement (env-gated).
 //
@@ -516,6 +529,46 @@ export const finishWorkoutSessionCallable = onCall(
 // this. Over the cap the app falls back to the on-device voice, so the
 // user still hears the reply; only the bill stops. Text replies are never
 // affected (the message/token caps are separate).
+// Live voice (beta) — docs/design/live-voice-brain.md milestone 1. Mints a
+// single-use Gemini Live token with the coach's prompt locked in; the phone
+// connects straight to Gemini with it. Off unless IRONBOI_LIVE_VOICE_ENABLED.
+export const startLiveCoachSession = onCall(
+  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey] },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    if (!liveVoiceEnabled()) throw new HttpsError("failed-precondition", "live_voice_disabled");
+    const signInProvider = (request.auth?.token as { firebase?: { sign_in_provider?: string } } | undefined)
+      ?.firebase?.sign_in_provider;
+    if (!liveAllowedForSignInProvider(signInProvider)) {
+      throw new HttpsError("permission-denied", "live_voice_requires_sign_in");
+    }
+    const parsed = parseCallablePayload(StartLiveCoachSessionRequest, request.data ?? {}, "startLiveCoachSession");
+    const cap = Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT;
+    if (!(await takeLiveMint(db, userId, cap))) {
+      safeLogger.warn("Live voice daily cap reached", { event: "live_voice_cap_reached", userId });
+      throw new HttpsError("resource-exhausted", "live_voice_daily_cap");
+    }
+    const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new HttpsError("failed-precondition", "live_voice_not_configured");
+    const model = process.env.IRONBOI_LIVE_MODEL || LIVE_MODEL_DEFAULT;
+    const voice = process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT;
+    const inputs = await loadLivePromptInputs(db, userId);
+    const prompt = liveCoachPrompt({ ...inputs, today: parsed.clientDate ?? new Date().toISOString().slice(0, 10) });
+    try {
+      const { token, expiresAt } = await mintLiveToken({ apiKey, setup: liveSetup({ model, voice, prompt }) });
+      safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId });
+      return { token, model, voice, expiresAt };
+    } catch (error) {
+      safeLogger.error("Live voice mint failed", {
+        event: "live_voice_mint_failed",
+        userId,
+        errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+      });
+      throw new HttpsError("unavailable", "live_voice_unavailable");
+    }
+  },
+);
+
 export const synthesizeSpeechCallable = onCall(
   { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB" },
   async (request) => {
