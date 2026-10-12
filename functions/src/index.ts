@@ -74,18 +74,22 @@ import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
 import { checkDailyTtsCap, recordTtsUsage } from "./usage/cap.js";
 import {
+  CoachLiveToolRequest,
   LIVE_MINTS_PER_DAY_DEFAULT,
   LIVE_MODEL_DEFAULT,
   LIVE_VOICE_DEFAULT,
+  RecordLiveTurnRequest,
   StartLiveCoachSessionRequest,
+  buildLiveSystemInstruction,
   liveAllowedForSignInProvider,
-  liveCoachPrompt,
-  liveSetup,
+  liveBrainSetup,
   liveVoiceEnabled,
-  loadLivePromptInputs,
   mintLiveToken,
+  recordLiveTurn,
+  runLiveTool,
   takeLiveMint,
 } from "./coach/liveSession.js";
+import { selectCoachModelProvider } from "./coach/modelProvider.js";
 
 // Phase 3 Task 3.2 — App Check enforcement (env-gated).
 //
@@ -552,11 +556,20 @@ export const startLiveCoachSession = onCall(
     if (!apiKey) throw new HttpsError("failed-precondition", "live_voice_not_configured");
     const model = process.env.IRONBOI_LIVE_MODEL || LIVE_MODEL_DEFAULT;
     const voice = process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT;
-    const inputs = await loadLivePromptInputs(db, userId);
-    const prompt = liveCoachPrompt({ ...inputs, today: parsed.clientDate ?? new Date().toISOString().slice(0, 10) });
+    // The whole brain — profile, plan, recent workouts, memory facts, coach
+    // notes, the shared conversation — locked into the session.
+    const instruction = await buildLiveSystemInstruction({
+      db,
+      coach,
+      userId,
+      today: parsed.clientDate ?? new Date().toISOString().slice(0, 10),
+    });
     try {
-      const { token, expiresAt } = await mintLiveToken({ apiKey, setup: liveSetup({ model, voice, prompt }) });
-      safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId });
+      const { token, expiresAt } = await mintLiveToken({
+        apiKey,
+        setup: liveBrainSetup({ model, voice, instruction, resumeHandle: parsed.resumeHandle }),
+      });
+      safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId, outcome: parsed.resumeHandle ? "resume" : "new" });
       return { token, model, voice, expiresAt };
     } catch (error) {
       safeLogger.error("Live voice mint failed", {
@@ -566,6 +579,47 @@ export const startLiveCoachSession = onCall(
       });
       throw new HttpsError("unavailable", "live_voice_unavailable");
     }
+  },
+);
+
+function requireLiveUser(request: { auth?: { uid: string; token: unknown } | null }) {
+  const userId = requireUserId(request.auth as Parameters<typeof requireUserId>[0]);
+  if (!liveVoiceEnabled()) throw new HttpsError("failed-precondition", "live_voice_disabled");
+  const signInProvider = (request.auth?.token as { firebase?: { sign_in_provider?: string } } | undefined)
+    ?.firebase?.sign_in_provider;
+  if (!liveAllowedForSignInProvider(signInProvider)) {
+    throw new HttpsError("permission-denied", "live_voice_requires_sign_in");
+  }
+  return userId;
+}
+
+// Live voice: one spoken exchange into the shared conversation (memory for
+// both pipelines), with the severe screen on the user's own words.
+export const recordLiveTurnCallable = onCall(
+  { ...CALLABLE_OPTS, timeoutSeconds: 40, memory: "256MiB", secrets: [geminiApiKey, openRouterApiKey] },
+  async (request) => {
+    const userId = requireLiveUser(request);
+    const turn = parseCallablePayload(RecordLiveTurnRequest, request.data, "recordLiveTurn");
+    const provider = selectCoachModelProvider({
+      geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
+    });
+    const result = await recordLiveTurn({ db, userId, turn, provider });
+    if (result.stop) safeLogger.warn("Live voice severe stop", { event: "live_voice_severe_stop", userId });
+    return result;
+  },
+);
+
+// Live voice: one tool call from the live coach, run with the text coach's
+// registry and gates.
+export const coachLiveToolCallable = onCall(
+  { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const userId = requireLiveUser(request);
+    const call = parseCallablePayload(CoachLiveToolRequest, request.data, "coachLiveTool");
+    const result = await runLiveTool({ db, userId, call });
+    safeLogger.info("Live voice tool", { event: "live_voice_tool", userId, outcome: `${call.name}:${result.ok === true ? "ok" : "refused"}` });
+    return result;
   },
 );
 
