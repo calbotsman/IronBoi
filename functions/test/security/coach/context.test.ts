@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { deleteApp, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { loadCoachContext } from "../../../src/coach/context.js";
-import { planAdjustmentProposalPath, profilePath, workoutPlanPath } from "../../../src/paths.js";
+import { coachSessionPath, planAdjustmentProposalPath, profilePath, workoutPlanPath } from "../../../src/paths.js";
 import { baseProfile } from "../fixtures/users.js";
 
 const USER_ID = "context-user-a";
@@ -100,5 +100,23 @@ describe("loadCoachContext", () => {
     const withPlan = await loadCoachContext(db, USER_ID, SESSION_ID);
     expect(withPlan.currentPlan?.days?.Mon?.name).toBe("Push");
     expect(withPlan.currentPlan?.dailyOverrides?.["2026-09-04"]?.name).toBe("Adjusted");
+  });
+  it("loads the newest 40 messages of the session, oldest first", async () => {
+    const base = Date.parse("2026-10-01T00:00:00.000Z");
+    const batch = db.batch();
+    for (let i = 0; i < 55; i += 1) {
+      batch.set(db.doc(`${coachSessionPath(USER_ID, SESSION_ID)}/messages/m${String(i).padStart(3, "0")}`), {
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: `message ${i}`,
+        serverCreatedAt: new Date(base + i * 1000).toISOString(),
+      });
+    }
+    await batch.commit();
+
+    const context = await loadCoachContext(db, USER_ID, SESSION_ID);
+    const contents = context.sessionHistory.map((message) => message.content);
+    expect(contents).toHaveLength(40);
+    expect(contents[0]).toBe("message 15");
+    expect(contents.at(-1)).toBe("message 54");
   });
 });

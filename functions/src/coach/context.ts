@@ -103,8 +103,11 @@ export async function loadCoachContext(
         .limit(14)
         .get(),
       db
+        // The NEWEST 40, read newest-first and flipped back to oldest-first
+        // below. ("asc" + limit returned the first 40 messages ever sent,
+        // so past 40 the coach never saw the recent turns.)
         .collection(`${coachSessionPath(userId, sessionId)}/messages`)
-        .orderBy("serverCreatedAt", "asc")
+        .orderBy("serverCreatedAt", "desc")
         .limit(40)
         .get(),
       recentPlanChangesPromise,
@@ -125,7 +128,7 @@ export async function loadCoachContext(
     profile: profileSnap.exists ? profileSnap.data() ?? null : null,
     recentFacts: confirmedFacts,
     recentLogs: recentLogsSnap.docs.map((doc) => doc.data()),
-    sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()),
+    sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()).reverse(),
     pendingProposalCount,
     recentPlanChanges,
     progressSummary,
