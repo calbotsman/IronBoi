@@ -98,6 +98,10 @@ final class VoiceInputEngine: ObservableObject {
                 // a moment later. One retry before giving up.
                 AudioHub.log("listen failed: \(error.localizedDescription) — retrying once")
                 let before = session
+                // Start the retry from nothing: a tap or engine left over
+                // from the failed attempt is the usual cause (-50).
+                removeTap()
+                if audioEngine.isRunning { audioEngine.stop() }
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 guard session == before else { return }
                 do {

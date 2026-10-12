@@ -30,22 +30,72 @@ enum WorkoutVoice {
     /// `from`: the count already reached before this transcript began — real
     /// counting spans pauses, and the recognizer restarts between them.
     static func repCount(in transcript: String, from start: Int = 0) -> Int {
+        // Every number-ish word, in order, with whether it was a clear
+        // number or only sounds like one ("to", "for").
+        let heard: [(value: Int, soundAlike: Bool)] = expanded(tokens(transcript), after: start).compactMap { token in
+            if let value = Int(token) ?? numberWords[token] { return (value, false) }
+            if let value = soundAlikes[token] { return (value, true) }
+            return nil
+        }
         var count = start
-        for token in expanded(tokens(transcript), after: start) {
-            let value = Int(token) ?? numberWords[token] ?? soundAlikes[token]
-            guard let value else { continue }
-            let isSoundAlike = Int(token) == nil && numberWords[token] == nil
-            // The recogniser drops words mid-set. Once a count is running, a
-            // clear number up to three ahead resyncs it ("…six, [seven lost],
-            // eight, nine" lands on nine); a sound-alike may only skip one.
-            // Before the count starts, only a real "one" starts it.
-            let ahead = value - count
-            let accepted = count == 0
-                ? value == 1
-                : (isSoundAlike ? (1...2).contains(ahead) : (1...3).contains(ahead))
-            if accepted { count = value }
+        for (i, number) in heard.enumerated() {
+            let ahead = number.value - count
+            guard ahead > 0 else { continue }
+            // The next number, clear or sound-alike: always.
+            if ahead == 1 { count = number.value; continue }
+            // The recogniser drops words. A clear number a little ahead
+            // resyncs the count ("…six, [seven lost], eight" lands on
+            // eight), and a count can start on two or three when "one" was
+            // lost. A sound-alike may only skip one.
+            let limit = number.soundAlike ? 2 : 3
+            if count == 0 ? (!number.soundAlike && number.value <= 3) : ahead <= limit {
+                count = number.value
+                continue
+            }
+            // Two numbers in a row are proof you're counting, however many
+            // were missed before them: "two … [three, four, five lost] …
+            // six, seven" lands on seven.
+            if number.value <= 30, i + 1 < heard.count, heard[i + 1].value == number.value + 1,
+               !(number.soundAlike && heard[i + 1].soundAlike) {
+                count = number.value
+            }
         }
         return count
+    }
+
+    /// Nothing but numbers (and counting filler): mid-workout this is a
+    /// count, even one that couldn't be followed, and never a message.
+    static func isOnlyNumbers(_ transcript: String) -> Bool {
+        let words = tokens(transcript)
+        guard !words.isEmpty else { return false }
+        let filler: Set<String> = ["and", "uh", "um", "okay", "ok", "come", "on", "more", "rep", "reps"]
+        return words.allSatisfy { Int($0) != nil || numberWords[$0] != nil || soundAlikes[$0] != nil || filler.contains($0) }
+            && words.contains { Int($0) != nil || numberWords[$0] != nil }
+    }
+
+    /// "Can I do these seated?", "let me do it kneeling", "switch to
+    /// standing": a change of position for the lift you're on.
+    static func stanceRequest(_ transcript: String) -> ExerciseMotion.Stance? {
+        let t = normalized(transcript)
+        guard t.range(of: #"\b(not|don't|never)\b"#, options: .regularExpression) == nil,
+              t.range(of: #"\b(can i|could i|can we|should i|let me|let's|lets|i'll|i will|i want to|i wanna|i'm gonna|i am going to|switch|change|go|do (it|this|these|them|those|this one|the rest)|instead|rather)\b"#,
+                      options: .regularExpression) != nil,
+              t.range(of: #"\b(seated|sitting|kneeling|on my knees|standing|stand up)\b"#, options: .regularExpression) != nil
+        else { return nil }
+        return ExerciseMotion.Stance.named(in: t)
+    }
+
+    /// The same lift in another position: "Dumbbell Shoulder Press" →
+    /// "Seated Dumbbell Shoulder Press"; "Seated Curl" → "Standing Curl".
+    static func variant(of name: String, _ stance: ExerciseMotion.Stance) -> String {
+        let bare = name.replacingOccurrences(
+            of: #"(?i)\b(seated|sitting|standing|half[- ]?kneeling|tall[- ]?kneeling|kneeling)\b\s*"#,
+            with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+        switch stance {
+        case .seated: return "Seated \(bare)"
+        case .kneeling: return "Kneeling \(bare)"
+        case .standing: return "Standing \(bare)"
+        }
     }
 
     /// "Done", "that's the set", "finished" — the set is over at whatever count.

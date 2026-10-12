@@ -65,6 +65,8 @@ struct BodyPose {
     var bench = false
     /// Bench tilt in radians (incline positive), applied with the body.
     var benchAngle: Float = 0
+    /// A seat under the hips, seen front-on (seated arm lifts).
+    var seat = false
     /// Squash the blob toward this (1 = round) — a landing. It springs back
     /// with a wobble on its own.
     var squash: Float? = nil

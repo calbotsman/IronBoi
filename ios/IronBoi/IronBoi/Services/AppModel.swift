@@ -357,7 +357,8 @@ final class AppModel: NSObject, ObservableObject {
     func sendCoachMessage(
         _ content: String,
         structuredAnswer: [String: Any]? = nil,
-        spoken: Bool = false
+        spoken: Bool = false,
+        repsCounted: Int? = nil
     ) async {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -374,7 +375,7 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let now = ISO8601DateFormatter().string(from: Date())
-            try await callCallable("sendCoachMessage", data: [
+            var data: [String: Any] = [
                 "sessionId": sessionId,
                 "messageId": "ios_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
@@ -390,10 +391,36 @@ final class AppModel: NSObject, ObservableObject {
                 // Local calendar date — a chat-driven "yes, just today" keys
                 // its override to the user's day, not the server timezone.
                 "clientDate": Self.currentDateISO(),
-            ])
+            ]
+            // Mid-workout: the exercise you're on, so "this one" means it.
+            if let live = liveWorkoutState(repsCounted: repsCounted) { data["liveWorkout"] = live }
+            try await callCallable("sendCoachMessage", data: data)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Where you are in the workout right now, for the coach. Strings are
+    /// clipped to what the server accepts (80 characters, 30 exercises).
+    func liveWorkoutState(repsCounted: Int? = nil) -> [String: Any]? {
+        guard let workout = activeWorkout, let index = currentExerciseIndex,
+              workout.exercises.indices.contains(index) else { return nil }
+        let exercise = workout.exercises[index]
+        func clip(_ s: String) -> String { String(s.prefix(80)) }
+        let totalSets = max(1, min(exercise.targetSets, 30))
+        var state: [String: Any] = [
+            "exercise": clip(exercise.name),
+            "exerciseNumber": min(index + 1, 30),
+            "setNumber": max(1, min(exercise.completedSetCount + 1, totalSets)),
+            "totalSets": totalSets,
+            "targetReps": max(0, min(exercise.targetReps, 200)),
+            "exercises": workout.exercises.prefix(30).map { clip($0.name) },
+        ]
+        if !workout.workoutName.isEmpty { state["workoutName"] = clip(workout.workoutName) }
+        let weight = workingWeight(for: exercise)
+        if weight > 0 { state["weightLb"] = min(weight, 2000) }
+        if let repsCounted, repsCounted > 0 { state["repsCountedThisSet"] = min(repsCounted, 200) }
+        return state
     }
 
     func askCoachAboutWorkout(
@@ -709,6 +736,18 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
         sessionChanges.append("Swapped \(old.name) for \(name)")
         return target
+    }
+
+    /// The same lift done another way (seated, kneeling): only the name
+    /// changes. Sets done, sets left and the weight all carry over.
+    func renameWorkoutExercise(_ index: Int, to name: String) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(index) else { return }
+        let old = workout.exercises[index].name
+        guard old != name else { return }
+        workout.exercises[index].name = name
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("Switched \(old) to \(name)")
     }
 
     /// Skips a lift today: it's crossed off and left out of the log.

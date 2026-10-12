@@ -160,6 +160,7 @@ final class OrbModel {
     private var gearShown: Gear = .none
     private var benchShown = false
     private var benchAngleShown: Float = 0
+    private var seatShown = false
     private var gearSideOn = false
     private var gearGrow: Float = 0
     private var gearGrowVelocity: Float = 0
@@ -487,14 +488,16 @@ extension OrbModel {
     fileprivate func updateGear(for pose: BodyPose, dt: Float, reduceMotion: Bool) {
         let wanted = pose.form > 0.5 ? pose.gear : .none
         let wantsBench = pose.form > 0.5 && pose.bench
-        let changing = wanted != gearShown || wantsBench != benchShown
+        let wantsSeat = pose.form > 0.5 && pose.seat
+        let changing = wanted != gearShown || wantsBench != benchShown || wantsSeat != seatShown
         if changing, gearGrow < 0.04 {
             gearShown = wanted
             benchShown = wantsBench
+            seatShown = wantsSeat
             gearSideOn = pose.side > 0.5
         }
         if wantsBench { benchAngleShown = pose.benchAngle }
-        let hasGear = gearShown != .none || benchShown
+        let hasGear = gearShown != .none || benchShown || seatShown
         let target: Float = !changing && hasGear && form > 0.75 ? 1 : 0
         if reduceMotion {
             gearGrow = target
@@ -516,7 +519,7 @@ extension OrbModel {
         if gearGrow > 0.02 {
             let s = bodyScale * Self.size
             let shapes = GearShape.build(gear: gearShown, bench: benchShown, benchAngle: benchAngleShown,
-                                         sideOn: gearSideOn, joints: joints, grow: gearGrow)
+                                         seat: seatShown, sideOn: gearSideOn, joints: joints, grow: gearGrow)
             for (i, shape) in shapes.prefix(Self.maxGearShapes).enumerated() {
                 flat.replaceSubrange(i * 8 ..< i * 8 + 8, with: shape.scaled(s).floats)
             }

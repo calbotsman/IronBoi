@@ -1121,6 +1121,15 @@ struct CoachStageView: View {
             return
         }
         if appModel.activeWorkout != nil {
+            // Bare numbers are a count, even one we couldn't follow ("two",
+            // then "six, seven" after misses). They never go to Coach as a
+            // message — that's what made Coach talk over you mid-set.
+            if WorkoutVoice.isOnlyNumbers(text) {
+                AudioHub.log("count words kept local: \"\(text.suffix(40))\" count=\(repCount)")
+                markRestartHandled()
+                resumeListening()
+                return
+            }
             if repCount > 0 {
                 // Mid-count: "set done" (tapped, typed or said) closes the
                 // set at the count so far. A question or a request closes
@@ -1174,6 +1183,16 @@ struct CoachStageView: View {
                 confirm("\(Self.short(exercise.name)) at \(LiveWorkoutCard.pounds(max(0, next))) pounds.")
                 return
             }
+            // "Can I do these seated?" — the lift you're on changes position
+            // right away (the body sits, the log says Seated), and the
+            // question still goes to Coach for a word on form.
+            if short, let stance = WorkoutVoice.stanceRequest(text), let index = currentExerciseIndex,
+               let exercise = currentExercise, ExerciseMotion.match(exercise.name)?.lift.canSitOrKneel == true {
+                let renamed = WorkoutVoice.variant(of: exercise.name, stance)
+                AudioHub.log("stance: \(exercise.name) → \(renamed)")
+                appModel.renameWorkoutExercise(index, to: renamed)
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
             // Mid-workout the mic hears the whole gym — music, other people.
             // Only what's said to MYO (or an answer to its question) goes to
             // the coach; everything else is ignored, with a hint if it
@@ -1224,6 +1243,7 @@ struct CoachStageView: View {
         guard WorkoutVoice.looksLikeCounting(transcript) else { return }
         let count = WorkoutVoice.repCount(in: transcript, from: countBase)
         guard count > repCount else { return }
+        AudioHub.log("count \(repCount) → \(count) (heard: \(transcript.suffix(40)))")
         repCount = count
         voiceInput.holdOpen = true
         // You're lifting again: the rest is over, quietly.
@@ -1858,7 +1878,8 @@ struct CoachStageView: View {
             typedReplyAfter = Set(appModel.messages.map(\.id))
         }
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
-        Task { await appModel.sendCoachMessage(trimmed, spoken: spoken) }
+        let counted = repCount
+        Task { await appModel.sendCoachMessage(trimmed, spoken: spoken, repsCounted: counted) }
     }
 
     /// Coach named a move in a new reply: step into it. Once per reply, and

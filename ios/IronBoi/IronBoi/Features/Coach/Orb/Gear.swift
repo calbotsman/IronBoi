@@ -102,7 +102,7 @@ struct GearShape {
 
     /// Everything held and stood on for this pose, each piece grown `g` of
     /// the way out of the hand (or the back, for the bench) it comes from.
-    static func build(gear: Gear, bench: Bool, benchAngle: Float = 0, sideOn: Bool, joints: [Joint], grow g: Float) -> [GearShape] {
+    static func build(gear: Gear, bench: Bool, benchAngle: Float = 0, seat: Bool = false, sideOn: Bool, joints: [Joint], grow g: Float) -> [GearShape] {
         let left = SIMD2(joints[5].x, joints[5].y), right = SIMD2(joints[8].x, joints[8].y)
         let middle = (left + right) / 2
         var out: [GearShape] = []
@@ -148,6 +148,19 @@ struct GearShape {
             }
         }
 
+        if seat {
+            // Front-on: a pad under the hips, wider than them, on two legs.
+            // Grows down out of the hips like the bench does.
+            let hips = SIMD2(joints[2].x, joints[2].y)
+            // Wider than the knees so both ends show; its legs stand
+            // outside the feet.
+            let pad = SIMD2(hips.x, hips.y - 0.13)
+            out += [
+                GearShape(kind: .box, a: pad, b: SIMD2(0.44, 0.032), r: 0.025, depth: .behind),
+                GearShape(kind: .capsule, a: SIMD2(pad.x - 0.38, pad.y), b: SIMD2(pad.x - 0.38, -0.48), r: 0.022, depth: .behind),
+                GearShape(kind: .capsule, a: SIMD2(pad.x + 0.38, pad.y), b: SIMD2(pad.x + 0.38, -0.48), r: 0.022, depth: .behind),
+            ].map { $0.grown(from: hips, by: g) }
+        }
         if bench {
             // Grows down out of the back it's under. An incline tips the pad
             // about the hips (the body is tipped the same way by the pose);

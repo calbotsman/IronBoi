@@ -11,11 +11,29 @@ struct ExerciseMotion: Equatable {
     /// Bench angle in radians for a pressing lift: positive = incline
     /// (head up), negative = decline. 0 is flat.
     var incline: Float = 0
+    /// How the body is set for an arm lift: on its feet, on a seat, or on
+    /// its knees. Any front-on arm lift can take any of them.
+    var stance: Stance = .standing
 
-    init(_ lift: Lift, _ gear: Gear, incline: Float = 0) {
+    enum Stance: Equatable {
+        case standing, seated, kneeling
+
+        /// From the words in an exercise name (or a sentence about it).
+        static func named(in text: String) -> Stance? {
+            let t = text.lowercased()
+            if t.range(of: #"\b(seated|sitting|sit)\b"#, options: .regularExpression) != nil { return .seated }
+            if t.range(of: #"\b(half[- ]?kneeling|tall[- ]?kneeling|kneeling|on (my|your) knees)\b"#,
+                       options: .regularExpression) != nil { return .kneeling }
+            if t.range(of: #"\b(standing|stand up|stand)\b"#, options: .regularExpression) != nil { return .standing }
+            return nil
+        }
+    }
+
+    init(_ lift: Lift, _ gear: Gear, incline: Float = 0, stance: Stance = .standing) {
         self.lift = lift
         self.gear = gear
         self.incline = incline
+        self.stance = lift.canSitOrKneel ? stance : .standing
     }
 
     /// Best guess from an exercise name, or nil when nothing fits.
@@ -23,15 +41,49 @@ struct ExerciseMotion: Equatable {
         guard let lift = Lift.match(name) else { return nil }
         let n = name.lowercased()
         let incline: Float = lift == .benchPress ? (n.contains("incline") ? 0.5 : n.contains("decline") ? -0.3 : 0) : 0
-        return ExerciseMotion(lift, Gear.match(name, lift: lift), incline: incline)
+        // A lat pulldown is done sitting at the machine unless it says otherwise.
+        let machineSeat = lift == .pullDown && n.range(of: #"pull ?-?down|lat pull"#, options: .regularExpression) != nil
+        let stance = Stance.named(in: n) ?? (machineSeat ? .seated : .standing)
+        return ExerciseMotion(lift, Gear.match(name, lift: lift), incline: incline, stance: stance)
     }
 
     var repDuration: Float { lift.repDuration }
 
-    func frame(at t: Float) -> BodyPose { Self.inclined(lift.frame(at: t, gear: gear), by: incline) }
+    func frame(at t: Float) -> BodyPose {
+        Self.set(Self.inclined(lift.frame(at: t, gear: gear), by: incline), stance)
+    }
 
     func frame(holding p: Float, time t: Float) -> BodyPose {
-        Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline)
+        Self.set(Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline), stance)
+    }
+
+    /// Sits or kneels a standing, front-on pose. The upper body keeps its
+    /// motion and drops as one piece; the legs are rebuilt. Seated, the
+    /// thighs point at you, so the knees show just below and outside the
+    /// hips with the shins straight down; kneeling, the knees are on the
+    /// floor under the hips.
+    private static func set(_ pose: BodyPose, _ stance: Stance) -> BodyPose {
+        guard stance != .standing else { return pose }
+        var out = pose
+        var j = pose.joints
+        let drop: Float = stance == .seated ? 0.17 : 0.19
+        for i in 0...8 { j[i].y -= drop }
+        let hipY = j[2].y, hipX = j[2].x
+        switch stance {
+        case .seated:
+            // Knees apart, feet planted wider, legs slimmer than standing,
+            // so there's daylight between them and the seat shows through.
+            j[9] = Joint(hipX - 0.20, hipY - 0.07, 0.095); j[10] = Joint(hipX - 0.24, -0.39, 0.085)
+            j[11] = Joint(hipX + 0.20, hipY - 0.07, 0.095); j[12] = Joint(hipX + 0.24, -0.39, 0.085)
+            out.seat = true
+        case .kneeling:
+            j[9] = Joint(hipX - 0.12, -0.355, 0.115); j[10] = Joint(hipX - 0.12, -0.40, 0.09)
+            j[11] = Joint(hipX + 0.12, -0.355, 0.115); j[12] = Joint(hipX + 0.12, -0.40, 0.09)
+        case .standing:
+            break
+        }
+        out.joints = j
+        return out
     }
 
     /// Tips the lying body and its bench together about the hips. The arms
@@ -207,6 +259,15 @@ enum Lift: Equatable {
         let angle = start + turn * p
         let length = hypot(from.x, from.y) + (hypot(to.x, to.y) - hypot(from.x, from.y)) * p
         return SIMD2(cos(angle), sin(angle)) * length
+    }
+
+    /// Front-on arm lifts: the legs aren't part of the move, so the body can
+    /// stand, sit or kneel for them.
+    var canSitOrKneel: Bool {
+        switch self {
+        case .overheadPress, .lateralRaise, .curl, .tricepExtension, .pullDown: return true
+        default: return false
+        }
     }
 
     /// (start, end) of one rep. Standing lifts keep breathing underneath.

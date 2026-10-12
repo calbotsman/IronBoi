@@ -114,8 +114,13 @@ final class AudioHub {
             headphonesConnected = Self.headphones(in: session.currentRoute)
             Self.log("start: system route [\(Self.describe(session.currentRoute))] headphones=\(headphonesConnected) otherAudio=\(session.isOtherAudioPlaying)")
         }
-        if session.category != .playAndRecord || session.categoryOptions != Self.categoryOptions {
+        // Only when it's actually different. iOS reports .duckOthers with
+        // .mixWithOthers added, so an equality test was always false and
+        // re-set the category every time Coach spoke: the route flipped to
+        // the earpiece and back mid-set, and words were lost in the flips.
+        if session.category != .playAndRecord || !session.categoryOptions.isSuperset(of: Self.categoryOptions) {
             try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
+            Self.log("category set: options=\(session.categoryOptions.rawValue)")
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         sessionActive = true
