@@ -125,6 +125,11 @@ export function healthContextSummaryPath(userId: string, date: string) {
 // contracts/coach-agent.ts, built by progress/store.ts). Single fixed-window
 // doc per the progress plan — per-horizon docs (progress_90d, ...) only if a
 // real need appears.
+/** The coach's own running notes about this person (coach/coachNotes.ts). */
+export function coachNotesPath(userId: string) {
+  return `${userRoot(userId)}/derivedSummaries/coach_notes`;
+}
+
 export function progressSummaryPath(userId: string) {
   return `${userRoot(userId)}/derivedSummaries/progress_current`;
 }

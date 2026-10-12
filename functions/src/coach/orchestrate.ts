@@ -29,6 +29,7 @@ import {
 import { executeTool } from "../tools/executor.js";
 import type { CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
 import { liveWorkoutRules } from "./liveWorkout.js";
+import { refreshCoachNotesIfDue } from "./coachNotes.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
@@ -143,6 +144,7 @@ export async function orchestrateCoachTurn({
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
+  const turnStartedAt = Date.now();
   const assistantMessageId = `${messageId}_coach`;
   const assistantRef = db.doc(
     coachSessionMessagePath(userId, sessionId, assistantMessageId),
@@ -441,6 +443,22 @@ export async function orchestrateCoachTurn({
       },
       { merge: true },
     );
+    // After the reply is saved: the coach's running notes about this
+    // person, every few turns. Best-effort; the user already has the reply.
+    // Skipped on a slow turn so the 60s function always reaches `finally`
+    // (the notes call has its own 20s cap; the next turn catches up).
+    if (Date.now() - turnStartedAt < 25_000) await refreshCoachNotesIfDue({
+      db,
+      provider,
+      userId,
+      profile: contextBundle.profile,
+      facts: contextBundle.memoryFacts,
+      conversation: [
+        ...contextBundle.conversationWindow,
+        { role: "user", content: userContent },
+        { role: "coach", content },
+      ],
+    });
   } catch (error) {
     const aborted = isAbortError(error);
     const billing = error instanceof ModelBillingError;

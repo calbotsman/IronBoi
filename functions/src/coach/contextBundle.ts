@@ -32,6 +32,8 @@ export type CoachContextBundleV1 = {
   // numbers the coach may ground progress claims in. Null until the first
   // rebuild has run (or when the read was gated off / failed).
   progressSummary: CoachContextProgressSummary | null;
+  /** The coach's own running notes about this person. */
+  coachNotes?: string | null;
   // The user's actual plan as the Train tab shows it: the next 7 days from
   // `today`, override-resolved, every exercise with sets/reps/weight. Null
   // when the user has no plan yet.
@@ -176,6 +178,7 @@ export function buildCoachContextBundle(
     assembledAt: now,
     today: today ?? now.slice(0, 10),
     profile: context.profile ? pickProfile(context.profile) : null,
+    coachNotes: stringValue(context.coachNotes, 1_500) ?? null,
     memoryFacts: context.recentFacts
       .filter((fact) => !fact.userDeletedAt)
       // A temporary fact past its `until` date is over — drop it in code

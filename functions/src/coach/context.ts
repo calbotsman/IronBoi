@@ -3,6 +3,7 @@ import {
   coachSessionPath,
   profilePath,
   progressSummaryPath,
+  coachNotesPath,
   userRoot,
   workoutPlanPath,
 } from "../paths.js";
@@ -24,6 +25,8 @@ export type CoachLoadedContext = {
   // progress/store.ts). Null when the doc doesn't exist yet, the read
   // failed, or the includeProgress option is off.
   progressSummary: DocumentData | null;
+  /** The coach's running notes about this person, if any. */
+  coachNotes?: string | null;
   // users/{uid}/workoutPlans/current — the plan the Train tab renders (the
   // active week's days plus any date-keyed dailyOverrides). Null when the
   // user has no plan yet or the read failed. Before 2026-09-03 the coach
@@ -60,6 +63,13 @@ export async function loadCoachContext(
         .then((snap) => snap.docs.map((doc) => doc.data()))
         .catch(() => [] as DocumentData[])
     : Promise.resolve([] as DocumentData[]);
+
+  // The coach's running notes (coach/coachNotes.ts). Degrades to null.
+  const coachNotesPromise = db
+    .doc(coachNotesPath(userId))
+    .get()
+    .then((snap) => (snap.exists && typeof snap.get("content") === "string" ? (snap.get("content") as string) : null))
+    .catch(() => null);
 
   // Derived progress rollup — same posture as the plan-change read: gated
   // behind the tool-loop feature bundle, degraded to null on any failure
@@ -129,6 +139,7 @@ export async function loadCoachContext(
     recentFacts: confirmedFacts,
     recentLogs: recentLogsSnap.docs.map((doc) => doc.data()),
     sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()).reverse(),
+    coachNotes: await coachNotesPromise,
     pendingProposalCount,
     recentPlanChanges,
     progressSummary,
