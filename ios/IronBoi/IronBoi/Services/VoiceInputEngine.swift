@@ -17,15 +17,39 @@ final class VoiceInputEngine: ObservableObject {
     /// While true, a pause doesn't end the utterance — set during a rep
     /// count, where the gaps between reps are long and expected.
     var holdOpen = false {
-        didSet { if holdOpen { pauseTask?.cancel() } else if isListening, !transcript.isEmpty { schedulePauseCheck() } }
+        didSet {
+            if holdOpen {
+                pauseTask?.cancel()
+                scheduleRotation()
+            } else {
+                rotationTask?.cancel()
+                rotationTask = nil
+                if isListening, !transcript.isEmpty { schedulePauseCheck() }
+            }
+        }
     }
     private static let pauseSeconds: UInt64 = 1_400_000_000
+    /// A set can run a minute or more on one open request, and the
+    /// recogniser goes quiet on a request that old: while a count is held
+    /// open, the request is swapped for a fresh one this often. The tap
+    /// stays; the count carries over (a blank transcript tells the count
+    /// to continue from where it was).
+    private static let rotationSeconds: UInt64 = 25_000_000_000
+    private var rotationTask: Task<Void, Never>?
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     /// Shared with Coach's voice so the mic can stay open while Coach talks.
     private var audioEngine: AVAudioEngine { AudioHub.shared.engine }
-    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var request: SFSpeechAudioBufferRecognitionRequest? {
+        didSet { requestBox.current = request }
+    }
+    /// What the mic tap appends to — read on the audio thread, so it lives
+    /// outside the main actor behind a lock.
+    private let requestBox = RequestBox()
     private var recognitionTask: SFSpeechRecognitionTask?
+    /// Bumped on every new recognition request; a callback from an older
+    /// request is ignored (its "final" must not stop a fresh one).
+    private var requestGeneration = 0
     private var hasInstalledTap = false
     /// Bumped on every stop; callbacks and starts carry the value they began
     /// with and drop out if it's moved on.
@@ -51,15 +75,26 @@ final class VoiceInputEngine: ObservableObject {
         }
 
         Task {
+            // A fresh listen: an earlier failure no longer applies.
+            errorMessage = nil
             do {
-                // A fresh listen: an earlier failure no longer applies.
-                errorMessage = nil
                 try await start()
             } catch {
-                errorMessage = error.localizedDescription
-                AudioHub.log("listen failed: \(error.localizedDescription)")
-                stop()
-                onFailure?()
+                // A route still settling (AirPods just connected, a call
+                // just ended) refuses the session once; it usually takes
+                // a moment later. One retry before giving up.
+                AudioHub.log("listen failed: \(error.localizedDescription) — retrying once")
+                let before = session
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard session == before else { return }
+                do {
+                    try await start()
+                } catch {
+                    errorMessage = error.localizedDescription
+                    AudioHub.log("listen failed: \(error.localizedDescription)")
+                    stop()
+                    onFailure?()
+                }
             }
         }
     }
@@ -69,6 +104,8 @@ final class VoiceInputEngine: ObservableObject {
         session += 1
         pauseTask?.cancel()
         pauseTask = nil
+        rotationTask?.cancel()
+        rotationTask = nil
         meter.reset()
         // The engine stays up — Coach may be mid-sentence on it.
         if hasInstalledTap {
@@ -101,6 +138,42 @@ final class VoiceInputEngine: ObservableObject {
             throw VoiceInputError.microphoneUnavailable
         }
 
+        beginRequest(session: mine)
+
+        let inputNode = audioEngine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw VoiceInputError.microphoneUnavailable
+        }
+
+        let meter = self.meter
+        let analyzer = MicAnalyzer()
+        let box = requestBox
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
+            box.current?.append(buffer)
+            analyzer.process(buffer, into: meter)
+        }
+        hasInstalledTap = true
+        isListening = true
+        if holdOpen { scheduleRotation() }
+    }
+
+    /// The words a workout is made of, so the recogniser leans toward
+    /// them: a count ("seven" over "heaven"), and the set being called.
+    private static let workoutWords: [String] = [
+        "MYO", "Coach", "set done", "sets done", "done", "reps",
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+        "eighteen", "nineteen", "twenty",
+    ]
+
+    /// A new recognition request on the open mic. `session` is the listen
+    /// it belongs to; the request's own generation keeps a late result from
+    /// an earlier request away from this one.
+    private func beginRequest(session mine: Int) {
+        requestGeneration += 1
+        let generation = requestGeneration
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
@@ -114,46 +187,60 @@ final class VoiceInputEngine: ObservableObject {
             request.requiresOnDeviceRecognition = true
         }
         #endif
-        request.contextualStrings = ["MYO", "Coach", "set done", "sets done", "reps"]
+        request.contextualStrings = Self.workoutWords
         self.request = request
         transcript = ""
 
         recognitionTask = recognizer?.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
-                // A late callback from an earlier listen must not touch this one.
-                guard let self, self.session == mine else { return }
+                // A late callback from an earlier listen or an earlier
+                // request must not touch this one.
+                guard let self, self.session == mine, self.requestGeneration == generation else { return }
 
                 if let text = result?.bestTranscription.formattedString.trimmingCharacters(in: .whitespacesAndNewlines),
                    !text.isEmpty, text != self.transcript {
                     self.transcript = text
                     // Every partial, so a device test shows exactly what the
-                    // recogniser made of a count. DEBUG-only, like the rest
-                    // of the audio log.
+                    // recogniser made of a count.
                     AudioHub.log("heard: \(text.suffix(80))")
                     self.schedulePauseCheck()
                 }
 
                 if error != nil || result?.isFinal == true {
-                    self.stop()
+                    if let error { AudioHub.log("recogniser ended: \(error.localizedDescription)") }
+                    if self.holdOpen {
+                        // Mid-count: the recogniser gave up on this
+                        // request (quiet too long, or just old). Keep the
+                        // mic open and start it a fresh one; the count
+                        // carries over.
+                        self.rotateRequest()
+                    } else {
+                        self.stop()
+                    }
                 }
             }
         }
+    }
 
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+    /// Swaps the open request for a fresh one without touching the tap.
+    private func rotateRequest() {
+        guard isListening, hasInstalledTap else { return }
+        AudioHub.log("recogniser rotated (count open)")
+        request?.endAudio()
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        beginRequest(session: session)
+        scheduleRotation()
+    }
 
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw VoiceInputError.microphoneUnavailable
+    private func scheduleRotation() {
+        rotationTask?.cancel()
+        guard isListening, holdOpen else { return }
+        rotationTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.rotationSeconds)
+            guard let self, !Task.isCancelled, self.isListening, self.holdOpen else { return }
+            self.rotateRequest()
         }
-
-        let meter = self.meter
-        let analyzer = MicAnalyzer()
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: format) { [weak request] buffer, _ in
-            request?.append(buffer)
-            analyzer.process(buffer, into: meter)
-        }
-        hasInstalledTap = true
-        isListening = true
     }
 
     #if DEBUG
@@ -226,6 +313,16 @@ final class VoiceInputEngine: ObservableObject {
         guard micGranted else {
             throw VoiceInputError.microphonePermissionDenied
         }
+    }
+}
+
+/// Hands the mic tap (audio thread) the request to feed, under a lock.
+private final class RequestBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: SFSpeechAudioBufferRecognitionRequest?
+    var current: SFSpeechAudioBufferRecognitionRequest? {
+        get { lock.lock(); defer { lock.unlock() }; return value }
+        set { lock.lock(); value = newValue; lock.unlock() }
     }
 }
 
