@@ -1,5 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
 import { coachNotesPath, profilePath } from "../paths.js";
 import { todayUtcDateKey, usagePath } from "../usage/cap.js";
@@ -248,7 +248,9 @@ export async function recordLiveTurn(args: {
     const messageId = `live_${stamp}_user`;
     await db.doc(coachSessionMessagePath(userId, LIVE_SESSION_ID, messageId)).set({
       ...base, messageId, role: "user", content: userText, timestamp: turn.startedAt,
-      serverCreatedAt: FieldValue.serverTimestamp(),
+      // Explicit and ordered: two serverTimestamps in the same millisecond
+      // could put the coach's answer before the question in history.
+      serverCreatedAt: Timestamp.fromMillis(stamp),
     });
   }
   if (coachText || severe) {
@@ -258,7 +260,7 @@ export async function recordLiveTurn(args: {
       content: severe ? LIVE_SAFETY_LINE : coachText + (turn.interrupted ? " …" : ""),
       timestamp: new Date(stamp).toISOString(),
       riskLevel: severe ? "high" : "low",
-      serverCreatedAt: FieldValue.serverTimestamp(),
+      serverCreatedAt: Timestamp.fromMillis(stamp + 1),
     });
   }
   if (args.provider && !severe) {

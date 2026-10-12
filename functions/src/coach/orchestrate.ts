@@ -145,6 +145,7 @@ export async function orchestrateCoachTurn({
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
   const turnStartedAt = Date.now();
+  let notesRefresh: (() => Promise<void>) | null = null;
   const assistantMessageId = `${messageId}_coach`;
   const assistantRef = db.doc(
     coachSessionMessagePath(userId, sessionId, assistantMessageId),
@@ -443,11 +444,10 @@ export async function orchestrateCoachTurn({
       },
       { merge: true },
     );
-    // After the reply is saved: the coach's running notes about this
-    // person, every few turns. Best-effort; the user already has the reply.
-    // Skipped on a slow turn so the 60s function always reaches `finally`
-    // (the notes call has its own 20s cap; the next turn catches up).
-    if (Date.now() - turnStartedAt < 25_000) await refreshCoachNotesIfDue({
+    // The coach's running notes are refreshed after the turn is fully
+    // over (below, after the proposal card is published) — never before:
+    // a quick "yes" must find the card already live.
+    notesRefresh = () => refreshCoachNotesIfDue({
       db,
       provider,
       userId,
@@ -524,4 +524,8 @@ export async function orchestrateCoachTurn({
       });
     }
   }
+  // Best-effort, last: the reply is saved and the card is live. Skipped on
+  // a slow turn so the 60s function never times out on it (the notes call
+  // has its own 20s cap; the next turn catches up).
+  if (notesRefresh && Date.now() - turnStartedAt < 35_000) await notesRefresh();
 }
