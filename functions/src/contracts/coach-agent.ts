@@ -224,6 +224,8 @@ export const CoachAgentContract = z.object({
 
 export const UserHealthProfile = z.object({
   userId: z.string().min(1),
+  /** What the user wants to be called; set when they tell the coach. */
+  preferredName: z.string().min(1).max(40).optional(),
   ageYears: z.number().int().min(13).max(120),
   sexOrGender: SexOrGender,
   sexOrGenderSelfDescription: z.string().optional(),
@@ -744,6 +746,7 @@ export const AuditEventType = z.enum([
   // No review card means the audit log is the only record that it happened.
   "exercise_swapped",
   "exercise_baseline_rebaselined",
+  "profile_name_set",
 ]);
 
 export const AuditActor = z.enum(["user", "coach", "system"]);

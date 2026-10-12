@@ -6,12 +6,13 @@ import {
   ClearPlanOverridesToolRequest,
   FindExerciseSwapsRequest,
   ForgetUserFactToolRequest,
+  SetPreferredNameToolRequest,
   RejectPlanAdjustmentToolRequest,
   RememberUserFactToolRequest,
 } from "../contracts/tool-calls.js";
 import { CoachMemoryFact } from "../contracts/coach-agent.js";
 import { recordAuditEventBestEffort } from "../audit/log.js";
-import { memoryFactPath, userRoot } from "../paths.js";
+import { memoryFactPath, profilePath, userRoot } from "../paths.js";
 import { CATALOG_EQUIPMENT, suggestSwaps, type Equipment } from "../workouts/exerciseCatalog.js";
 import {
   acceptLatestPlanAdjustmentFromChat,
@@ -206,6 +207,16 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
     },
   },
   {
+    name: "set_preferred_name",
+    description:
+      "Save what the user wants to be called, when they tell you their name in this message ('I'm Josh', 'call me J'). Only a name they actually said; never MYO.",
+    parameters: {
+      type: "object",
+      properties: { name: { type: "string", maxLength: 40, description: "Just the name, as they said it." } },
+      required: ["name"],
+    },
+  },
+  {
     name: "forget_user_fact",
     description:
       "Delete exactly one remembered fact, by the factId shown in <memory_facts>, when the user asks you to forget it.",
@@ -306,6 +317,20 @@ const RememberUserFactArgs = RememberUserFactToolRequest.omit({
   requestedAt: true,
   tool: true,
 });
+const SetPreferredNameArgs = SetPreferredNameToolRequest.omit({
+  toolCallId: true,
+  requestedAt: true,
+  tool: true,
+});
+
+/** "josh" → "Josh"; letters, spaces, apostrophes and hyphens only. */
+export function cleanPreferredName(raw: string): string | null {
+  const name = raw.normalize("NFC").replace(/\s+/g, " ").trim();
+  if (!name || name.length > 40 || !/^[\p{L}][\p{L} '’-]*$/u.test(name)) return null;
+  if (/^(myo|coach|my o|mayo)$/i.test(name)) return null;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 const ForgetUserFactArgs = ForgetUserFactToolRequest.omit({
   toolCallId: true,
   requestedAt: true,
@@ -591,6 +616,31 @@ export function buildCoachToolRegistry(
         outcome: fact.category,
       });
       return { ok: true, factId, remembered: fact.content };
+    },
+    set_preferred_name: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      const parsed = SetPreferredNameArgs.safeParse(args);
+      const name = parsed.success ? cleanPreferredName(parsed.data.name) : null;
+      if (!name) {
+        logToolValidationFailure(userId, "set_preferred_name", parsed.success ? [] : parsed.error.issues);
+        return { ok: false, error: "invalid_name", hint: "Just the name, letters only, and never MYO." };
+      }
+      // Only a name the user said this turn: the model may not invent one.
+      const said = (context.rawUserText ?? "").toLowerCase();
+      if (!said.includes(name.toLowerCase())) {
+        return { ok: false, error: "name_not_in_message", hint: "Only save a name the user said in this message. Otherwise ask what they'd like to be called." };
+      }
+      await db.doc(profilePath(userId)).set(
+        { preferredName: name, updatedAt: new Date().toISOString() },
+        { merge: true },
+      );
+      await recordAuditEventBestEffort(db, {
+        userId,
+        eventType: "profile_name_set",
+        actor: "coach",
+        payload: {},
+      });
+      return { ok: true, name };
     },
     forget_user_fact: async (rawArgs) => {
       const { userId, ...args } = rawArgs;

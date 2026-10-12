@@ -131,6 +131,7 @@ export type CoachContextProgressSummary = {
 };
 
 const PROFILE_FIELDS = [
+  "preferredName",
   "ageYears",
   "sexOrGender",
   "sexOrGenderSelfDescription",

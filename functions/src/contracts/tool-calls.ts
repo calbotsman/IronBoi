@@ -254,6 +254,13 @@ export const RememberUserFactToolResult = ToolResultBase.extend({
   factId: z.string().optional(),
 });
 
+// The user's name, from their own words this turn ("call me Josh"). Lives on
+// the profile, not in memory facts: it's who they are, read every turn.
+export const SetPreferredNameToolRequest = ToolCallBase.extend({
+  tool: z.literal("set_preferred_name"),
+  name: z.string().min(1).max(40),
+}).strict();
+
 export const ForgetUserFactToolRequest = ToolCallBase.extend({
   tool: z.literal("forget_user_fact"),
   factId: z.string().min(1).max(120),
@@ -363,6 +370,7 @@ export const CoachToolRequest = z.discriminatedUnion("tool", [
   RejectPlanAdjustmentToolRequest,
   ClearPlanOverridesToolRequest,
   RememberUserFactToolRequest,
+  SetPreferredNameToolRequest,
   ForgetUserFactToolRequest,
   FindExerciseSwapsRequest,
   ExplainExerciseRequest,

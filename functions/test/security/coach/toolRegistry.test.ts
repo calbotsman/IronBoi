@@ -424,4 +424,23 @@ describe("coach tool registry", () => {
     const other = (await executeTool(registry, "forget_user_fact", { factId: "chat_other_9" }, { authenticatedUserId: USER_ID })) as Record<string, unknown>;
     expect(other.ok).toBe(false);
   });
+
+  it("set_preferred_name saves only a name the user said this turn, never MYO", async () => {
+    const said = buildCoachToolRegistry(db, {
+      latestPendingProposalId: null,
+      clientDate: TEST_CLIENT_DATE,
+      rawUserText: "MYO, it's josh by the way",
+      sourceMessageId: "ios_name",
+    });
+    const ok = (await executeTool(said, "set_preferred_name", { name: "josh" }, { authenticatedUserId: USER_ID })) as Record<string, unknown>;
+    expect(ok).toMatchObject({ ok: true, name: "Josh" });
+    expect((await db.doc(profilePath(USER_ID)).get()).get("preferredName")).toBe("Josh");
+
+    const invented = (await executeTool(said, "set_preferred_name", { name: "Sam" }, { authenticatedUserId: USER_ID })) as Record<string, unknown>;
+    expect(invented).toMatchObject({ ok: false, error: "name_not_in_message" });
+
+    const coachName = (await executeTool(said, "set_preferred_name", { name: "MYO" }, { authenticatedUserId: USER_ID })) as Record<string, unknown>;
+    expect(coachName).toMatchObject({ ok: false, error: "invalid_name" });
+    expect((await db.doc(profilePath(USER_ID)).get()).get("preferredName")).toBe("Josh");
+  });
 });
