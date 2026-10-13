@@ -3,11 +3,13 @@ import simd
 
 /// During a workout the coach's body demonstrates the exercise you're on, as
 /// a slow looping rep, holding the equipment it needs. An exercise is matched
-/// by name to a movement family and its equipment; anything unmatched leaves
-/// the body a blob.
+/// by name to a move from `MoveLibrary` or a hand-built movement family, and
+/// its equipment; anything unmatched leaves the body a blob.
 struct ExerciseMotion: Equatable {
     let lift: Lift
     let gear: Gear
+    /// A move written as data (`lift` is `.authored`).
+    var spec: MoveSpec? = nil
     /// Bench angle in radians for a pressing lift: positive = incline
     /// (head up), negative = decline. 0 is flat.
     var incline: Float = 0
@@ -36,8 +38,18 @@ struct ExerciseMotion: Equatable {
         self.stance = lift.canSitOrKneel ? stance : .standing
     }
 
+    init(spec: MoveSpec, gear: Gear) {
+        self.lift = .authored
+        self.gear = gear
+        self.spec = spec
+    }
+
     /// Best guess from an exercise name, or nil when nothing fits.
     static func match(_ name: String) -> ExerciseMotion? {
+        if let spec = MoveLibrary.match(name) {
+            let gear = spec.takesGear ? Gear.named(name, lift: .authored) ?? spec.defaultGear : Gear.none
+            return ExerciseMotion(spec: spec, gear: gear)
+        }
         guard let lift = Lift.match(name) else { return nil }
         let n = name.lowercased()
         let incline: Float = lift == .benchPress ? (n.contains("incline") ? 0.5 : n.contains("decline") ? -0.3 : 0) : 0
@@ -47,14 +59,25 @@ struct ExerciseMotion: Equatable {
         return ExerciseMotion(lift, Gear.match(name, lift: lift), incline: incline, stance: stance)
     }
 
-    var repDuration: Float { lift.repDuration }
+    var repDuration: Float { spec?.seconds ?? lift.repDuration }
+
+    /// Rest ninety seconds after a set of this, not sixty.
+    var isHeavy: Bool {
+        if let spec { return spec.heavy }
+        switch lift {
+        case .squat, .hinge, .benchPress, .overheadPress, .pullDown: return true
+        default: return false
+        }
+    }
 
     func frame(at t: Float) -> BodyPose {
-        Self.set(Self.inclined(lift.frame(at: t, gear: gear), by: incline), stance)
+        if let spec { return spec.pose(progress: spec.progress(at: t), time: t, gear: gear) }
+        return Self.set(Self.inclined(lift.frame(at: t, gear: gear), by: incline), stance)
     }
 
     func frame(holding p: Float, time t: Float) -> BodyPose {
-        Self.set(Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline), stance)
+        if let spec { return spec.pose(progress: p, time: t, gear: gear) }
+        return Self.set(Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline), stance)
     }
 
     /// Sits or kneels a standing, front-on pose. The upper body keeps its
@@ -113,6 +136,8 @@ struct ExerciseMotion: Equatable {
 enum Lift: Equatable {
     case overheadPress, lateralRaise, squat, curl, tricepExtension, pullDown
     case hinge, swing, benchPress, skullCrusher, pushups, plank, lunge
+    /// A move from `MoveLibrary`; its `ExerciseMotion.spec` does the work.
+    case authored
 
     static func match(_ name: String) -> Lift? {
         let n = name.lowercased()
@@ -306,6 +331,8 @@ enum Lift: Equatable {
                     lying(elbow: [-0.20, 0.21], hand: [-0.37, 0.10]))
         case .pushups, .plank:
             return (OneBodyMotion.plank(0), OneBodyMotion.plank(0))
+        case .authored:
+            return (OneBodyMotion.standing(t), OneBodyMotion.standing(t))
         }
     }
 

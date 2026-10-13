@@ -1511,10 +1511,7 @@ struct CoachStageView: View {
 
     /// Heavy compounds get a minute and a half, everything else a minute.
     private static func restSeconds(for exercise: ActiveWorkoutExercise) -> Int {
-        switch ExerciseMotion.match(exercise.name)?.lift {
-        case .squat, .hinge, .benchPress, .overheadPress, .pullDown: return 90
-        default: return 60
-        }
+        ExerciseMotion.match(exercise.name)?.isHeavy == true ? 90 : 60
     }
 
     /// Starts the rest if there's more work after this set, and returns the
@@ -1654,8 +1651,8 @@ struct CoachStageView: View {
         if tips != .quiet { line += " " + CoachingStyle.praise(tone) }
         if tips == .full, let index = exerciseIndex, let exercise = appModel.activeWorkout?.exercises[index],
            exercise.completedSetCount < exercise.targetSets,
-           let lift = ExerciseMotion.match(exercise.name)?.lift {
-            line += " Next one: " + ExerciseLesson.cue(for: lift).lowercased()
+           let motion = ExerciseMotion.match(exercise.name) {
+            line += " Next one: " + ExerciseLesson.cue(for: motion).lowercased()
         }
         return line
     }
@@ -2062,7 +2059,7 @@ struct CoachStageView: View {
             cues.append(.hold(0))
         }
         if style == .full, let motion {
-            for beat in ExerciseLesson.beats(for: motion.lift) {
+            for beat in ExerciseLesson.beats(for: motion) {
                 lines.append(beat.line)
                 cues.append(beat.body)
             }

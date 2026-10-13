@@ -15,7 +15,6 @@
 		1F427C3553FD7EDA6A281A8A /* PaperBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0454D8621A0D45798905DF73 /* PaperBackground.swift */; };
 		2127E711F8AEF1AE4EA68A3B /* OnboardingStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 412AB8D23DE585A4011E7CDC /* OnboardingStageView.swift */; };
 		22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */; };
-		243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */; };
 		25B2EAE2F402BA9568A459D1 /* WorkoutEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083722ABB4FE380F28D66DF6 /* WorkoutEdits.swift */; };
 		28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
 		2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */; };
@@ -48,6 +47,7 @@
 		8D031BF9F41427741B2CFD39 /* WorkoutLogModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4734F76A950FA7C6ECA47EC /* WorkoutLogModels.swift */; };
 		8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAE8CC59433E740F466264C6 /* AppModel.swift */; };
 		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
+		8F74849D763D35FFA34E137C /* MoveSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B11E9E7F9FBAB3A75A3B70 /* MoveSpec.swift */; };
 		8FB00210D5060ADFCBB12BBF /* CoachVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */; };
 		97122EBA819A4AC4B8DD976A /* SessionChangesCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE7937F1EE073A0A0F01714 /* SessionChangesCard.swift */; };
 		971478636E13DB8A91D04639 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */; };
@@ -66,6 +66,7 @@
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
 		EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
 		EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */; };
+		EECFA673703A34EBBCC48022 /* MoveLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -82,6 +83,7 @@
 		2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeightFollowUpCard.swift; sourceTree = "<group>"; };
 		308987A1BEE7DAF86C626E66 /* MemoryReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryReviewView.swift; sourceTree = "<group>"; };
 		349CFA8575361D4715FDABD9 /* TodayWorkoutCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayWorkoutCard.swift; sourceTree = "<group>"; };
+		37B11E9E7F9FBAB3A75A3B70 /* MoveSpec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveSpec.swift; sourceTree = "<group>"; };
 		3AD68749BA9C041709597E0B /* MyoTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyoTheme.swift; sourceTree = "<group>"; };
 		412AB8D23DE585A4011E7CDC /* OnboardingStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStageView.swift; sourceTree = "<group>"; };
 		42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
@@ -95,6 +97,7 @@
 		5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
 		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
+		6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveLibrary.swift; sourceTree = "<group>"; };
 		73C5EE0407EB961F5B79622A /* DossierComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DossierComponents.swift; sourceTree = "<group>"; };
 		7471B86DB66DD6B54955497F /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
 		7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicAnalyzer.swift; sourceTree = "<group>"; };
@@ -102,7 +105,6 @@
 		77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseMotion.swift; sourceTree = "<group>"; };
 		8251B627C5781604E47176FE /* CoachView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
 		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		8E6486137A4FFFD180E600A3 /* TypeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypeBar.swift; sourceTree = "<group>"; };
 		92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeLife.swift; sourceTree = "<group>"; };
 		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
@@ -178,7 +180,6 @@
 			isa = PBXGroup;
 			children = (
 				ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */,
-				8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */,
 				B4E60CD7DDA97B7D6E1C118C /* Info.plist */,
 				967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */,
 				5041EB6152324AB118525DA6 /* IronBoiApp.swift */,
@@ -243,6 +244,8 @@
 				77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */,
 				D8BC768A7E4EB1E601050122 /* Gear.swift */,
 				92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */,
+				6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */,
+				37B11E9E7F9FBAB3A75A3B70 /* MoveSpec.swift */,
 				60101B940C2222A85AFAE5E9 /* OneBody.metal */,
 				58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */,
 				56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */,
@@ -384,7 +387,6 @@
 				E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */,
 				AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */,
 				D6444B3E1D84C06921141B78 /* GoogleService-Info-Staging.plist in Resources */,
-				243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */,
 				B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */,
 				5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */,
 			);
@@ -446,6 +448,8 @@
 				7CE0660BBEDC99B11BB65681 /* MemoryFact.swift in Sources */,
 				AB88E520959883D65800468A /* MemoryReviewView.swift in Sources */,
 				EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */,
+				EECFA673703A34EBBCC48022 /* MoveLibrary.swift in Sources */,
+				8F74849D763D35FFA34E137C /* MoveSpec.swift in Sources */,
 				8C6060F4FD7B405631C70726 /* MyoTheme.swift in Sources */,
 				8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */,
 				2127E711F8AEF1AE4EA68A3B /* OnboardingStageView.swift in Sources */,

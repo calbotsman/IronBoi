@@ -20,9 +20,25 @@ enum Gear: Equatable {
     /// From the exercise's name ("DB", "KB", "Barbell", "Goblet"…), else
     /// what the lift usually means in a gym.
     static func match(_ name: String, lift: Lift) -> Gear {
+        if let named = named(name, lift: lift) { return named }
+        switch lift {
+        case .squat: return .barbell
+        case .lunge: return .none
+        case .hinge, .benchPress, .skullCrusher: return .barbell
+        case .overheadPress: return name.lowercased().contains("shoulder press") ? .dumbbells : .barbell
+        case .lateralRaise, .curl: return .dumbbells
+        case .tricepExtension: return .dumbbell
+        case .swing: return .kettlebell
+        case .pullDown: return .cableBar
+        case .pushups, .plank, .authored: return .none
+        }
+    }
+
+    /// What the name says is held, if it says.
+    static func named(_ name: String, lift: Lift) -> Gear? {
         let n = " " + name.lowercased().replacingOccurrences(of: "-", with: " ") + " "
         func has(_ words: String...) -> Bool { words.contains { n.contains($0) } }
-        if has("bodyweight", "body weight", "air squat") { return .none }
+        if has("bodyweight", "body weight", "air squat") { return Gear.none }
         if has("kettlebell", " kb ") { return .kettlebell }
         if has("goblet") { return .dumbbell }
         if has("dumbbell", " db ", "arnold", "hammer") {
@@ -30,17 +46,7 @@ enum Gear: Equatable {
         }
         if has("barbell", " bb ", " ez ", "zercher") { return .barbell }
         if has("pull up", "pullup", "chin up", "chinup") { return .pullupBar }
-        switch lift {
-        case .squat: return .barbell
-        case .lunge: return .none
-        case .hinge, .benchPress, .skullCrusher: return .barbell
-        case .overheadPress: return has("shoulder press") ? .dumbbells : .barbell
-        case .lateralRaise, .curl: return .dumbbells
-        case .tricepExtension: return .dumbbell
-        case .swing: return .kettlebell
-        case .pullDown: return .cableBar
-        case .pushups, .plank: return .none
-        }
+        return nil
     }
 }
 
