@@ -4,6 +4,7 @@ import { deleteApp, getApps, initializeApp, type App } from "firebase-admin/app"
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { processOnboardingAnswer } from "../../../src/onboarding/flow.js";
 import { MODERATE_NOTE, screenOutcome } from "../../../src/onboarding/healthScreen.js";
+import { profilePath } from "../../../src/paths.js";
 
 // The onboarding health screen follows ACSM 2015's logic: symptoms, or a
 // known heart / metabolic / kidney condition in someone not yet active, mean
@@ -124,5 +125,23 @@ describe("health screen in onboarding", () => {
     await answer("Mon at 6", { preferredDays: ["Mon"], preferredTime: "18:00" });
     const young = await answer("16", { ageYears: 16, sexOrGender: "male" });
     expect(young.onboardingMissingFields).toContain("ageYears");
+  });
+});
+
+describe("what they like to do", () => {
+  beforeAll(() => {
+    app = getApps()[0] ?? initializeApp({ projectId: "demo-ironboi-security" });
+    db = getFirestore(app);
+  });
+  beforeEach(async () => {
+    await db.recursiveDelete(db.doc(`users/${USER_ID}`));
+  });
+
+  it("is kept as demand data, filtered to what the app offers, and asks nothing extra", async () => {
+    await answer("Build muscle", { goals: ["muscle_gain"] });
+    const next = await answer("Lift, Run", { activities: ["lift", "run", "skydiving"] });
+    expect(next.onboardingStep).toBe("trainingExperience");
+    const draft = (await db.doc(profilePath(USER_ID)).get()).get("onboardingDraft");
+    expect(draft?.activities).toEqual(["lift", "run"]);
   });
 });

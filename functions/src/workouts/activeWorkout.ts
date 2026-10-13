@@ -211,6 +211,7 @@ export async function finishWorkoutSession(
     stringOr(source.workoutName, `Workout ${request.completedAt.slice(0, 10)}`);
   const startedAt = stringOr(source.startedAt, request.completedAt);
   const dayKey = stringOr(source.dayKey, "Workout");
+  const duration = sessionDuration(request.durationSec, startedAt, request.completedAt);
   const completedExercises = request.exercises.map((exercise) => ({
     ...exercise,
     exerciseDone:
@@ -245,7 +246,9 @@ export async function finishWorkoutSession(
           };
         }),
     })),
-    durationSec: request.durationSec,
+    // The app doesn't send a duration: the time from start to finish is it,
+    // unless that's implausible (a session left open overnight).
+    ...(duration !== undefined ? { durationSec: duration } : {}),
     perceivedEffort: request.perceivedEffort,
     postSessionNotes: request.postSessionNotes ?? `${dayKey}: ${workoutName}`,
     createdAt: request.completedAt,
@@ -493,3 +496,9 @@ function stringOr(value: unknown, fallback: string) {
   return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
+/** Seconds from start to finish, or the client's figure; nothing past six hours. */
+export function sessionDuration(sent: number | undefined, startedAt: string, completedAt: string): number | undefined {
+  if (sent !== undefined) return sent;
+  const elapsed = Math.round((Date.parse(completedAt) - Date.parse(startedAt)) / 1000);
+  return Number.isFinite(elapsed) && elapsed > 0 && elapsed <= 6 * 3600 ? elapsed : undefined;
+}

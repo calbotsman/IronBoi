@@ -46,6 +46,9 @@ struct OnboardingStageView: View {
     @State private var gear: Set<String> = []
     @State private var about = AboutYou()
     @State private var safety = SafetyAnswers()
+    @State private var activities: Set<String> = []
+    /// Said before the next question: an honest word about what MYO coaches.
+    @State private var aside: String?
     @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
     @AppStorage(CoachingStyle.toneKey) private var toneSetting = CoachingStyle.Tone.hype.rawValue
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
@@ -377,6 +380,15 @@ struct OnboardingStageView: View {
                     answer(["equipment": list.map(\.key)], chip: list.map(\.label).joined(separator: " · "),
                            content: list.map(\.label).joined(separator: ", "))
                 }
+            case .activities:
+                ActivitiesCard(selected: $activities) {
+                    let picked = ActivitiesCard.options.filter { activities.contains($0.key) }
+                    if !activities.isDisjoint(with: ["run", "yoga", "sport"]) {
+                        aside = "Good to know. For now I build strength plans, with mobility and easy cardio in them. Running and yoga plans are coming. "
+                    }
+                    answer(["activities": picked.map(\.key)], chip: picked.map(\.label).joined(separator: " · "),
+                           content: picked.map(\.label).joined(separator: ", "))
+                }
             case .safety:
                 SafetyCard(answers: $safety) {
                     answer(safety.answer, chip: safety.chip, content: safety.chip)
@@ -570,6 +582,7 @@ struct OnboardingStageView: View {
             }
         }
         if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
+        if let saved = draft["activities"] as? [String] { activities = Set(saved) }
         about.adopt(draft)
         safety.adopt(draft)
         syncStep()
@@ -611,7 +624,8 @@ struct OnboardingStageView: View {
         let intro = stepIndex == 0 && chips.isEmpty
             ? "Hi, I'm your coach. A few quick questions and I'll build your first week. "
             : ""
-        speak(intro + step.question)
+        speak((aside ?? "") + intro + step.question)
+        aside = nil
     }
 
     private func speak(_ text: String) {
@@ -682,6 +696,7 @@ private struct Step {
         case schedule
         case gear
         case aboutYou
+        case activities
         case safety
         case customize
         case voice
@@ -701,6 +716,7 @@ private struct Step {
         case "ageYears": return "You"
         case "injuriesOrLimitations": return "Health"
         case "voice": return "Voice"
+        case "activities": return "Likes"
         default: return "Color"
         }
     }
@@ -709,7 +725,7 @@ private struct Step {
     var fields: [String] {
         switch kind {
         case .aboutYou: return ["ageYears", "sexOrGender", "heightCm", "weightKg"]
-        case .customize, .voice: return []
+        case .customize, .voice, .activities: return []
         default: return [field]
         }
     }
@@ -720,6 +736,9 @@ private struct Step {
         switch kind {
         case .customize, .voice:
             return nil
+        case .activities:
+            guard let picked = value as? [String], !picked.isEmpty else { return nil }
+            return ActivitiesCard.options.filter { picked.contains($0.key) }.map(\.label).joined(separator: " · ")
         case .safety:
             guard draft["healthScreen"] != nil || value is [Any] else { return nil }
             let limits = (draft["injuriesOrLimitations"] as? [String]) ?? []
@@ -765,6 +784,7 @@ private struct Step {
             Option(label: "Feel fitter", chip: "Feel fitter", answer: ["goals": ["general_fitness"]]),
             Option(label: "Get back into it", chip: "Getting back into it", answer: ["goals": ["return_to_training"]]),
         ])),
+        Step(field: "activities", question: "What do you like to do, or want to try? Pick any.", kind: .activities),
         Step(field: "trainingExperience", question: "How much have you trained before?", kind: .choices([
             Option(label: "Never really", chip: "New to this", answer: ["trainingExperience": "new"]),
             Option(label: "A little", chip: "A little training", answer: ["trainingExperience": "beginner"]),
@@ -969,6 +989,53 @@ private struct StageFramesKey: PreferenceKey {
 }
 
 // MARK: - Gear, about you, make it yours
+
+/// What they like to do: demand data for what MYO coaches next, and an
+/// honest answer if it's something MYO doesn't plan yet.
+private struct ActivitiesCard: View {
+    struct Item: Identifiable { let key: String; let label: String; var id: String { key } }
+    static let options: [Item] = [
+        Item(key: "lift", label: "Lift weights"), Item(key: "run", label: "Run"), Item(key: "yoga", label: "Yoga"),
+        Item(key: "mobility", label: "Mobility"), Item(key: "sport", label: "A sport"), Item(key: "not_sure", label: "Not sure yet"),
+    ]
+
+    @Binding var selected: Set<String>
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            FlowRow(spacing: 8) {
+                ForEach(Self.options) { item in
+                    let on = selected.contains(item.key)
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if on {
+                            selected.remove(item.key)
+                        } else if item.key == "not_sure" {
+                            selected = ["not_sure"]
+                        } else {
+                            selected.remove("not_sure")
+                            selected.insert(item.key)
+                        }
+                    } label: {
+                        Text(item.label)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 46)
+                            .contentShape(Capsule())
+                            .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            DoneButton(title: "That's me", enabled: !selected.isEmpty, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+}
 
 /// Everything they have, all that apply. A gym covers the rest.
 private struct GearCard: View {

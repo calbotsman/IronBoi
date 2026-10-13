@@ -47,6 +47,7 @@ type PlannedWorkoutDayType = z.infer<typeof PlannedWorkoutDay>;
 type UserHealthProfileType = z.infer<typeof UserHealthProfile>;
 
 const ONBOARDING_SESSION_ID = "onboarding";
+const ACTIVITIES = new Set(["lift", "run", "yoga", "mobility", "sport", "not_sure"]);
 // Six things up front (docs/product/habit-journey-plan.md §1); everything
 // else — height, weight, diet, exact age, the coaching lens — the coach learns
 // by talking, or has a sensible default. The app asks these on the coach
@@ -103,6 +104,13 @@ export async function processOnboardingAnswer(
   );
   const missingFields = missingRequiredFields(draft);
   const nextStep = missingFields[0] ?? "proposal_ready";
+  if (Array.isArray(draft.activities) && request.structuredAnswer?.activities !== undefined) {
+    safeLogger.info("Onboarding activities", {
+      event: "onboarding_activities",
+      userId,
+      outcome: (draft.activities as string[]).join(","),
+    });
+  }
 
   await db.doc(coachSessionPath(userId, ONBOARDING_SESSION_ID)).set(
     {
@@ -447,6 +455,15 @@ function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
       next.screenStatus = outcome.status;
       next.screenReasons = outcome.reasons;
     }
+  }
+  // "What do you like to do?" Not required, and not used to build the plan
+  // yet: it's demand data for what MYO coaches next (docs/product/
+  // flexible-training-plan.md §8).
+  if (next.activities !== undefined) {
+    const picked = Array.isArray(next.activities)
+      ? next.activities.filter((item): item is string => typeof item === "string" && ACTIVITIES.has(item))
+      : [];
+    next.activities = picked.length > 0 ? [...new Set(picked)] : undefined;
   }
   if (typeof next.sexOrGender === "string") next.sexOrGender = normalizeSexOrGender(next.sexOrGender);
   if (typeof next.trainingExperience === "string") {
