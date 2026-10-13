@@ -366,6 +366,11 @@ struct PreferencesView: View {
             MyoValueRow(label: "Live voice (beta)") {
                 Toggle("Live voice (beta)", isOn: $liveVoiceBeta).labelsHidden()
             }
+            // Turning it on is the consent, so say what it does first.
+            Text("Talk in real time. While it's on, your voice goes straight from your phone to Google's Gemini to answer you; we don't keep the audio.")
+                .font(.caption)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
 
             MyoValueRow(label: "Training-day reminders") {
                 Toggle("Training-day reminders", isOn: Binding(
