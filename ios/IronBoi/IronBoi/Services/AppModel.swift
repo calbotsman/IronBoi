@@ -32,7 +32,7 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary? {
         // Reminders follow the plan's training days.
         didSet {
-            guard !isPreviewSession, let days = currentWorkoutPlan?.days else { return }
+            guard !inPreview, let days = currentWorkoutPlan?.days else { return }
             TrainingReminders.shared.update(trainingDays: days.filter { !$0.exercises.isEmpty }.map(\.dayKey))
         }
     }
@@ -670,6 +670,15 @@ final class AppModel: NSObject, ObservableObject {
     /// Bumped when you accept a plan change, so the coach screen can say
     /// what to do next.
     @Published private(set) var planChangesAccepted = 0
+
+    /// The no-backend preview (debug builds only); always false in Release.
+    private var inPreview: Bool {
+        #if DEBUG
+        return isPreviewSession
+        #else
+        return false
+        #endif
+    }
 
     /// Signed up, plan accepted, no workout finished yet: the first session
     /// is a short starter, and it's on offer even on a rest day.
@@ -1531,7 +1540,7 @@ final class AppModel: NSObject, ObservableObject {
         guard let latestWorkoutPlanData else { return }
         currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: latestWorkoutPlanData)
         // Back in the app: roll the two-week reminder window forward.
-        if !isPreviewSession { Task { await TrainingReminders.shared.reschedule() } }
+        if !inPreview { Task { await TrainingReminders.shared.reschedule() } }
     }
 
     private func listenForActiveWorkout(userId: String?) {
