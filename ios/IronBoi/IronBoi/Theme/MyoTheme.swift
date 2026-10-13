@@ -185,6 +185,38 @@ enum YouColor {
     ]
 }
 
+/// Coach's body colour — the orb itself. Chosen in "Meet your coach";
+/// amber by default. Stored on this device as a hex string, like YouColor.
+/// Only the body follows it: the app's ochre/brick chrome stays doctrine.
+enum CoachColor {
+    static let storageKey = "coachColorHex"
+    static let defaultHex = "F6A609"
+
+    /// Warm-leaning presets so the body still contrasts with your (cool)
+    /// colour by default. The custom picker allows anything.
+    static let presets: [(name: String, hex: String)] = [
+        ("Amber", "F6A609"),
+        ("Ember", "E8622A"),
+        ("Coral", "F07A6A"),
+        ("Rose", "E0598B"),
+        ("Gold", "D9B23A"),
+        ("Lime", "9BC53D"),
+    ]
+
+    /// True when two colours are close enough that your words would vanish
+    /// into the body as they land. Plain RGB distance is enough for a hint.
+    static func clashes(_ a: String, _ b: String) -> Bool {
+        func rgb(_ hex: String) -> (Double, Double, Double)? {
+            let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            guard cleaned.count == 6, let v = UInt32(cleaned, radix: 16) else { return nil }
+            return (Double((v >> 16) & 0xFF), Double((v >> 8) & 0xFF), Double(v & 0xFF))
+        }
+        guard let x = rgb(a), let y = rgb(b) else { return false }
+        let d = ((x.0 - y.0) * (x.0 - y.0) + (x.1 - y.1) * (x.1 - y.1) + (x.2 - y.2) * (x.2 - y.2)).squareRoot()
+        return d < 90
+    }
+}
+
 extension Color {
     /// From "RRGGBB" (a leading # is fine). Falls back to the default blue.
     init(hex: String) {
