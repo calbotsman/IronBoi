@@ -699,7 +699,7 @@ private struct Step {
         case "equipment": return "Gear"
         case "preferredDays": return "When"
         case "ageYears": return "You"
-        case "injuriesOrLimitations": return "Limits"
+        case "injuriesOrLimitations": return "Health"
         case "voice": return "Voice"
         default: return "Color"
         }
@@ -775,7 +775,7 @@ private struct Step {
         Step(field: "preferredDays", question: "Which days work, and what time?", kind: .schedule),
         Step(field: "ageYears", question: "A bit about you.", kind: .aboutYou),
         Step(field: "injuriesOrLimitations",
-             question: "A few health questions, so I keep you safe.",
+             question: "Four quick health questions, so I keep you safe.",
              kind: .safety),
         Step(field: "customize", question: "Now make me yours. Pick my color.", kind: .customize),
         Step(field: "voice", question: "Last thing: how should I sound, and how should I coach you?", kind: .voice),
@@ -1252,9 +1252,9 @@ private struct SafetyAnswers {
     ]
     static let conditionOptions: [(key: String, label: String)] = [
         ("heart", "Heart condition"), ("high_blood_pressure", "High blood pressure"), ("diabetes", "Diabetes"),
-        ("kidney", "Kidney disease"), ("lung", "Lung condition, like asthma"), ("pregnant", "Pregnant"),
-        ("postpartum", "Had a baby this year"), ("surgery", "Surgery this year"), ("osteoporosis", "Osteoporosis"),
-        ("glaucoma", "Glaucoma"), ("falls", "A fall, or feeling unsteady"),
+        ("kidney", "Kidney disease"), ("lung", "Asthma or lung"), ("pregnant", "Pregnant"),
+        ("postpartum", "New baby"), ("surgery", "Recent surgery"), ("osteoporosis", "Osteoporosis"),
+        ("glaucoma", "Glaucoma"), ("falls", "Falls or unsteady"),
     ]
 
     var complete: Bool {
@@ -1293,95 +1293,175 @@ private struct SafetyAnswers {
     }
 }
 
-/// How active you are, conditions, symptoms, pain: all taps, nothing misheard.
+/// How active you are, conditions, symptoms, pain: one short question at a
+/// time, all taps, nothing misheard. Single answers move straight on.
 private struct SafetyCard: View {
     @Binding var answers: SafetyAnswers
     let onDone: () -> Void
+    @State private var page = 0
+
+    private enum Page { case activity, conditions, pregnancy, symptoms, pain }
+
+    private var pages: [Page] {
+        [.activity, .conditions] + (answers.conditions.contains("pregnant") ? [.pregnancy] : []) + [.symptoms, .pain]
+    }
+    private var current: Page { pages[min(page, pages.count - 1)] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-                    section("Do you exercise now, 30 minutes on 3 or more days a week?") {
-                        HStack(spacing: 8) {
-                            ForEach(SafetyAnswers.activity, id: \.key) { option in
-                                pill(option.label, on: answers.activeNow == option.key) { answers.activeNow = option.key }
-                            }
-                        }
-                    }
-                    section("Do any of these apply to you?") {
-                        FlowRow(spacing: 8) {
-                            ForEach(SafetyAnswers.conditionOptions, id: \.key) { option in
-                                pill(option.label, on: answers.conditions.contains(option.key)) {
-                                    if answers.conditions.contains(option.key) {
-                                        answers.conditions.remove(option.key)
-                                    } else {
-                                        answers.conditions.insert(option.key)
-                                        answers.noneOfThese = false
-                                    }
-                                }
-                            }
-                            pill("None of these", on: answers.noneOfThese) {
-                                answers.noneOfThese.toggle()
-                                if answers.noneOfThese { answers.conditions = [] }
-                            }
-                        }
-                        if answers.conditions.contains("pregnant") {
-                            Text("Has a doctor told you not to exercise, or do you have placenta previa, preeclampsia, a cerclage, or a risk of early labor?")
-                                .font(.footnote)
-                                .foregroundStyle(MyoColor.Text.secondary.color)
-                                .fixedSize(horizontal: false, vertical: true)
-                            yesNo(answers.pregnancyContraindication) { answers.pregnancyContraindication = $0 }
-                        }
-                    }
-                    section("When you're active, do you ever get chest pain, unusual shortness of breath, dizziness or fainting, or a racing heartbeat?") {
-                        yesNo(answers.symptoms) { answers.symptoms = $0 }
-                    }
-                    section("Does anything hurt right now?") {
-                        yesNo(answers.hurts) { answers.hurts = $0 }
-                        if answers.hurts == true {
-                            TextField("Where, and what makes it worse?", text: $answers.pain, axis: .vertical)
-                                .font(.body)
-                                .padding(MyoTheme.Spacing.sm)
-                                .myoGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            HStack {
+                Text("\(min(page, pages.count - 1) + 1) of \(pages.count)")
+                    .myoStyle(.label)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+                Spacer()
+                if page > 0 {
+                    Button("Back") { withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { page -= 1 } }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                }
+            }
+            Group {
+                switch current {
+                case .activity: activity
+                case .conditions: conditions
+                case .pregnancy: pregnancy
+                case .symptoms: symptoms
+                case .pain: pain
+                }
+            }
+            .id(current)
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)))
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+        .clipped()
+    }
+
+    // MARK: Pages
+
+    private var activity: some View {
+        question("Do you exercise now, about 30 minutes, 3 or more days a week?") {
+            ForEach(SafetyAnswers.activity, id: \.key) { option in
+                row(option.label, on: answers.activeNow == option.key) { answers.activeNow = option.key; next() }
+            }
+        }
+    }
+
+    private var conditions: some View {
+        question("Do any of these apply to you?") {
+            row("None of these", on: answers.noneOfThese) {
+                answers.noneOfThese = true
+                answers.conditions = []
+                next()
+            }
+            FlowRow(spacing: 8) {
+                ForEach(SafetyAnswers.conditionOptions, id: \.key) { option in
+                    chip(option.label, on: answers.conditions.contains(option.key)) {
+                        if answers.conditions.contains(option.key) {
+                            answers.conditions.remove(option.key)
+                        } else {
+                            answers.conditions.insert(option.key)
+                            answers.noneOfThese = false
                         }
                     }
                 }
             }
-            .frame(maxHeight: 360)
-            DoneButton(title: "That's everything", enabled: answers.complete, action: onDone)
+            if !answers.conditions.isEmpty {
+                DoneButton(title: "Next", enabled: true, action: next)
+            }
         }
-        .padding(MyoTheme.Spacing.lg)
-        .myoCard()
     }
 
-    private func section<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var pregnancy: some View {
+        question("Has a doctor told you not to exercise in this pregnancy, or do you have placenta previa, preeclampsia, a cerclage, or a risk of early labor?") {
+            yesNo(answers.pregnancyContraindication) { answers.pregnancyContraindication = $0; next() }
+        }
+    }
+
+    private var symptoms: some View {
+        question("When you're active, do you ever get chest pain, unusual breathlessness, dizziness or fainting, or a racing heartbeat?") {
+            yesNo(answers.symptoms) { answers.symptoms = $0; next() }
+        }
+    }
+
+    private var pain: some View {
+        question("Does anything hurt right now?") {
+            yesNo(answers.hurts) { hurts in
+                answers.hurts = hurts
+                if !hurts { finish() }
+            }
+            if answers.hurts == true {
+                TextField("Where, and what makes it worse?", text: $answers.pain, axis: .vertical)
+                    .font(.body)
+                    .padding(MyoTheme.Spacing.sm)
+                    .myoGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                DoneButton(title: "That's everything", enabled: answers.complete, action: finish)
+            }
+        }
+    }
+
+    // MARK: Pieces
+
+    private func next() {
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) { page = min(page + 1, pages.count - 1) }
+    }
+
+    private func finish() {
+        guard answers.complete else { return }
+        onDone()
+    }
+
+    private func question<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.body.weight(.semibold))
                 .foregroundStyle(MyoColor.Text.primary.color)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 4)
             content()
         }
     }
 
     private func yesNo(_ value: Bool?, set: @escaping (Bool) -> Void) -> some View {
         HStack(spacing: 8) {
-            pill("No", on: value == false) { set(false) }
-            pill("Yes", on: value == true) { set(true) }
+            row("No", on: value == false) { set(false) }
+            row("Yes", on: value == true) { set(true) }
         }
     }
 
-    private func pill(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+    /// A big answer, one per line (or side by side for yes and no).
+    private func row(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            HStack {
+                Text(title).font(.body.weight(.semibold))
+                Spacer(minLength: 4)
+                if on { Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(MyoTheme.Colors.coachAmber) }
+            }
+            .foregroundStyle(MyoColor.Text.primary.color)
+            .padding(.horizontal, MyoTheme.Spacing.lg)
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .contentShape(RoundedRectangle(cornerRadius: 25))
+            .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.3) : nil,
+                      in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             action()
         } label: {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 40)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 36)
                 .contentShape(Capsule())
                 .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
         }
