@@ -345,13 +345,13 @@ When something the library doesn't have is requested ("crow pose", "a fartlek"):
 - **Cost.** A per-user cap; templates first; one AI draft plus at most one repair.
 - **Pricing.** Not decided. A generalist at Fitbod's price ($95.99/yr) competes with Strava+Runna and Fitness+ bundles. Strength-first with supporting kinds keeps the comparison favourable.
 
-## 10. Decisions for Josh
+## 10. Decisions (Josh, 2026-10-13)
 
-1. **Approve the sequencing:** voice and the safety screen now, expansion behind the two gates. *Recommended.*
-2. **A qualified reviewer:** budget a CSCS, physio or registered yoga teacher (a few hundred dollars for the first 30–60 entries). *Recommended: yes, before any mobility content ships.*
-3. **The PAR-Q+:** write to the PAR-Q+ Collaboration for commercial permission, or have a clinician review our own screen wording.
-4. **Testers:** recruit 5–10 people who fit the wedge (returning, anxious, 30–60), so Gate 1 can be measured.
-5. **Videos:** links out only, or none. *Recommended: the body plus our own words, no third-party video.*
+1. **Sequencing: gated,** as in §8.
+2. **Qualified reviewer: not now.** So no new mobility, pose or generated content ships yet. The safety screen ships with our own wording, marked *pending clinician review* before any public launch.
+3. **Screen wording:** ours, from the ACSM 2015 logic, with clinician review once a reviewer is in place.
+4. **Testers: just Josh for now.** Gate 1 can't be a retention rate with one person. Until there are testers, Gate 1 is Josh's call after a few weeks of real use, with the voice guardrail numbers improving. Revisit recruiting before any expansion.
+5. **Videos (default):** the body plus our own words; no third-party video.
 
 ## 11. What the adversarial review changed
 
