@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { deleteApp, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { CLEARANCE_NOTE, processOnboardingAnswer } from "../../../src/onboarding/flow.js";
+import { CLEARANCE_NOTE, normalizeTrainingExperience, processOnboardingAnswer } from "../../../src/onboarding/flow.js";
 import { lookupExercise } from "../../../src/workouts/exerciseCatalog.js";
 import { profilePath } from "../../../src/paths.js";
 
@@ -133,5 +133,28 @@ describe("changing an answer after the plan is drafted", () => {
       .get();
     expect(pending.size).toBe(1);
     expect(pending.docs[0].get("profile.schedule.preferredDays")).toEqual(["Tue", "Thu"]);
+  });
+});
+
+describe("training experience, however it's said", () => {
+  it("reads everyday answers", () => {
+    const cases: Record<string, string | undefined> = {
+      "pretty consistently": "intermediate",
+      "I train regularly, like 3 times a week": "intermediate",
+      "On and off for years": "intermediate",
+      "yeah, I go to the gym": "intermediate",
+      "not consistently": "beginner",
+      "on and off, not really consistently": "beginner",
+      "a little": "beginner",
+      "sometimes": "beginner",
+      "Never really": "new",
+      "brand new to this": "new",
+      "Seriously, for years": "advanced",
+      "lifting for 10 years": "advanced",
+      "do a push-up": undefined,
+    };
+    for (const [said, level] of Object.entries(cases)) {
+      expect(normalizeTrainingExperience(said), said).toBe(level);
+    }
   });
 });

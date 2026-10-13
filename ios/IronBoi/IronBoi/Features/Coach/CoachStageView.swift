@@ -99,8 +99,9 @@ struct CoachStageView: View {
     @State private var silentRestarts: [Date] = []
     /// What you said while Coach was still answering, sent after.
     @State private var heldUtterances: [String] = []
-    /// A reply that arrived while you were mid-sentence.
+    /// A reply that arrived while you were mid-sentence, or mid-count.
     @State private var heldReply: CoachMessage?
+    @State private var heldReplyAt: Date?
     /// Reps counted out loud in the current utterance.
     @State private var repCount = 0
     /// The set this count already closed (exercise index, 1-based set) —
@@ -335,16 +336,27 @@ struct CoachStageView: View {
             // can't be Coach's own words — those fail the echo test). If
             // you cut in, keep what you're saying.
             if !cutIn, voiceInput.isListening {
-                let heard = voiceInput.transcript
-                let yours = !heard.isEmpty && !Self.echoes(heard, of: voice.spokenText)
-                    && (WorkoutVoice.looksLikeCounting(heard)
-                        || (appModel.activeWorkout != nil && repCount > 0 && WorkoutVoice.saysSetDone(heard)))
+                // Coach's own words out first: under it, your count is mixed in.
+                let heard = Self.withoutEcho(voiceInput.transcript, of: voice.spokenText)
+                let yours = (appModel.activeWorkout != nil && repCount > 0)
+                    || (!heard.isEmpty && !Self.echoes(heard, of: voice.spokenText)
+                        && (WorkoutVoice.looksLikeCounting(heard)
+                            || (appModel.activeWorkout != nil && repCount > 0 && WorkoutVoice.saysSetDone(heard))))
                 if !yours {
                     markRestartHandled()
                     voiceInput.stop()
                 }
             }
             cutIn = false
+            // A reply held for a count: now the set's logged and said, say
+            // it — unless it's gone stale or you're counting again.
+            if conversationActive, heldUtterances.isEmpty, repCount == 0, let reply = heldReply {
+                heldReply = nil
+                if let at = heldReplyAt, Date().timeIntervalSince(at) < 40 {
+                    speak(reply)
+                    return
+                }
+            }
             if conversationActive, !heldUtterances.isEmpty {
                 // What you added while Coach was thinking, now that it has
                 // answered the first part — one message, in order.
@@ -359,7 +371,15 @@ struct CoachStageView: View {
         // Listening stopped without a send (the recognizer timed out on
         // silence): pick back up, unless it stopped on an error.
         // Counting reps out loud: the count updates as you say each number.
-        .onChange(of: voiceInput.transcript) { _, transcript in
+        .onChange(of: voiceInput.transcript) { _, heardAll in
+            // With no echo cancellation the mic hears Coach and you as one
+            // stream: "four five <Coach's sentence> six". While Coach talks
+            // (and just after), its own words come out before the count is
+            // read, so your numbers still cut in and still count.
+            let coachJustSpoke = voice.isSpeaking
+                || (voiceStoppedAt.map { Date().timeIntervalSince($0) < 3 } ?? false)
+            let transcript = coachJustSpoke && appModel.activeWorkout != nil
+                ? Self.withoutEcho(heardAll, of: voice.spokenText) : heardAll
             // You started talking over Coach: Coach stops and listens. Two
             // ways in. Mid-workout, the next number of your count or "done"
             // cuts in on its own — one word, no waiting — and it can't be
@@ -369,7 +389,8 @@ struct CoachStageView: View {
             // this safe without echo cancellation (speaker + music); the
             // on-device fallback voice can't be cancelled at all, so only
             // the count route is open under it.
-            if voice.isSpeaking, conversationActive, !Self.echoes(transcript, of: voice.spokenText) {
+            if voice.isSpeaking, conversationActive, !Self.echoes(heardAll, of: voice.spokenText)
+                || (voice.isSpeaking && conversationActive && appModel.activeWorkout != nil && repCount > 0) {
                 var counted = appModel.activeWorkout != nil
                     && WorkoutVoice.cutsIn(transcript, repCount: repCount, countBase: countBase)
                 // Starting a count from nothing is the one case a single
@@ -379,7 +400,8 @@ struct CoachStageView: View {
                    WorkoutVoice.repCount(in: transcript, from: countBase) < 2 {
                     counted = false
                 }
-                let spoke = !voice.speakingOnDevice && transcript.split(separator: " ").count >= 2
+                let spoke = !voice.speakingOnDevice && !Self.echoes(heardAll, of: voice.spokenText)
+                    && heardAll.split(separator: " ").count >= 2
                 if counted || spoke {
                     cutIn = true
                     AudioHub.log("cut in (\(counted ? "count" : "speech")): \"\(transcript.suffix(40))\" echo=\(AudioHub.shared.canTalkOver)")
@@ -771,6 +793,17 @@ struct CoachStageView: View {
         let got = words(heard)
         guard !said.isEmpty, got.count >= 2 else { return false }
         return Double(got.filter(said.contains).count) / Double(got.count) >= 0.5
+    }
+
+    /// What you said, with the words Coach is saying taken out (numbers
+    /// and set-done words stay: those are what a count is made of).
+    private static func withoutEcho(_ heard: String, of spoken: String) -> String {
+        let keep: Set<String> = ["done", "finished", "set", "that's", "last", "rep", "reps"]
+        let said = Set(spoken.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { $0.count > 1 })
+        return heard.split(separator: " ").filter { raw in
+            let word = raw.lowercased().trimmingCharacters(in: CharacterSet.letters.union(.decimalDigits).union(["'"]).inverted)
+            return WorkoutVoice.isNumberWord(word) || keep.contains(word) || !said.contains(word)
+        }.joined(separator: " ")
     }
 
     /// Within the coach's body (with a little slack), wherever it rests.
@@ -2301,12 +2334,22 @@ struct CoachStageView: View {
         }) else { return }
         awaitingReplyAfter = nil
         guard conversationActive else { return }
+        // You're counting a set: the reply (often to the set before, a few
+        // seconds late) waits until this one is logged, instead of talking
+        // over the count and drowning it out.
+        if appModel.activeWorkout != nil, repCount > 0 || closeCountTask != nil {
+            heldReply = reply
+            heldReplyAt = Date()
+            AudioHub.log("reply waits: you're counting")
+            return
+        }
         if voiceInput.isListening {
             // You're mid-sentence: the reply waits for you to finish.
             // (It used to be dropped silently, which read as Coach losing
             // the thread.)
             if !voiceInput.transcript.isEmpty {
                 heldReply = reply
+                heldReplyAt = Date()
                 AudioHub.log("reply waits: you're talking")
                 return
             }

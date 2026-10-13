@@ -1044,19 +1044,37 @@ private struct AboutYouCard: View {
                     }
                 }
                 pickerPill("Height", value: about.heightLabel) {
-                    Picker("Height", selection: $about.heightCm) {
-                        ForEach(Array(stride(from: 140, through: 215, by: 1)), id: \.self) { cm in
-                            Text(about.metric ? "\(cm) cm" : Self.feet(cm)).tag(cm)
+                    // One row per inch in feet and inches, not per centimetre
+                    // (which showed 5′11″ twice).
+                    if about.metric {
+                        Picker("Height", selection: $about.heightCm) {
+                            ForEach(140...215, id: \.self) { Text("\($0) cm").tag($0) }
+                        }
+                    } else {
+                        Picker("Height", selection: Binding(
+                            get: { Int((Double(about.heightCm) / 2.54).rounded()) },
+                            set: { about.heightCm = Int((Double($0) * 2.54).rounded()) }
+                        )) {
+                            ForEach(55...85, id: \.self) { inches in
+                                Text("\(inches / 12)′\(inches % 12)″").tag(inches)
+                            }
                         }
                     }
                 }
                 pickerPill("Weight", value: about.weightLabel) {
-                    Picker("Weight", selection: Binding(
-                        get: { Int(about.weightKg.rounded()) },
-                        set: { about.weightKg = Double($0) }
-                    )) {
-                        ForEach(35...200, id: \.self) { kg in
-                            Text(about.metric ? "\(kg) kg" : "\(Int((Double(kg) / 0.453592).rounded())) lb").tag(kg)
+                    if about.metric {
+                        Picker("Weight", selection: Binding(
+                            get: { Int(about.weightKg.rounded()) },
+                            set: { about.weightKg = Double($0) }
+                        )) {
+                            ForEach(35...200, id: \.self) { Text("\($0) kg").tag($0) }
+                        }
+                    } else {
+                        Picker("Weight", selection: Binding(
+                            get: { Int((about.weightKg / 0.453592).rounded()) },
+                            set: { about.weightKg = Double($0) * 0.453592 }
+                        )) {
+                            ForEach(77...440, id: \.self) { Text("\($0) lb").tag($0) }
                         }
                     }
                 }
@@ -1110,11 +1128,6 @@ private struct AboutYouCard: View {
             .myoGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
-    }
-
-    private static func feet(_ cm: Int) -> String {
-        let inches = Int((Double(cm) / 2.54).rounded())
-        return "\(inches / 12)′\(inches % 12)″"
     }
 }
 

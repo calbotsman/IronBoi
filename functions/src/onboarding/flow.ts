@@ -987,13 +987,26 @@ function normalizeSexOrGender(value: string) {
   return undefined;
 }
 
-function normalizeTrainingExperience(value: string) {
-  const lower = value.toLowerCase();
+/**
+ * How much they've trained, from however they said it. Order matters:
+ * "never" and "not / rarely / inconsistently" win over the words they
+ * qualify, so "not consistently" is a beginner, not someone who trains.
+ */
+export function normalizeTrainingExperience(value: string) {
+  const lower = value.toLowerCase().replace(/[’‘]/g, "'");
   if (/^(new|beginner|intermediate|advanced)$/.test(lower)) return lower;
-  if (/advanced|expert|serious|competit|athlete|lifting for (\d+|many|a lot of) years/.test(lower)) return "advanced";
-  if (/intermediate|on and off|off and on|trained before|years|a while|used to/.test(lower)) return "intermediate";
-  if (/beginner|a little|a bit|some|few months|not much|bit of/.test(lower)) return "beginner";
-  if (/never|new|first time|none|nothing|zero/.test(lower)) return "new";
+  if (/never|first time|brand new|complete beginner|no experience|not at all|zero|\bnone\b|\bnothing\b|\bnew\b/.test(lower)) {
+    return "new";
+  }
+  if (/advanced|expert|serious|competit|athlete|decade|\b([5-9]|[1-9]\d)\+? years|lifting for (many|a lot of) years|years and years/.test(lower)) {
+    return "advanced";
+  }
+  if (/\b(not|rarely|hardly|barely|inconsistent\w*)\b|a little|a bit|\bsome\b|few months|not much|bit of|beginner|casual|now and then|sometimes|occasional/.test(lower)) {
+    return "beginner";
+  }
+  if (/intermediate|on and off|off and on|trained before|years|a while|used to|consisten|regular|often|every week|most weeks|times a week|a lot|quite a bit|plenty|\bgym\b|\b(yes|yeah|yep)\b/.test(lower)) {
+    return "intermediate";
+  }
   return undefined;
 }
 
