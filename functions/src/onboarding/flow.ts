@@ -22,7 +22,7 @@ import {
 } from "../paths.js";
 import { buildTrainingProgramFromDays } from "../workouts/program.js";
 import { attachDefaultProgression } from "../workouts/progressionDefaults.js";
-import { fitPlanToUser } from "../workouts/planFit.js";
+import { canonicalEquipment, fitPlanToUser } from "../workouts/planFit.js";
 import { trainingDaysPerWeek, welcomeMessage } from "../journey/recap.js";
 import { writeGeneralCoachMessage } from "../journey/messages.js";
 import { safeLogger } from "../logging/safeLogger.js";
@@ -54,8 +54,11 @@ const REQUIRED_FIELDS = [
   "goals",
   "trainingExperience",
   "equipment",
-  "ageYears",
   "preferredDays",
+  // The app's "About you" card sends age, sex or gender, height and weight
+  // together. Only age is required here, so builds that predate the card
+  // (which send age alone) still finish onboarding.
+  "ageYears",
   "injuriesOrLimitations",
 ] as const;
 
@@ -63,7 +66,10 @@ const QUESTIONS: Record<string, string> = {
   goals: "What do you want from training right now?",
   trainingExperience: "How much have you trained before?",
   equipment: "Where will you train, and with what?",
-  ageYears: "Roughly how old are you?",
+  ageYears: "A bit about you: how old are you?",
+  sexOrGender: "And your sex or gender?",
+  heightCm: "How tall are you?",
+  weightKg: "And roughly what do you weigh?",
   preferredDays: "Which days work, and what time?",
   injuriesOrLimitations: "Last one: does anything hurt, or has a doctor told you to limit exercise?",
 };
@@ -395,8 +401,13 @@ function applyAnswer(
 function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
   const next = { ...draft };
   if (typeof next.goals === "string") next.goals = parseGoals(next.goals);
-  if (typeof next.equipment === "string") next.equipment = splitList(next.equipment);
-  if (Array.isArray(next.equipment)) next.equipment = cleanList(next.equipment);
+  if (typeof next.equipment === "string") next.equipment = [next.equipment];
+  // "I have kettle bells, dumbbells and a barbell for benching" → the gear
+  // itself, so the plan and the coach read the same clean list.
+  if (Array.isArray(next.equipment)) {
+    const gear = canonicalEquipment(cleanList(next.equipment));
+    next.equipment = gear.length > 0 ? gear : undefined;
+  }
   if (typeof next.dietaryConstraints === "string") {
     next.dietaryConstraints = splitList(next.dietaryConstraints);
   }
@@ -416,6 +427,8 @@ function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
   }
   if (typeof next.sexOrGender === "string") next.sexOrGender = normalizeSexOrGender(next.sexOrGender);
   if (typeof next.trainingExperience === "string") {
+    // Unrecognised ("do a push-up") stays unanswered so it's asked again,
+    // rather than quietly becoming "new".
     next.trainingExperience = normalizeTrainingExperience(next.trainingExperience);
   }
   if (typeof next.trainingFocus === "string") {
@@ -425,6 +438,12 @@ function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
     if (typeof next[field] === "string") next[field] = parseNumber(next[field]);
   }
   if (typeof next.ageYears === "string") next.ageYears = parseAge(next.ageYears);
+  if (typeof next.ageYears === "number" && !(Number.isInteger(next.ageYears) && next.ageYears >= 13 && next.ageYears <= 100)) {
+    next.ageYears = undefined;
+  }
+  for (const field of ["heightCm", "weightKg"] as const) {
+    if (typeof next[field] === "number" && !(Number(next[field]) > 0)) next[field] = undefined;
+  }
   if (typeof next.preferredDays === "string") next.preferredDays = parseDays(next.preferredDays);
   if (Array.isArray(next.preferredDays)) {
     const days = parseDays(next.preferredDays.join(" "));
@@ -508,9 +527,12 @@ function buildProgramProposal(
       preferredWorkoutTime: workoutTimeOfDay(preferredTime),
       dislikedExercises: [],
       // Not asked any more: the coach picks the structure from the answers.
+      // Not asked: "MYO's recommendation" follows the days you train (full
+      // body up to 3 a week, a split from 4), and keeps following it when
+      // the days change later. A focus they picked themselves is kept.
       trainingFocus: draft.trainingFocus !== undefined
         ? normalizeTrainingFocus(draft.trainingFocus)
-        : recommendTrainingFocus({ ...draft, daysPerWeek: preferredDays.length || draft.daysPerWeek }),
+        : "myo_recommended",
       coachingLens: normalizeCoachingLens(draft.coachingLens),
     },
     dietaryConstraints: draft.dietaryConstraints ?? [],
@@ -957,19 +979,22 @@ function parseGoals(value: string): z.infer<typeof GoalType>[] {
 
 function normalizeSexOrGender(value: string) {
   const lower = value.toLowerCase();
-  if (/female|woman|girl/.test(lower)) return "female";
-  if (/male|man|boy/.test(lower)) return "male";
-  if (/non/.test(lower)) return "non_binary";
-  if (/prefer/.test(lower)) return "prefer_not_to_say";
-  return "self_described";
+  if (/^(female|male|non_binary|prefer_not_to_say|self_described)$/.test(lower)) return lower;
+  if (/non[- ]?binary|enby|\bnb\b/.test(lower)) return "non_binary";
+  if (/prefer not|rather not|skip/.test(lower)) return "prefer_not_to_say";
+  if (/female|woman|girl|\bshe\b/.test(lower)) return "female";
+  if (/\bmale\b|\bman\b|\bguy\b|\bboy\b|\bhe\b/.test(lower)) return "male";
+  return undefined;
 }
 
 function normalizeTrainingExperience(value: string) {
   const lower = value.toLowerCase();
-  if (/advanced|expert/.test(lower)) return "advanced";
-  if (/intermediate/.test(lower)) return "intermediate";
-  if (/beginner|some/.test(lower)) return "beginner";
-  return "new";
+  if (/^(new|beginner|intermediate|advanced)$/.test(lower)) return lower;
+  if (/advanced|expert|serious|competit|athlete|lifting for (\d+|many|a lot of) years/.test(lower)) return "advanced";
+  if (/intermediate|on and off|off and on|trained before|years|a while|used to/.test(lower)) return "intermediate";
+  if (/beginner|a little|a bit|some|few months|not much|bit of/.test(lower)) return "beginner";
+  if (/never|new|first time|none|nothing|zero/.test(lower)) return "new";
+  return undefined;
 }
 
 function normalizeCoachingLens(value: unknown): z.infer<typeof CoachingLens> {

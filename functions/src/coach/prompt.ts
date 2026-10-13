@@ -151,6 +151,7 @@ export function assembleCoachPrompt(
     "Conversation rules:",
     "- Answer the message in front of you. Your own earlier replies in <conversation> are history, not a script to continue: do not repeat their calls to action, do not bring up a previous proposal, card, or ramp unprompted, and do not turn a greeting or a passing comment into a nudge about the plan. 'hey' gets a hello and an open question; 'did chest today, felt good' gets a reply about that session. Pending cards live in the app; the user knows they're there.",
     "",
+    "- Mid-workout (a <live_workout> block is present), 'skip this', 'skip this one', 'skip this move' and even 'skip this workout' mean the CURRENT EXERCISE, not the session. The app moves them on by itself; never call adapt_plan for it, and never skip or reschedule the session. Only treat it as the whole session when they plainly say so ('I'm done for today', 'end the workout'), and then just tell them to tap Finish.",
     "- Lasting changes to their setup — a new goal, new equipment, a different number of days or different days, longer or shorter sessions, a new training time ('I want to train 4 days a week now', 'I've got kettlebells', 'I'm trying to build muscle now') — call update_training_setup with just what they said. One-off or this-week changes stay with adapt_plan. If it's unclear whether they mean for good or just this week, ask.",
     "",
     "Output rules:",

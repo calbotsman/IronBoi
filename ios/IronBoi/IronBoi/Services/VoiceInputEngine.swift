@@ -29,6 +29,8 @@ final class VoiceInputEngine: ObservableObject {
         }
     }
     private static let pauseSeconds: UInt64 = 1_400_000_000
+    /// Added to every pause — set where answers run long (onboarding).
+    var extraPause: UInt64 = 0
 
     /// How long a quiet stretch ends your turn. A finished sentence ("…
     /// seated?") goes quickly; a short command ("set done") nearly as
@@ -387,7 +389,9 @@ final class VoiceInputEngine: ObservableObject {
     private func schedulePauseCheck() {
         pauseTask?.cancel()
         guard !holdOpen else { return }
-        let wait = Self.pauseDelay(after: transcript)
+        // Onboarding answers are lists and descriptions ("I have kettlebells…
+        // dumbbells… a barbell for benching"): give them room.
+        let wait = Self.pauseDelay(after: transcript) + extraPause
         pauseTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: wait)
             guard let self, !Task.isCancelled, self.isListening else { return }

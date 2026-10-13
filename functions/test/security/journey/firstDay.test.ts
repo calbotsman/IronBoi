@@ -154,7 +154,10 @@ describe("first day: starter session, recap, effort", () => {
           goals: ["muscle_gain"],
           trainingExperience: "intermediate",
           equipment: ["Full gym"],
-          ageYears: "18–39",
+          ageYears: 34,
+          sexOrGender: "male",
+          heightCm: 180,
+          weightKg: 82,
           preferredDays: ["Mon", "Wed", "Fri"],
           injuriesOrLimitations: ["none"],
           // Not asked any more, but still honoured when given.

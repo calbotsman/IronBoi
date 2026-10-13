@@ -647,6 +647,7 @@ struct OrbView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(YouColor.storageKey) private var youHex = YouColor.defaultHex
+    @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
     @State private var model = OrbModel()
 
     var body: some View {
@@ -682,7 +683,7 @@ struct OrbView: View {
                         .float(0.025),
                         .float(0.14),
                         .float(0.05),
-                        .color(MyoTheme.Colors.coachAmber),
+                        .color(Color(hex: coachHex)),
                         .color(Color(hex: youHex)),
                         .floatArray(model.dropArray),
                         .floatArray(model.jointArray),

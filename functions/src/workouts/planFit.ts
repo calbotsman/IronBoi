@@ -44,6 +44,34 @@ export function equipmentFromAnswer(answer: readonly string[] | undefined): Set<
   return have;
 }
 
+const GEAR_NAMES: Array<[Equipment, string]> = [
+  ["dumbbell", "dumbbells"], ["kettlebell", "kettlebells"], ["barbell", "barbell"], ["bench", "bench"],
+  ["pullup_bar", "pull-up bar"], ["cable", "cable machine"], ["machine", "machines"], ["band", "bands"],
+  ["sandbag", "sandbag"], ["club", "clubs"], ["medball", "medicine ball"],
+];
+
+/**
+ * What someone said they have, as a clean list: "I'm gonna train at home. I
+ * have kettle bells, dumbbells and a barbell for benching" → ["kettlebells",
+ * "dumbbells", "barbell", "bench"]. A gym stays "full gym"; nothing at all is
+ * "bodyweight". Saved like this so the profile, the plan and the coach's
+ * swaps all read the same thing.
+ */
+export function canonicalEquipment(answer: readonly string[] | undefined): string[] {
+  const text = (answer ?? []).join(" ").toLowerCase();
+  if (!text.trim()) return [];
+  const have = equipmentFromAnswer(answer);
+  if (have === null) return ["full gym"];
+  const names = GEAR_NAMES.filter(([item]) => have.has(item)).map(([, name]) => name);
+  return names.length > 0 ? names : ["bodyweight"];
+}
+
+/** Catalog equipment for a saved profile list; null = a full gym (anything goes). */
+export function catalogEquipment(saved: readonly string[] | undefined): Equipment[] | null {
+  const have = equipmentFromAnswer(saved);
+  return have === null ? null : [...have];
+}
+
 // First-session weights as a share of the seed's (intermediate) numbers.
 const EXPERIENCE_LOAD: Record<Experience, number> = {
   new: 0.4,

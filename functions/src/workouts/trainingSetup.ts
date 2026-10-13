@@ -7,6 +7,7 @@ import { buildWorkoutPlanFromProfile } from "../onboarding/flow.js";
 import { profilePath, workoutPlanPath } from "../paths.js";
 import { recordAuditEventBestEffort } from "../audit/log.js";
 import { writeRegeneratedPlanAndProgram } from "./program.js";
+import { canonicalEquipment } from "./planFit.js";
 
 // The six things onboarding asks, changed later — from the You screen or by
 // saying it to the coach ("4 days a week now, I've got kettlebells, building
@@ -26,6 +27,10 @@ export const TrainingSetupChange = z
     trainingExperience: TrainingExperience.optional(),
     /** In the user's words, as onboarding takes it: "kettlebells", "full gym". */
     equipment: z.array(z.string().trim().min(1).max(60)).min(1).max(12).optional(),
+    /** Gear to add to what they already have ("I've got dumbbells too"). */
+    addEquipment: z.array(z.string().trim().min(1).max(60)).min(1).max(12).optional(),
+    /** Gear they no longer have. */
+    removeEquipment: z.array(z.string().trim().min(1).max(60)).min(1).max(12).optional(),
     /** Which days. Wins over daysPerWeek when both are given. */
     preferredDays: z.array(z.enum(WEEK)).min(1).max(7).optional(),
     daysPerWeek: z.number().int().min(1).max(7).optional(),
@@ -41,7 +46,9 @@ export type TrainingSetupChange = z.infer<typeof TrainingSetupChange>;
 
 // Fields that change what the plan should be. Session length and the reminder
 // time are saved but don't need a new plan.
-const PLAN_FIELDS = ["goals", "trainingExperience", "equipment", "preferredDays", "daysPerWeek"] as const;
+const PLAN_FIELDS = [
+  "goals", "trainingExperience", "equipment", "addEquipment", "removeEquipment", "preferredDays", "daysPerWeek",
+] as const;
 
 export async function updateTrainingSetup(
   db: Firestore,
@@ -77,7 +84,20 @@ export async function updateTrainingSetup(
   };
   if (change.goals) patch.goals = change.goals;
   if (change.trainingExperience) patch.trainingExperience = change.trainingExperience;
-  if (change.equipment) patch.equipment = change.equipment;
+  // Gear is saved as a clean list ("kettlebells", "dumbbells"…), whether it
+  // came as a whole new list or as things added or taken away.
+  let equipment: string[] | undefined;
+  if (change.equipment) equipment = canonicalEquipment(change.equipment);
+  if (change.addEquipment || change.removeEquipment) {
+    const base = equipment ?? canonicalEquipment(Array.isArray(current.equipment) ? current.equipment : []);
+    const added = canonicalEquipment(change.addEquipment ?? []);
+    const removed = new Set(canonicalEquipment(change.removeEquipment ?? []));
+    // Adding real gear to "bodyweight" replaces it; a gym already has it all.
+    const merged = [...base, ...added].filter((item) => !removed.has(item));
+    equipment = [...new Set(merged.length > 1 ? merged.filter((item) => item !== "bodyweight") : merged)];
+    if (equipment.length === 0) equipment = ["bodyweight"];
+  }
+  if (equipment) patch.equipment = equipment;
   if (change.preferredTime) {
     patch.preferredTime = change.preferredTime;
     const hour = Number(change.preferredTime.slice(0, 2));
@@ -98,7 +118,7 @@ export async function updateTrainingSetup(
       {
         schedule: { daysPerWeek: schedule.daysPerWeek ?? 3, preferredDays: schedule.preferredDays ?? [] },
         trainingFocus: focus.success ? focus.data : undefined,
-        equipment: change.equipment ?? (Array.isArray(current.equipment) ? current.equipment : undefined),
+        equipment: equipment ?? (Array.isArray(current.equipment) ? current.equipment : undefined),
         trainingExperience: experience.success ? experience.data : undefined,
       },
       seed.DEFAULT_PLAN,

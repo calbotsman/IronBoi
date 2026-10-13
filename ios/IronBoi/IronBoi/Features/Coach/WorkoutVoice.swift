@@ -251,19 +251,42 @@ enum WorkoutVoice {
         var out: [String] = []
         var expected = start + 1
         for token in tokens {
-            if token.count > 1, token.allSatisfy(\.isNumber), let first = Int(String(token.first!)),
-               first == expected || first == 1 {
-                let digits = token.compactMap { Int(String($0)) }
-                if zip(digits, digits.dropFirst()).allSatisfy({ $1 == $0 + 1 }) {
-                    out.append(contentsOf: digits.map(String.init))
-                    expected = (digits.last ?? 0) + 1
-                    continue
-                }
+            // The recogniser glues a fast count into one number: "12456" for
+            // 1, 2, [3 lost], 4, 5, 6, or "8910" for 8, 9, 10. Split it back
+            // into rising reps, allowing one missed number between them.
+            if token.count > 1, token.allSatisfy(\.isNumber), let run = splitCount(token, expected: expected) {
+                out.append(contentsOf: run.map(String.init))
+                expected = (run.last ?? 0) + 1
+                continue
             }
             out.append(token)
             if let value = Int(token) ?? numberWords[token] { expected = value + 1 }
         }
         return out
+    }
+
+    /// "12456" → [1, 2, 4, 5, 6]; "8910" → [8, 9, 10]. Each rep is the last
+    /// one plus 1 (or plus 2: one lost), up to 30. Nil if it doesn't read as
+    /// a count starting at `expected` (or at 1, a fresh set).
+    static func splitCount(_ token: String, expected: Int) -> [Int]? {
+        let chars = Array(token)
+        func walk(_ index: Int, _ last: Int, _ acc: [Int]) -> [Int]? {
+            if index == chars.count { return acc }
+            for width in [1, 2] where index + width <= chars.count {
+                guard let value = Int(String(chars[index..<index + width])), String(value).count == width else { continue }
+                let step = value - last
+                guard value <= 30, step == 1 || step == 2 else { continue }
+                if let done = walk(index + width, value, acc + [value]) { return done }
+            }
+            return nil
+        }
+        for start in Set([expected, 1]) {
+            let width = String(start).count
+            guard chars.count > width, String(chars.prefix(width)) == String(start),
+                  let run = walk(width, start, [start]), run.count >= 2 else { continue }
+            return run
+        }
+        return nil
     }
 
     private static func firstNumber(in text: String) -> Double? {

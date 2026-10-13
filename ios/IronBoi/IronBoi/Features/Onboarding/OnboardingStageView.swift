@@ -40,6 +40,12 @@ struct OnboardingStageView: View {
     @State private var lastChipField: String?
     // The schedule card's own state.
     @State private var days: Set<String> = ["Mon", "Wed", "Fri"]
+    @State private var gear: Set<String> = []
+    @State private var about = AboutYou()
+    @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
+    @AppStorage(CoachingStyle.toneKey) private var toneSetting = CoachingStyle.Tone.hype.rawValue
+    @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
+    @AppStorage("onboarding.customized") private var customized = false
     @State private var time = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
 
     private var isWeek: Bool { stepIndex >= Step.all.count }
@@ -131,6 +137,8 @@ struct OnboardingStageView: View {
         }
         .onAppear {
             voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+            // Answers here are lists and descriptions: don't cut them off.
+            voiceInput.extraPause = 1_200_000_000
             voiceInput.onPause = { text in
                 voiceInput.release()
                 answerInWords(text, mode: .dictation)
@@ -270,6 +278,23 @@ struct OnboardingStageView: View {
                     notice = prompt
                     showKeyboard = true
                 }
+            case .gear:
+                GearCard(selected: $gear) {
+                    let list = GearCard.options.filter { gear.contains($0.key) }
+                    answer(["equipment": list.map(\.key)], chip: list.map(\.label).joined(separator: " · "),
+                           content: list.map(\.label).joined(separator: ", "))
+                }
+            case .aboutYou:
+                AboutYouCard(about: $about) {
+                    answer(about.answer, chip: about.chip, content: about.chip)
+                }
+            case .customize:
+                CustomizeCard(coachHex: $coachHex, tone: $toneSetting, tips: $tipsSetting) {
+                    customized = true
+                    chips[step.field] = "Your coach"
+                    lastChipField = step.field
+                    advance()
+                }
             case .schedule:
                 ScheduleCard(days: $days, time: $time) {
                     let ordered = ScheduleCard.week.filter { days.contains($0) }
@@ -329,7 +354,7 @@ struct OnboardingStageView: View {
         notice = nil
         chips[step.field] = chip
         lastChipField = step.field
-        enqueue(content, structured: structured, mode: .tap)
+        if !structured.isEmpty { enqueue(content, structured: structured, mode: .tap) }
         advance()
     }
 
@@ -338,13 +363,22 @@ struct OnboardingStageView: View {
     private func answerInWords(_ text: String, mode: CoachInputMode) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let step else { return }
+        if case .customize = step.kind {
+            notice = "Tap a color and a style below."
+            return
+        }
         voice.stop()
         notice = nil
         awaitingParse = step.field
         let field = step.field
         enqueue(trimmed, structured: nil, mode: mode) {
             awaitingParse = nil
-            if appModel.onboardingMissingFields.contains(field) && appModel.onboardingStatus != .proposalReady {
+            let stillMissing = step.fields.contains { appModel.onboardingMissingFields.contains($0) }
+            if case .aboutYou = step.kind, stillMissing, !appModel.onboardingMissingFields.contains("ageYears") {
+                // Some of it landed: fill the card with what was heard.
+                about.adopt(appModel.onboardingDraft)
+                notice = "Got some of that. Fill in the rest below."
+            } else if stillMissing && appModel.onboardingStatus != .proposalReady {
                 notice = "Sorry, I didn't catch that. Tap a card, or say it another way."
                 lastSpokenStep = nil
                 speak(notice ?? "")
@@ -403,7 +437,12 @@ struct OnboardingStageView: View {
         for step in Step.all where chips[step.field] == nil {
             if let label = step.chip(for: draft[step.field], draft: draft) { chips[step.field] = label }
         }
+        if customized, chips["customize"] == nil, Step.all.dropLast().allSatisfy({ chips[$0.field] != nil }) {
+            chips["customize"] = "Your coach"
+        }
         if let days = draft["preferredDays"] as? [String], !days.isEmpty { self.days = Set(days) }
+        if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
+        about.adopt(draft)
         syncStep()
     }
 
@@ -418,7 +457,13 @@ struct OnboardingStageView: View {
             return
         }
         let missing = appModel.onboardingMissingFields.first ?? appModel.onboardingStep
-        if let index = Step.all.firstIndex(where: { $0.field == missing }) { stepIndex = index }
+        if let index = Step.all.firstIndex(where: { $0.fields.contains(missing) }) {
+            stepIndex = index
+        } else if appModel.onboardingStatus == .proposalReady,
+                  let index = Step.all.firstIndex(where: { chips[$0.field] == nil }) {
+            // Server has everything; only "make it yours" is left.
+            stepIndex = index
+        }
     }
 
     // MARK: - The coach's voice
@@ -435,7 +480,7 @@ struct OnboardingStageView: View {
         guard let step else { return }
         lastSpokenStep = stepIndex
         let intro = stepIndex == 0 && chips.isEmpty
-            ? "Hi, I'm your coach. Six quick questions and I'll build your first week. "
+            ? "Hi, I'm your coach. A few quick questions and I'll build your first week. "
             : ""
         speak(intro + step.question)
     }
@@ -507,16 +552,38 @@ private struct Step {
     enum Kind {
         case choices([Option])
         case schedule
+        case gear
+        case aboutYou
+        case customize
     }
 
     let field: String
     let question: String
     let kind: Kind
 
+    /// The server fields this card answers ("About you" is four).
+    var fields: [String] {
+        switch kind {
+        case .aboutYou: return ["ageYears", "sexOrGender", "heightCm", "weightKg"]
+        case .customize: return []
+        default: return [field]
+        }
+    }
+
     /// The stack label for an answer the server already has.
     func chip(for value: Any?, draft: [String: Any]) -> String? {
         guard let value else { return nil }
         switch kind {
+        case .customize:
+            return nil
+        case .gear:
+            guard let list = value as? [String], !list.isEmpty else { return nil }
+            return list.map { item in GearCard.options.first { $0.key == item }?.label ?? item.capitalized }
+                .joined(separator: " · ")
+        case .aboutYou:
+            var about = AboutYou()
+            guard about.adopt(draft) else { return nil }
+            return about.chip
         case .schedule:
             guard let days = value as? [String], !days.isEmpty else { return nil }
             let time = (draft["preferredTime"] as? String).map { " · \($0)" } ?? ""
@@ -556,21 +623,11 @@ private struct Step {
             Option(label: "On and off for years", chip: "Trained before", answer: ["trainingExperience": "intermediate"]),
             Option(label: "Seriously, for years", chip: "Experienced", answer: ["trainingExperience": "advanced"]),
         ])),
-        Step(field: "equipment", question: "Where will you train?", kind: .choices([
-            Option(label: "A full gym", chip: "Full gym", answer: ["equipment": ["full gym"]]),
-            Option(label: "Home, with dumbbells", chip: "Home · dumbbells", answer: ["equipment": ["dumbbells", "bench"]]),
-            Option(label: "A home gym with a barbell", chip: "Home gym", answer: ["equipment": ["home gym"]]),
-            Option(label: "Bodyweight only", chip: "Bodyweight", answer: ["equipment": ["bodyweight"]]),
-        ])),
-        Step(field: "ageYears", question: "Roughly how old are you?", kind: .choices([
-            Option(label: "Under 18", chip: "Under 18", answer: ["ageYears": 16]),
-            Option(label: "18–39", chip: "18–39", answer: ["ageYears": "18–39"]),
-            Option(label: "40–59", chip: "40–59", answer: ["ageYears": "40–59"]),
-            Option(label: "60+", chip: "60+", answer: ["ageYears": "60+"]),
-        ])),
+        Step(field: "equipment", question: "What do you have to train with? Pick everything.", kind: .gear),
         Step(field: "preferredDays", question: "Which days work, and what time?", kind: .schedule),
+        Step(field: "ageYears", question: "A bit about you.", kind: .aboutYou),
         Step(field: "injuriesOrLimitations",
-             question: "Last one. Does anything hurt, or has a doctor told you to limit exercise?",
+             question: "Does anything hurt, or has a doctor told you to limit exercise?",
              kind: .choices([
                 Option(label: "All good", chip: "No limits", answer: ["injuriesOrLimitations": ["none"]]),
                 Option(label: "Something hurts", chip: "Something hurts", answer: [:],
@@ -578,6 +635,7 @@ private struct Step {
                 Option(label: "A doctor's limit, or chest pain, dizziness or fainting when active",
                        chip: "Doctor's limit", answer: ["injuriesOrLimitations": ["doctor advised limit"]]),
              ])),
+        Step(field: "customize", question: "Last thing. Make me yours: my color, and how I coach you.", kind: .customize),
     ]
 }
 
@@ -756,5 +814,273 @@ private struct StageFramesKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue()) { $1 }
+    }
+}
+
+// MARK: - Gear, about you, make it yours
+
+/// Everything they have, all that apply. A gym covers the rest.
+private struct GearCard: View {
+    struct Item: Identifiable { let key: String; let label: String; var id: String { key } }
+    static let options: [Item] = [
+        Item(key: "full gym", label: "Full gym"),
+        Item(key: "dumbbells", label: "Dumbbells"),
+        Item(key: "kettlebells", label: "Kettlebells"),
+        Item(key: "barbell", label: "Barbell"),
+        Item(key: "bench", label: "Bench"),
+        Item(key: "pull-up bar", label: "Pull-up bar"),
+        Item(key: "bands", label: "Bands"),
+        Item(key: "bodyweight", label: "Just my body"),
+    ]
+    private static let exclusive: Set<String> = ["full gym", "bodyweight"]
+
+    @Binding var selected: Set<String>
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            FlowRow(spacing: 8) {
+                ForEach(Self.options) { item in
+                    let on = selected.contains(item.key)
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if on {
+                            selected.remove(item.key)
+                        } else if Self.exclusive.contains(item.key) {
+                            selected = [item.key]
+                        } else {
+                            selected.subtract(Self.exclusive)
+                            selected.insert(item.key)
+                        }
+                    } label: {
+                        Text(item.label)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 46)
+                            .contentShape(Capsule())
+                            .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            DoneButton(title: "That's everything", enabled: !selected.isEmpty, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+}
+
+/// Age, sex or gender, height and weight — exact, because loads and
+/// estimates depend on them.
+private struct AboutYou {
+    var age = 30
+    var sex: String?
+    var metric = Locale.current.measurementSystem != .us
+    var heightCm = 175
+    var weightKg = 75.0
+
+    static let sexes: [(key: String, label: String)] = [
+        ("male", "Male"), ("female", "Female"), ("non_binary", "Non-binary"), ("prefer_not_to_say", "Prefer not to say"),
+    ]
+
+    var heightLabel: String {
+        if metric { return "\(heightCm) cm" }
+        let inches = Int((Double(heightCm) / 2.54).rounded())
+        return "\(inches / 12)′\(inches % 12)″"
+    }
+    var weightLabel: String {
+        metric ? "\(Int(weightKg.rounded())) kg" : "\(Int((weightKg / 0.453592).rounded())) lb"
+    }
+    var chip: String {
+        let sexLabel = Self.sexes.first { $0.key == sex }?.label
+        return ([String(age)] + (sexLabel.map { [$0] } ?? []) + [heightLabel, weightLabel]).joined(separator: " · ")
+    }
+    var answer: [String: Any] {
+        ["ageYears": age, "sexOrGender": sex ?? "prefer_not_to_say", "heightCm": heightCm,
+         "weightKg": (weightKg * 10).rounded() / 10]
+    }
+
+    /// Take what the server already has. True if it has all four.
+    @discardableResult
+    mutating func adopt(_ draft: [String: Any]) -> Bool {
+        func number(_ key: String) -> Double? { (draft[key] as? NSNumber)?.doubleValue }
+        if let value = number("ageYears") { age = Int(value) }
+        if let value = draft["sexOrGender"] as? String { sex = value }
+        if let value = number("heightCm") { heightCm = Int(value.rounded()) }
+        if let value = number("weightKg") { weightKg = value }
+        return ["ageYears", "sexOrGender", "heightCm", "weightKg"].allSatisfy { draft[$0] != nil }
+    }
+}
+
+private struct AboutYouCard: View {
+    @Binding var about: AboutYou
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            HStack(spacing: MyoTheme.Spacing.sm) {
+                pickerPill("Age", value: "\(about.age)") {
+                    Picker("Age", selection: $about.age) {
+                        ForEach(13...90, id: \.self) { Text("\($0)").tag($0) }
+                    }
+                }
+                pickerPill("Height", value: about.heightLabel) {
+                    Picker("Height", selection: $about.heightCm) {
+                        ForEach(Array(stride(from: 140, through: 215, by: 1)), id: \.self) { cm in
+                            Text(about.metric ? "\(cm) cm" : Self.feet(cm)).tag(cm)
+                        }
+                    }
+                }
+                pickerPill("Weight", value: about.weightLabel) {
+                    Picker("Weight", selection: Binding(
+                        get: { Int(about.weightKg.rounded()) },
+                        set: { about.weightKg = Double($0) }
+                    )) {
+                        ForEach(35...200, id: \.self) { kg in
+                            Text(about.metric ? "\(kg) kg" : "\(Int((Double(kg) / 0.453592).rounded())) lb").tag(kg)
+                        }
+                    }
+                }
+            }
+            FlowRow(spacing: 8) {
+                ForEach(AboutYou.sexes, id: \.key) { option in
+                    let on = about.sex == option.key
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        about.sex = option.key
+                    } label: {
+                        Text(option.label)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 40)
+                            .contentShape(Capsule())
+                            .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack {
+                Button(about.metric ? "Use lb and ft" : "Use kg and cm") { about.metric.toggle() }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(MyoColor.Text.secondary.color)
+                Spacer()
+            }
+            DoneButton(title: "That's me", enabled: about.sex != nil, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+
+    private func pickerPill<P: View>(_ title: String, value: String, @ViewBuilder picker: () -> P) -> some View {
+        Menu {
+            picker()
+        } label: {
+            VStack(spacing: 2) {
+                Text(title.uppercased())
+                    .font(.system(.caption2, design: .monospaced).weight(.medium))
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+                Text(value)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+            .myoGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private static func feet(_ cm: Int) -> String {
+        let inches = Int((Double(cm) / 2.54).rounded())
+        return "\(inches / 12)′\(inches % 12)″"
+    }
+}
+
+/// The coach's color (its body changes as you tap) and how it talks to you.
+private struct CustomizeCard: View {
+    @Binding var coachHex: String
+    @Binding var tone: String
+    @Binding var tips: String
+    let onDone: () -> Void
+
+    private static let styles: [(label: String, tone: CoachingStyle.Tone, tips: CoachingStyle.Tips)] = [
+        ("Hype me up", .hype, .full),
+        ("Calm and clear", .calm, .full),
+        ("Just the essentials", .calm, .brief),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            HStack(spacing: 10) {
+                ForEach(CoachColor.presets, id: \.hex) { preset in
+                    let on = coachHex.uppercased() == preset.hex
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(MyoTheme.Motion.fade) { coachHex = preset.hex }
+                    } label: {
+                        Circle()
+                            .fill(Color(hex: preset.hex))
+                            .frame(width: 34, height: 34)
+                            .overlay(Circle().stroke(MyoTheme.Colors.ink, lineWidth: on ? 2 : 0).padding(-4))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(preset.name)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            VStack(spacing: 8) {
+                ForEach(Self.styles, id: \.label) { style in
+                    let on = tone == style.tone.rawValue && tips == style.tips.rawValue
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        tone = style.tone.rawValue
+                        tips = style.tips.rawValue
+                    } label: {
+                        HStack {
+                            Text(style.label).font(.body.weight(.semibold))
+                                .foregroundStyle(MyoColor.Text.primary.color)
+                            Spacer()
+                            if on { Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(MyoTheme.Colors.coachAmber) }
+                        }
+                        .padding(.horizontal, MyoTheme.Spacing.lg)
+                        .frame(maxWidth: .infinity, minHeight: 46)
+                        .contentShape(RoundedRectangle(cornerRadius: 23))
+                        .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.3) : nil,
+                                  in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            DoneButton(title: "Looks good", enabled: true, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+}
+
+private struct DoneButton: View {
+    let title: String
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(MyoTheme.Colors.ink)
+                .frame(maxWidth: .infinity, minHeight: 52)
+                .contentShape(Capsule())
+                .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.4))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
     }
 }

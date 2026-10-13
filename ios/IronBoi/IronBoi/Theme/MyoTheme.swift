@@ -185,6 +185,21 @@ enum YouColor {
     ]
 }
 
+/// The coach's own color — its body. Amber unless you pick another.
+enum CoachColor {
+    static let storageKey = "coachColorHex"
+    static let defaultHex = "F6A609"
+
+    static let presets: [(name: String, hex: String)] = [
+        ("Amber", "F6A609"),
+        ("Coral", "F2734E"),
+        ("Rose", "E5638C"),
+        ("Lime", "8CC43C"),
+        ("Sky", "2BA6E8"),
+        ("Violet", "9B5CF0"),
+    ]
+}
+
 extension Color {
     /// From "RRGGBB" (a leading # is fine). Falls back to the default blue.
     init(hex: String) {

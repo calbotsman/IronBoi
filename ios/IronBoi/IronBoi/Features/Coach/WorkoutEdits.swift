@@ -64,6 +64,11 @@ enum WorkoutEdit: Equatable {
            let index = find(m[1]) {
             return .swap(index, to: cleanName(m[0]))
         }
+        // "Skip this", "skip this one", even "skip this workout": the lift
+        // you're on — never the whole session (that's "I'm done for today").
+        if let current, first(#"^(?:let's |lets |can we |can you |could we |i want to |i wanna |i'm gonna |gonna )?(?:skip|pass on|next) (?:this|it|that|this one|that one|this move|this exercise|this lift|this workout|this set)(?: one)?(?: please)?$"#) != nil {
+            return .skip(current)
+        }
         if let m = first(#"^(?:let's |lets |can we |can you |could you |could we |would you |i want to |i'm gonna |gonna )?(?:skip|drop|remove|cut|ditch|forget) (?:the )?(.+?)(?: today| for today| this time)?$"#),
            // "Forget it", "drop that" are about what was just said, not a lift.
            m[0].range(of: #"^(it|that|this|about it|about that)$"#, options: .regularExpression) == nil,
@@ -112,7 +117,7 @@ enum WorkoutEdit: Equatable {
     static func resolve(_ phrase: String, in exercises: [ActiveWorkoutExercise], current: Int?) -> Int? {
         let p = phrase.trimmingCharacters(in: .whitespaces)
         let open = exercises.indices.filter { !exercises[$0].exerciseDone }
-        if p.range(of: #"^(it|this|that|this one|that one|this exercise|this lift|the current one)$"#, options: .regularExpression) != nil {
+        if p.range(of: #"^(it|this|that|this one|that one|this exercise|this lift|this move|this workout|the current one)$"#, options: .regularExpression) != nil {
             return current
         }
         if p.range(of: #"^(the )?last( one| exercise| lift)?$"#, options: .regularExpression) != nil {
@@ -126,12 +131,33 @@ enum WorkoutEdit: Equatable {
         }
         let words = keyWords(p)
         guard !words.isEmpty else { return nil }
+        // Exact words count double; a near miss counts once — speech
+        // recognition hears "inverted row" as "inverter brow".
         var best: (index: Int, score: Int)?
         for (index, exercise) in exercises.enumerated() {
-            let score = keyWords(exercise.name).intersection(words).count
+            let name = keyWords(exercise.name)
+            let exact = name.intersection(words).count
+            let near = words.filter { word in !name.contains(word) && name.contains { close($0, word) } }.count
+            let score = exact * 2 + near
             if score > 0, score > (best?.score ?? 0) { best = (index, score) }
         }
         return best?.index
+    }
+
+    /// Within one edit for short words, two for longer ones ("brow"/"row",
+    /// "inverter"/"inverted").
+    private static func close(_ a: String, _ b: String) -> Bool {
+        guard min(a.count, b.count) >= 3, abs(a.count - b.count) <= 2 else { return false }
+        let x = Array(a), y = Array(b)
+        var previous = Array(0...y.count)
+        for i in 1...x.count {
+            var row = [i] + Array(repeating: 0, count: y.count)
+            for j in 1...y.count {
+                row[j] = min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1))
+            }
+            previous = row
+        }
+        return previous[y.count] <= (max(a.count, b.count) >= 6 ? 2 : 1)
     }
 
     /// The words that tell lifts apart: no equipment, no plurals, no filler.

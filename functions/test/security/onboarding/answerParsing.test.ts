@@ -34,3 +34,14 @@ describe("needsClearance", () => {
     expect(needsClearance("nothing")).toBe(false);
   });
 });
+
+describe("older app builds", () => {
+  it("still finish onboarding with the six answers they send", async () => {
+    // Covered end to end in sixQuestions.test.ts; here just the contract:
+    // sex, height and weight are optional on the server.
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("../../../src/onboarding/flow.ts", import.meta.url), "utf8");
+    const required = source.slice(source.indexOf("const REQUIRED_FIELDS"), source.indexOf("] as const;"));
+    for (const field of ["sexOrGender", "heightCm", "weightKg"]) expect(required).not.toContain(`"${field}"`);
+  });
+});

@@ -14,6 +14,7 @@ import { CoachMemoryFact } from "../contracts/coach-agent.js";
 import { recordAuditEventBestEffort } from "../audit/log.js";
 import { memoryFactPath, profilePath, userRoot } from "../paths.js";
 import { CATALOG_EQUIPMENT, suggestSwaps, type Equipment } from "../workouts/exerciseCatalog.js";
+import { catalogEquipment } from "../workouts/planFit.js";
 import {
   acceptLatestPlanAdjustmentFromChat,
   createClearOverridesProposalFromTool,
@@ -233,7 +234,17 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
         equipment: {
           type: "array",
           items: { type: "string" },
-          description: "Everything they have now, in their words ('kettlebells', 'dumbbells', 'full gym', 'bodyweight'). A full replacement list, not just what's new — include what they still have if they said so.",
+          description: "ONLY when they describe everything they have now ('I just have a full gym now'). Replaces the whole list.",
+        },
+        addEquipment: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gear they have that isn't on their profile yet ('I've got dumbbells too', 'I bought kettlebells'). Use this, not equipment, for anything they add.",
+        },
+        removeEquipment: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gear they no longer have ('I sold my barbell').",
         },
         preferredDays: {
           type: "array",
@@ -655,10 +666,15 @@ export function buildCoachToolRegistry(
         logToolValidationFailure(userId, "set_preferred_name", parsed.success ? [] : parsed.error.issues);
         return { ok: false, error: "invalid_name", hint: "Just the name, letters only, and never MYO." };
       }
-      // Only a name the user said this turn: the model may not invent one.
+      // Only a name the user plainly gave this turn ("I'm Josh", "call me
+      // J"). A bare word isn't enough: counting "one" came through as "Juan".
       const said = (context.rawUserText ?? "").toLowerCase();
-      if (!said.includes(name.toLowerCase())) {
-        return { ok: false, error: "name_not_in_message", hint: "Only save a name the user said in this message. Otherwise ask what they'd like to be called." };
+      const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const naming = new RegExp(
+        `\\b(my name is|my name's|name's|call me|i'm|i am|it's|this is|i go by|you can call me)\\s+${escaped}\\b`,
+      );
+      if (!naming.test(said)) {
+        return { ok: false, error: "name_not_in_message", hint: "Only save a name the user clearly gave this message ('I'm Josh', 'call me J'). Otherwise ask what they'd like to be called." };
       }
       await db.doc(profilePath(userId)).set(
         { preferredName: name, updatedAt: new Date().toISOString() },
@@ -759,7 +775,7 @@ export function buildCoachToolRegistry(
       }
       return rejectLatestPlanAdjustmentFromChat(db, userId);
     },
-    find_exercise_swaps: (rawArgs) => {
+    find_exercise_swaps: async (rawArgs) => {
       const { userId, ...args } = rawArgs;
       const parsed = FindExerciseSwapsArgs.safeParse(args);
       if (!parsed.success) {
@@ -779,9 +795,20 @@ export function buildCoachToolRegistry(
               (CATALOG_EQUIPMENT as readonly string[]).includes(item),
             );
 
+      // What they told us they have counts too: the model saying "just
+      // kettlebells" can't hide the dumbbells on their profile.
+      const saved = catalogEquipment((await db.doc(profilePath(userId)).get()).get("equipment"));
+      // An explicit empty list is a real answer ("I've got nothing with me
+      // today"): bodyweight only, profile or not.
+      const combined = available !== null && available.length === 0
+        ? available
+        : available === null || saved === null
+          ? (available === null ? saved : null)
+          : [...new Set([...available, ...saved])];
+
       const options = suggestSwaps({
         exerciseName: parsed.data.exerciseName,
-        availableEquipment: available,
+        availableEquipment: combined,
         limit: 6,
       });
 
@@ -793,7 +820,7 @@ export function buildCoachToolRegistry(
           ok: true,
           options: [],
           hint: `No catalog match for "${parsed.data.exerciseName}"${
-            available && available.length === 0 ? " with no equipment" : ""
+            combined && combined.length === 0 ? " with no equipment" : ""
           }. Do not invent a substitute — say you don't have a good swap for that movement, or ask what equipment they have.`,
         };
       }

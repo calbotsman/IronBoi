@@ -67,6 +67,14 @@ describe("updateTrainingSetup", () => {
     }
   });
 
+  it("'I've got dumbbells too' adds to what they have", async () => {
+    await db.doc(profilePath(USER_ID)).set({ equipment: ["kettlebells"] }, { merge: true });
+    await updateTrainingSetup(db, USER_ID, { addEquipment: ["dumbbells"] }, "coach");
+    expect((await db.doc(profilePath(USER_ID)).get()).get("equipment")).toEqual(["kettlebells", "dumbbells"]);
+    await updateTrainingSetup(db, USER_ID, { removeEquipment: ["kettlebell"] }, "coach");
+    expect((await db.doc(profilePath(USER_ID)).get()).get("equipment")).toEqual(["dumbbells"]);
+  });
+
   it("named days win, and the time is saved for the phone's reminders", async () => {
     const result = await updateTrainingSetup(
       db, USER_ID, { preferredDays: ["Fri", "Tue", "Sat"], preferredTime: "06:30" }, "user",

@@ -52,36 +52,45 @@ describe("six-question onboarding", () => {
     if (app && getApps().length && app.name !== "[DEFAULT]") await deleteApp(app);
   });
 
-  it("six spoken answers make a plan that fits dumbbells, a bench, and a beginner", async () => {
+  it("spoken answers make a plan that fits the gear they listed", async () => {
     expect((await say("I want to build muscle")).onboardingStep).toBe("trainingExperience");
-    expect((await say("beginner")).onboardingStep).toBe("equipment");
-    expect((await say("dumbbells and a bench at home")).onboardingStep).toBe("ageYears");
-    expect((await say("34")).onboardingStep).toBe("preferredDays");
-    expect((await say("Mondays, Wednesdays and Fridays at 6pm")).onboardingStep).toBe("injuriesOrLimitations");
+    // Not an answer: asked again, not quietly "new".
+    expect((await say("do a push-up")).onboardingStep).toBe("trainingExperience");
+    expect((await say("a little")).onboardingStep).toBe("equipment");
+    expect((await say("I'm gonna train at home. I have kettle bells I have dumbbells. I have a barbell for benching.")).onboardingStep)
+      .toBe("preferredDays");
+    expect((await say("Mondays, Wednesdays and Fridays at 6pm")).onboardingStep).toBe("ageYears");
+    // The "About you" card: all four in one answer.
+    clock += 1000;
+    const about = await processOnboardingAnswer(db, USER_ID, {
+      content: "34 · Non-binary · 5′10″ · 180 lb", timestamp: new Date(clock).toISOString(), inputMode: "tap",
+      structuredAnswer: { ageYears: 34, sexOrGender: "non_binary", heightCm: 178, weightKg: 81.6 },
+    }, seed.DEFAULT_PLAN);
+    expect(about.onboardingStep).toBe("injuriesOrLimitations");
     const done = await say("nothing hurts");
 
     expect(done.onboardingStatus).toBe("proposal_ready");
     const proposal = (done as unknown as { proposal: Proposal }).proposal;
     expect(proposal.profile.schedule).toMatchObject({ daysPerWeek: 3, preferredDays: ["Mon", "Wed", "Fri"] });
     expect(proposal.profile.preferences.preferredWorkoutTime).toBe("evening");
-    expect(proposal.profile.sexOrGender).toBe("prefer_not_to_say");
+    expect(proposal.profile.sexOrGender).toBe("non_binary");
+    expect((proposal.profile as unknown as { ageYears: number; heightCm: number; weightKg: number })).toMatchObject({ ageYears: 34, heightCm: 178 });
+    expect((proposal.profile as unknown as { equipment: string[] }).equipment).toEqual(["dumbbells", "kettlebells", "barbell", "bench"]);
 
     const days = proposal.workoutPlan.days;
     expect(Object.entries(days).filter(([, d]) => d.exercises.length > 0).map(([k]) => k)).toEqual(["Mon", "Wed", "Fri"]);
     for (const exercise of Object.values(days).flatMap((d) => d.exercises)) {
       const entry = lookupExercise(exercise.name);
-      expect(entry!.equipment.every((item) => ["none", "dumbbell", "bench"].includes(item)), exercise.name).toBe(true);
+      expect(entry!.equipment.every((item) => ["none", "dumbbell", "kettlebell", "barbell", "bench"].includes(item)), exercise.name).toBe(true);
     }
     const draft = (await db.doc(profilePath(USER_ID)).get()).get("onboardingDraft");
     expect(draft.preferredTime).toBe("18:00");
   });
 
   it("a doctor's limit becomes a clearance note and the gentlest plan", async () => {
-    await say("get stronger");
-    await say("intermediate");
-    await say("full gym");
-    await say("60+");
-    await say("tuesdays and thursdays");
+    for (const answer of ["get stronger", "intermediate", "full gym", "tuesdays and thursdays", "62"]) {
+      await say(answer);
+    }
     const done = await say("my doctor told me to take it easy");
 
     const proposal = (done as unknown as { proposal: Proposal }).proposal;
@@ -105,7 +114,7 @@ describe("changing an answer after the plan is drafted", () => {
   });
 
   it("retires the old draft so only one plan is ever pending", async () => {
-    for (const answer of ["build muscle", "beginner", "full gym", "30", "mon wed fri", "nothing"]) await say(answer);
+    for (const answer of ["build muscle", "beginner", "full gym", "mon wed fri", "30", "nothing"]) await say(answer);
     clock += 1000;
     await processOnboardingAnswer(
       db,

@@ -302,10 +302,33 @@ struct PreferencesView: View {
 
     @AppStorage(YouColor.storageKey) private var youHex = YouColor.defaultHex
 
+    @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
+
     private var youColorCard: some View {
         MyoGroupCard {
+            MyoSectionLabel(text: "Coach's color")
+            HStack(spacing: 10) {
+                ForEach(CoachColor.presets, id: \.hex) { preset in
+                    Button {
+                        withAnimation(MyoTheme.Motion.fade) { coachHex = preset.hex }
+                    } label: {
+                        Circle()
+                            .fill(Color(hex: preset.hex))
+                            .frame(width: 30, height: 30)
+                            .overlay(Circle().stroke(MyoTheme.Colors.ink, lineWidth: coachHex.uppercased() == preset.hex ? 2 : 0).padding(-4))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(preset.name)
+                    .accessibilityAddTraits(coachHex.uppercased() == preset.hex ? [.isSelected] : [])
+                }
+            }
+
+            MyoHairline().padding(.vertical, MyoTheme.Spacing.xs)
+
             MyoSectionLabel(text: "Your color")
-            Text("What your words turn Coach as they arrive. Coach stays warm.")
+            Text("What your words look like as they reach Coach.")
                 .font(.caption)
                 .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
 
