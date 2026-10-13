@@ -18,6 +18,8 @@ import {
   type TrendDirection,
 } from "../contracts/coach-agent.js";
 
+import { isTimedExercise } from "../workouts/exerciseCatalog.js";
+
 export const PROGRESS_WINDOW_DAYS = 42;
 const WEEKS_IN_WINDOW = PROGRESS_WINDOW_DAYS / 7; // 6 full buckets, no partial week
 const MAX_SERIES_POINTS = 8;
@@ -196,6 +198,8 @@ function logVolumeKg(log: Loose): number {
   let total = 0;
   for (const exercise of exercises) {
     if (!isRecord(exercise) || !Array.isArray(exercise.sets)) continue;
+    // A carry's "reps" are seconds: 40 s with 50 lb isn't 40 reps of volume.
+    if (isTimedExercise(exercise.name)) continue;
     for (const set of exercise.sets) {
       if (!isRecord(set)) continue;
       const reps = finiteNumber(set.reps);
@@ -238,7 +242,7 @@ function buildLifts(logs: WindowedLog[]) {
     for (const exercise of exercises) {
       if (!isRecord(exercise) || typeof exercise.name !== "string") continue;
       const displayName = exercise.name.trim();
-      if (!displayName) continue;
+      if (!displayName || isTimedExercise(displayName)) continue;
       const best = bestSetE1rm(exercise.sets);
       if (best === null) continue;
 

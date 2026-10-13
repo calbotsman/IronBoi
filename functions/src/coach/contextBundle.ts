@@ -2,6 +2,7 @@ import type { DocumentData } from "firebase-admin/firestore";
 import type { CoachLoadedContext } from "./context.js";
 import type { RetrievedCorpusEntry } from "../corpus/researchCorpus.js";
 import { progressionLabel } from "../workouts/progressionDefaults.js";
+import { isTimedExercise } from "../workouts/exerciseCatalog.js";
 
 export type CoachContextBundleV1 = {
   schema: "coach_context_bundle.v1";
@@ -257,7 +258,9 @@ function exerciseLine(exercise: unknown): string | null {
   const sets = numberValue(exercise.sets);
   const reps = numberValue(exercise.reps);
   const weight = numberValue(exercise.weight) ?? 0;
-  const scheme = sets !== undefined && reps !== undefined ? ` ${sets}x${reps}` : "";
+  // A hold or carry is done for time: "Plank 4x60s" (seconds), never 60 reps.
+  const unit = isTimedExercise(name) ? "s" : "";
+  const scheme = sets !== undefined && reps !== undefined ? ` ${sets}x${reps}${unit}` : "";
   const load = weight > 0 ? ` @${weight} lb` : " (bodyweight)";
   const progression = isPlainObject(exercise.progression)
     ? progressionLabel({

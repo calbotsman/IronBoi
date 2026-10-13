@@ -123,6 +123,10 @@ struct CoachStageView: View {
     /// down and the blob breathes slow until "go".
     @State private var restEndsAt: Date?
     @State private var restTask: Task<Void, Never>?
+    /// A timed hold in progress (a plank, a carry): when it started and ends.
+    @State private var holdStartedAt: Date?
+    @State private var holdEndsAt: Date?
+    @State private var holdTask: Task<Void, Never>?
     /// What Coach hadn't said yet when you cut in — offered back once the
     /// set is logged ("want the rest of what I was saying?").
     @State private var interruptedSpeech: String?
@@ -755,7 +759,15 @@ struct CoachStageView: View {
                     quickTap("Explain again", systemImage: "arrow.counterclockwise") {
                         introduce(exercise: index, first: false, replay: true)
                     }
-                    quickTap("Set done", systemImage: "checkmark") { handleTyped("set done") }
+                    if currentExercise.map({ ExerciseKnowledge.isTimed($0.name) }) == true {
+                        if holdEndsAt == nil {
+                            quickTap("Start hold", systemImage: "timer") { startHold() }
+                        } else {
+                            quickTap("Done", systemImage: "checkmark") { finishHold(early: true) }
+                        }
+                    } else {
+                        quickTap("Set done", systemImage: "checkmark") { handleTyped("set done") }
+                    }
                 } else {
                 if appModel.isNewToTraining {
                     quickTap("What should I expect?", systemImage: "questionmark") {
@@ -1140,6 +1152,10 @@ struct CoachStageView: View {
     }
 
     private var statusLine: String {
+        if let holdEndsAt, appModel.activeWorkout != nil {
+            let left = max(0, Int(holdEndsAt.timeIntervalSinceNow.rounded(.up)))
+            return String(format: "Hold · %d:%02d", left / 60, left % 60)
+        }
         if let restEndsAt, appModel.activeWorkout != nil {
             let left = max(0, Int(restEndsAt.timeIntervalSinceNow.rounded(.up)))
             return String(format: "Rest · %d:%02d", left / 60, left % 60)
@@ -1293,6 +1309,7 @@ struct CoachStageView: View {
             }
             return
         }
+        if appModel.activeWorkout != nil, handleHoldCommand(text) { return }
         if appModel.activeWorkout != nil, handleRestCommand(text) { return }
         if let choice = swapChoice, questionIsFresh, let pick = Self.pickSwap(text, from: choice.options) {
             chooseSwap(pick)
@@ -1446,6 +1463,8 @@ struct CoachStageView: View {
     /// Reaching the target logs the set; counting on raises its reps.
     private func trackReps(in transcript: String) {
         guard appModel.activeWorkout != nil else { return }
+        // A hold is timed, not counted: counting the seconds out loud isn't reps.
+        if let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) { return }
         // A fresh transcript (the recognizer restarted): continue from here.
         if transcript.isEmpty { countBase = repCount; return }
         guard voiceInput.isListening,
@@ -1583,6 +1602,88 @@ struct CoachStageView: View {
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
+    }
+
+    // MARK: - Timed holds (planks, carries)
+
+    /// "Go", "start", "ready" begin a hold; "done", "stop" end it early.
+    /// Only for an exercise done for time.
+    private func handleHoldCommand(_ text: String) -> Bool {
+        guard let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return false }
+        let t = text.lowercased()
+        func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        if holdEndsAt != nil {
+            guard says(#"\b(done|stop|finished|that's it|that's all|enough|can't|cannot|i'm out|im out)\b"#) else { return false }
+            finishHold(early: true)
+            return true
+        }
+        guard t.split(separator: " ").count <= 5,
+              says(#"\b(go|start|ready|begin|now|let's go|lets go|starting)\b"#) else { return false }
+        startHold()
+        return true
+    }
+
+    private func startHold() {
+        guard holdEndsAt == nil, let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return }
+        if restEndsAt != nil { cancelRest() }
+        let seconds = max(5, min(exercise.targetReps, 600))
+        let start = Date()
+        let ends = start.addingTimeInterval(TimeInterval(seconds))
+        holdStartedAt = start
+        holdEndsAt = ends
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        AudioHub.shared.play(cue: .tick)
+        if speaksReplies, tips != .quiet {
+            voice.speak("Go. \(seconds) seconds.", messageId: "local-\(UUID().uuidString)")
+        }
+        holdTask?.cancel()
+        holdTask = Task {
+            var saidHalfway = false
+            while !Task.isCancelled, holdEndsAt == ends {
+                let left = Int(ends.timeIntervalSinceNow.rounded(.up))
+                if left <= 0 {
+                    finishHold(early: false)
+                    return
+                }
+                if left <= 5 {
+                    // The last five, as ticks you can hear without looking.
+                    AudioHub.shared.play(cue: .tick)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } else if !saidHalfway, seconds >= 30, left == seconds / 2, tips == .full, speaksReplies, !voice.isSpeaking {
+                    saidHalfway = true
+                    voice.speak("Halfway. Breathe.", messageId: "local-\(UUID().uuidString)")
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    /// The hold's over, on time or early: the set is logged with the seconds
+    /// held, then rest.
+    private func finishHold(early: Bool) {
+        guard let started = holdStartedAt, let index = currentExerciseIndex, let exercise = currentExercise else {
+            cancelHold()
+            return
+        }
+        let target = max(5, min(exercise.targetReps, 600))
+        let held = early ? max(1, min(target, Int(Date().timeIntervalSince(started).rounded()))) : target
+        cancelHold()
+        guard let set = appModel.completeNextSet(exerciseIndex: index, reps: held) else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        AudioHub.shared.play(cue: .target)
+        let head = held < target ? "Set \(set): \(held) seconds." : "Set \(set) done."
+        var line = setDoneLine(head, exerciseIndex: index)
+        line += restLine(afterSetOn: index)
+        markRestartHandled()
+        voiceInput.stop()
+        confirm(line)
+    }
+
+    private func cancelHold() {
+        holdTask?.cancel()
+        holdTask = nil
+        holdEndsAt = nil
+        holdStartedAt = nil
     }
 
     // MARK: - Rest between sets
@@ -1884,6 +1985,7 @@ struct CoachStageView: View {
     private func workoutEnded() {
         endLesson()
         cancelRest()
+        cancelHold()
         swapChoice = nil
         let recap = appModel.consumeRecap()
         let opener = Self.finishLine(hype: tone == .hype, first: recap?.firstWorkout == true)
@@ -2154,7 +2256,11 @@ struct CoachStageView: View {
             let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
             let side = WorkoutVoice.isEachSide(exercise.name) ? " each side" : ""
-            lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(side)\(load).")
+            if ExerciseKnowledge.isTimed(exercise.name) {
+                lines.append("\(lead), \(exercise.name). \(exercise.targetSets) holds of \(exercise.targetReps) seconds\(side)\(load). Say go when you're set.")
+            } else {
+                lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(side)\(load).")
+            }
             cues.append(.hold(0))
         }
         if style == .full, let motion {

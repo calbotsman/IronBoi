@@ -235,6 +235,14 @@ describe("server catalog ↔ iOS ExerciseKnowledge drift", () => {
     expect(missing, "add these to ios ExerciseKnowledge.swift").toEqual([]);
   });
 
+  it("the timed exercises (holds and carries) agree between the catalog and iOS", () => {
+    const match = swift.match(/static let timed: Set<String> = \[([^\]]*)\]/);
+    expect(match, "ExerciseKnowledge.timed").not.toBeNull();
+    const ios = new Set(match![1].split(",").map((entry) => entry.trim().replace(/^"|"$/g, "")).filter(Boolean));
+    const server = new Set(allExercises().filter((entry) => entry.timed).map((entry) => entry.name));
+    expect([...ios].sort()).toEqual([...server].sort());
+  });
+
   it("muscle lists agree between the catalog and iOS", () => {
     const ios = parseSwiftEntries();
     for (const entry of allExercises()) {

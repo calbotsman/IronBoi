@@ -6,6 +6,17 @@ struct ExerciseKnowledge: Equatable {
     let cues: [String]
     let youtubeVideoId: String?
 
+    /// Done for time, not counted: a plan's reps for these are seconds.
+    /// Kept in step with the server catalog's `timed` (a test checks).
+    static let timed: Set<String> = ["Plank", "Side Plank", "Hollow Body Hold", "Wall Sit", "Superman Hold", "Sandbag Carry", "Farmer Carry", "Suitcase Carry"]
+
+    /// A hold or a carry: "Plank", "Weighted Plank", "Farmer Carry".
+    static func isTimed(_ exerciseName: String) -> Bool {
+        if timed.contains(exerciseName) { return true }
+        let lower = exerciseName.lowercased()
+        return timed.contains { lower.contains($0.lowercased()) }
+    }
+
     static func lookup(_ exerciseName: String) -> ExerciseKnowledge {
         database[exerciseName] ?? ExerciseKnowledge(
             primary: [],
