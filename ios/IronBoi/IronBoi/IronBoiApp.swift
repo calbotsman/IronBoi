@@ -44,6 +44,7 @@ struct IronBoiApp: App {
 
 struct AppRootView: View {
     @EnvironmentObject private var appModel: AppModel
+    @AppStorage(CoachSetup.pendingKey) private var coachSetupPending = false
 
     var body: some View {
         Group {
@@ -52,12 +53,21 @@ struct AppRootView: View {
                 PaperBackground().ignoresSafeArea()
             } else if appModel.user != nil && appModel.onboardingStatus != .complete {
                 OnboardingView()
+                    // Raised here so only people who go through onboarding
+                    // on this build meet the coach-setup sheet afterwards.
+                    .onAppear { coachSetupPending = true }
             } else {
                 // One screen: the coach. Plan, History and You live behind
                 // the profile icon in its corner.
                 CoachView()
                 .sheet(isPresented: $appModel.showProfile) {
                     PreferencesView()
+                }
+                .fullScreenCover(isPresented: Binding(
+                    get: { coachSetupPending && appModel.user != nil && !appModel.isPreviewSession },
+                    set: { if !$0 { coachSetupPending = false } }
+                )) {
+                    CoachSetupSheet { coachSetupPending = false }
                 }
             }
         }

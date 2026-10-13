@@ -423,11 +423,14 @@ final class AppModel: NSObject, ObservableObject {
                 "inputMode": spoken ? "live_voice" : "text",
                 // How you've asked Coach to talk ("no tips", "calm down").
                 "coachTips": UserDefaults.standard.string(forKey: CoachingStyle.tipsKey) ?? CoachingStyle.Tips.full.rawValue,
-                "coachTone": UserDefaults.standard.string(forKey: CoachingStyle.toneKey) ?? CoachingStyle.Tone.hype.rawValue,
                 // Local calendar date — a chat-driven "yes, just today" keys
                 // its override to the user's day, not the server timezone.
                 "clientDate": Self.currentDateISO(),
             ]
+            // Energy: steady is the default voice and isn't sent.
+            let tone = UserDefaults.standard.string(forKey: CoachingStyle.toneKey)
+                .flatMap(CoachingStyle.Tone.init(rawValue:)) ?? .hype
+            if let value = tone.serverValue { data["coachTone"] = value }
             // Mid-workout: the exercise you're on, so "this one" means it.
             if let live = liveWorkoutState(repsCounted: repsCounted) { data["liveWorkout"] = live }
             try await callCallable("sendCoachMessage", data: data)

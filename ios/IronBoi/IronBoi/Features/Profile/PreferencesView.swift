@@ -346,11 +346,23 @@ struct PreferencesView: View {
     // MARK: - Your colour
 
     @AppStorage(YouColor.storageKey) private var youHex = YouColor.defaultHex
+    @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
+    @AppStorage(CoachingStyle.toneKey) private var energyRaw = CoachingStyle.Tone.hype.rawValue
+    @AppStorage(CoachingStyle.tipsKey) private var tipsRaw = CoachingStyle.Tips.full.rawValue
+    @State private var showCoachCustomizer = false
+
+    private var personalityName: String {
+        CoachPersonality.matching(
+            delivery: draft.preferences.coachingTone,
+            energy: CoachingStyle.Tone(rawValue: energyRaw) ?? .hype,
+            tips: CoachingStyle.Tips(rawValue: tipsRaw) ?? .full
+        )?.name ?? "Custom"
+    }
 
     private var youColorCard: some View {
         MyoGroupCard {
             MyoSectionLabel(text: "Your color")
-            Text("What your words turn Coach as they arrive. Coach stays warm.")
+            Text("What your words turn Coach as they arrive.")
                 .font(.caption)
                 .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
 
@@ -358,7 +370,7 @@ struct PreferencesView: View {
                 // A little preview: Coach's body and one of your droplets.
                 ZStack(alignment: .bottomTrailing) {
                     Circle()
-                        .fill(RadialGradient(colors: [MyoTheme.Colors.cream, MyoTheme.Colors.coachAmber],
+                        .fill(RadialGradient(colors: [MyoTheme.Colors.cream, Color(hex: coachHex)],
                                              center: .center, startRadius: 2, endRadius: 30))
                         .frame(width: 52, height: 52)
                     Circle()
@@ -400,12 +412,29 @@ struct PreferencesView: View {
         MyoGroupCard {
             MyoSectionLabel(text: "Your coach")
 
-            MyoValueRow(label: "Tone") {
-                Picker("Tone", selection: $draft.preferences.coachingTone) {
-                    ForEach(CoachingTone.allCases) { Text($0.displayName).tag($0) }
+            Button { showCoachCustomizer = true } label: {
+                MyoValueRow(label: "Personality & look") {
+                    HStack(spacing: MyoTheme.Spacing.sm) {
+                        Text(personalityName)
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                        Circle()
+                            .fill(Color(hex: coachHex))
+                            .frame(width: 16, height: 16)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                    }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showCoachCustomizer) {
+                // Bound to the draft: the Save bar persists the tone, like
+                // every other field here. Energy, talk and colour save live.
+                CoachCustomizerView(context: .settings,
+                                    delivery: $draft.preferences.coachingTone) {
+                    showCoachCustomizer = false
+                }
             }
 
             MyoValueRow(label: "Live voice (beta)") {

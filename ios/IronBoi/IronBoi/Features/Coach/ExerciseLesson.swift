@@ -137,8 +137,13 @@ enum CoachingStyle {
         case quiet
     }
 
-    enum Tone: String {
-        case hype, calm
+    enum Tone: String, CaseIterable {
+        case calm, steady, hype
+
+        /// What goes to the server as `coachTone`. Steady is the coach's own
+        /// default voice, so nothing is sent (the backend only knows
+        /// hype/calm, and absent means default).
+        var serverValue: String? { self == .steady ? nil : rawValue }
     }
 
     static let tipsKey = "coachTips"
@@ -190,7 +195,7 @@ enum CoachingStyle {
         case .tips(.quiet), .hush: return nil
         case .tips(.brief): return "Got it. I'll keep it short."
         case .tips(.full): return "You got it. I'll coach you through it."
-        case .tone(.calm): return "Got it."
+        case .tone(.calm), .tone(.steady): return "Got it."
         case .tone(.hype): return "Let's go!"
         }
     }
@@ -207,6 +212,7 @@ enum CoachingStyle {
     static func praise(_ tone: Tone) -> String {
         switch tone {
         case .hype: return ["Let's go!", "Strong!", "That's it!", "Nice work!"].randomElement()!
+        case .steady: return ["Nice work.", "Good set.", "That's the one."].randomElement()!
         case .calm: return ["Nice.", "Good set.", "Solid."].randomElement()!
         }
     }
