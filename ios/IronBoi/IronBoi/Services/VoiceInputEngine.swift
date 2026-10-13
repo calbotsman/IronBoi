@@ -120,10 +120,20 @@ final class VoiceInputEngine: ObservableObject {
                 do {
                     try await start()
                 } catch {
-                    errorMessage = error.localizedDescription
-                    AudioHub.log("listen failed: \(error.localizedDescription)")
-                    stop()
-                    onFailure?()
+                    // Still refused: rebuild the audio from scratch, without
+                    // echo cancellation, and try a last time.
+                    AudioHub.log("listen failed again: \(error.localizedDescription) — rebuilding audio")
+                    AudioHub.shared.recover()
+                    removeTap()
+                    guard session == before else { return }
+                    do {
+                        try await start()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                        AudioHub.log("listen failed: \(error.localizedDescription)")
+                        stop()
+                        onFailure?()
+                    }
                 }
             }
         }

@@ -93,5 +93,7 @@ describe("live swaps in a workout", () => {
     expect(liveToolDeclarations().some((tool) => tool.name === "find_exercise_swaps")).toBe(true);
     const sent = CoachLiveToolRequest.safeParse({ name: "swap_workout_exercise", args: {}, turnId: "t1" });
     expect(sent.success).toBe(false);
+    expect(liveToolDeclarations().some((tool) => tool.name === "show_exercise")).toBe(true);
+    expect(CoachLiveToolRequest.safeParse({ name: "show_exercise", args: {}, turnId: "t1" }).success).toBe(false);
   });
 });

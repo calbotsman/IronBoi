@@ -15,11 +15,16 @@ final class AudioHub {
     private let cuePlayer = AVAudioPlayerNode()
     private lazy var tickBuffer = Self.tone([(1046, 0.06)], gain: 0.22)
     private lazy var targetBuffer = Self.tone([(880, 0.08), (1318, 0.12)], gain: 0.26)
+    /// The workout's done: a rising arpeggio.
+    private lazy var fanfareBuffer = Self.tone([(523, 0.09), (659, 0.09), (784, 0.09), (1046, 0.28)], gain: 0.28)
     /// Coach's audio format: Cloud TTS LINEAR16 at 24 kHz, mono.
     static let voiceFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
 
     private var configured = false
     private var engineStarted = false
+    /// The engine wouldn't start with echo cancellation on: leave it off
+    /// until the app restarts.
+    private var echoCancellationRefused = false
     private var sessionActive = false
     private(set) var echoCancelling = false
     /// Headphones (wired or Bluetooth) are connected. Tracked separately
@@ -139,7 +144,7 @@ final class AudioHub {
         // run with Bluetooth headphones — iOS pulls the audio off them onto
         // the speaker — and with headphones the mic can't hear Coach
         // anyway. With music playing it fights the other app's audio.
-        let wanted = !headphonesConnected && !session.isOtherAudioPlaying
+        let wanted = !echoCancellationRefused && !headphonesConnected && !session.isOtherAudioPlaying
         if (reconfigure || !engineStarted), wanted != engine.inputNode.isVoiceProcessingEnabled, !player.isPlaying {
             if engine.isRunning { engine.stop() }
             do {
@@ -240,13 +245,19 @@ final class AudioHub {
         player.stop()
     }
 
-    enum Cue { case tick, target }
+    enum Cue { case tick, target, fanfare }
 
     /// A rep was heard (tick) or the set reached its target (two notes).
     /// Plays over Coach's voice and your music; silent if the engine is
     /// down, which only happens outside a conversation.
     func play(cue: Cue) {
-        guard engine.isRunning, let buffer = cue == .tick ? tickBuffer : targetBuffer else { return }
+        let chosen: AVAudioPCMBuffer?
+        switch cue {
+        case .tick: chosen = tickBuffer
+        case .target: chosen = targetBuffer
+        case .fanfare: chosen = fanfareBuffer
+        }
+        guard engine.isRunning, let buffer = chosen else { return }
         cuePlayer.scheduleBuffer(buffer, at: nil, options: .interrupts)
         if !cuePlayer.isPlaying { cuePlayer.play() }
     }
@@ -271,6 +282,22 @@ final class AudioHub {
         }
         buffer.frameLength = AVAudioFrameCount(i)
         return buffer
+    }
+
+    /// The mic wouldn't open twice running (avfaudio -50: echo cancellation
+    /// and the mic's format disagreeing after live voice or a route
+    /// change). Rebuild the engine without echo cancellation, which always
+    /// starts; you just can't talk over Coach on the speaker.
+    func recover() {
+        Self.log("recover: rebuilding audio without echo cancellation")
+        player.stop()
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        try? engine.inputNode.setVoiceProcessingEnabled(false)
+        echoCancellationRefused = true
+        echoCancelling = false
+        engine.reset()
+        NotificationCenter.default.post(name: Self.resetNotification, object: nil)
     }
 
     /// Lets the mic indicator go out when the conversation is over, and

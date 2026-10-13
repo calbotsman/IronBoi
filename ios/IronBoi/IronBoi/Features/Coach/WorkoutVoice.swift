@@ -132,13 +132,17 @@ enum WorkoutVoice {
     /// (`tail`), so "okay, let's go — one, two, three" still counts: the
     /// recogniser keeps everything since the mic last restarted, and one
     /// leading phrase must not poison a whole set.
-    static func looksLikeCounting(_ transcript: String, tail: Int = 4) -> Bool {
+    /// `running`: a count is already going. Then one stray word between
+    /// numbers ("seven, oh god, eight") can't stall it: the last word being a
+    /// number, or half the tail, is enough.
+    static func looksLikeCounting(_ transcript: String, tail: Int = 4, running: Bool = false) -> Bool {
         let words = Array(tokens(transcript).suffix(tail))
         guard !words.isEmpty else { return false }
+        if running, let last = words.last, isNumberWord(last) { return true }
         let filler: Set<String> = ["and", "done", "finished", "set", "that's", "it", "last", "the", "got", "rep", "reps",
                                    "okay", "ok", "uh", "um", "come", "on", "more"]
         let counted = words.filter { Int($0) != nil || numberWords[$0] != nil || soundAlikes[$0] != nil || filler.contains($0) }
-        return Double(counted.count) / Double(words.count) >= 0.75
+        return Double(counted.count) / Double(words.count) >= (running ? 0.5 : 0.75)
     }
 
     /// A word that means "stop and listen to me" when Coach is talking and
@@ -147,7 +151,16 @@ enum WorkoutVoice {
     /// being called done once a count is running.
     static func cutsIn(_ transcript: String, repCount: Int, countBase: Int) -> Bool {
         if repCount > 0, saysSetDone(transcript) { return true }
-        return looksLikeCounting(transcript) && self.repCount(in: transcript, from: countBase) > repCount
+        return looksLikeCounting(transcript, running: repCount > 0)
+            && self.repCount(in: transcript, from: countBase) > repCount
+    }
+
+    /// A lift done one side at a time, counted to the target on each side:
+    /// "single-arm row", "Bulgarian split squat", "side plank".
+    static func isEachSide(_ name: String) -> Bool {
+        name.lowercased().range(
+            of: #"\b(single|one)[- ]?(arm|leg|side)|each (side|arm|leg)|per (side|arm|leg)|unilateral|split squat|bulgarian|step[- ]?ups?|suitcase|side plank|pistol|cossack|\b(left|right) and (left|right)"#,
+            options: .regularExpression) != nil
     }
 
     /// Is this word a number or something that sounds like one.

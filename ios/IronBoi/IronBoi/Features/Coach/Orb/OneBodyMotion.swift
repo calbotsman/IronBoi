@@ -16,6 +16,8 @@ enum BodyMove: String, CaseIterable {
     case plank
     case squats
     case lunges
+    /// The workout's done: a big cheer, a hop, a fist pump.
+    case celebrate
 
     var name: String {
         switch self {
@@ -23,6 +25,7 @@ enum BodyMove: String, CaseIterable {
         case .plank: return "Plank"
         case .squats: return "Squats"
         case .lunges: return "Lunges"
+        case .celebrate: return "Celebrate"
         }
     }
 
@@ -40,6 +43,7 @@ enum BodyMove: String, CaseIterable {
         case .pushups: return OneBodyMotion.pushupDuration
         case .plank: return OneBodyMotion.plankDuration
         case .squats, .lunges: return OneBodyMotion.liftDuration(lift!)
+        case .celebrate: return OneBodyMotion.celebrateDuration
         }
     }
 
@@ -49,6 +53,7 @@ enum BodyMove: String, CaseIterable {
         case .plank: return OneBodyMotion.plankFrame(t, reducedMotion: reducedMotion)
         case .squats, .lunges:
             return OneBodyMotion.liftFrame(lift!, name: name, t, reducedMotion: reducedMotion)
+        case .celebrate: return OneBodyMotion.celebrateFrame(t, reducedMotion: reducedMotion)
         }
     }
 }
@@ -286,6 +291,23 @@ enum OneBodyMotion {
             return pose
         }
         return BodyPose(joints: standing(t), form: form, side: 0, label: "Back to a blob")
+    }
+
+    /// Arms up in a V with hops, again bigger, then a double fist pump —
+    /// the end of a workout, not just a set.
+    static let celebrateDuration: Float = 1.0 + WorkoutLife.cheerSeconds * 3 + 1.2
+    static func celebrateFrame(_ t: Float, reducedMotion: Bool) -> BodyPose {
+        let total = celebrateDuration
+        let form = smooth(t / 0.8) * (1 - smooth((t - (total - 1.2)) / 1.0))
+        if reducedMotion || t < 0.6 {
+            return BodyPose(joints: standing(t), form: form, side: 0, label: "Done!")
+        }
+        let beat = (t - 0.6) / WorkoutLife.cheerSeconds
+        let style = [0, 0, 1][min(2, Int(beat))]
+        var pose = WorkoutLife.cheer(at: (t - 0.6).truncatingRemainder(dividingBy: WorkoutLife.cheerSeconds), style: style)
+        pose.form = form
+        pose.label = "Done!"
+        return pose
     }
 
     /// The push-up's way in and out, with an eight-second breathing hold.

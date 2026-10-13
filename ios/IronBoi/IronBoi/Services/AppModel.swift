@@ -393,6 +393,7 @@ final class AppModel: NSObject, ObservableObject {
                 // Swapping a lift mid-workout happens here, on the phone that
                 // holds the session — no review card, no weight to ask for.
                 if name == "swap_workout_exercise" { return await self.liveSwap(args) }
+                if name == "show_exercise" { return self.liveShow(args) }
                 guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
                 let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
                     "name": name,
@@ -784,6 +785,25 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
         sessionChanges.append("Added \(name), \(sets)×\(reps)\(weight > 0 ? " at \(Self.poundsText(weight)) lb" : "")")
         return index
+    }
+
+    /// The live coach asked the body to demonstrate a lift.
+    struct ShowRequest: Equatable {
+        let id = UUID()
+        let name: String
+    }
+    @Published var showExerciseRequest: ShowRequest?
+
+    func liveShow(_ args: [String: Any]) -> [String: Any] {
+        let current = currentExerciseIndex.flatMap { activeWorkout?.exercises[$0].name }
+        guard let name = (args["exerciseName"] as? String).flatMap({ $0.isEmpty ? nil : $0 }) ?? current else {
+            return ["ok": false, "error": "which_exercise"]
+        }
+        guard ExerciseMotion.match(name) != nil else {
+            return ["ok": false, "error": "no_demo_for_this_one", "hint": "Describe it in words instead."]
+        }
+        showExerciseRequest = ShowRequest(name: name)
+        return ["ok": true, "showing": name]
     }
 
     /// The live coach's swap: `replacementName` in for `exerciseName` (or the

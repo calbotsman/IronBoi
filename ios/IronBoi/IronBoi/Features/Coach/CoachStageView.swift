@@ -111,6 +111,9 @@ struct CoachStageView: View {
     /// itself — the timeout handler shouldn't also restart it.
     @State private var restartHandledLocally = false
     @State private var restartMarks = 0
+    /// One side of an each-side lift counted to target: its reps, while the
+    /// other side is counted from one.
+    @State private var firstSide: Int?
     /// The count reached before the current transcript began; counting
     /// carries across the recognizer's restarts.
     @State private var countBase = 0
@@ -183,6 +186,13 @@ struct CoachStageView: View {
     private static let space = "coachStage"
     @Namespace private var cardSpace
 
+    /// The stage, demonstrating a lift when the live coach asks to show it.
+    private var stageShowingOnRequest: some View {
+        stage.onChange(of: appModel.showExerciseRequest) { _, request in
+            if let request { demo(request.name) }
+        }
+    }
+
     #if DEBUG
     /// MYO_LIFT=squat (any exercise name): demonstrate it on a loop, to tune
     /// the movement without starting a workout.
@@ -198,7 +208,7 @@ struct CoachStageView: View {
     #endif
 
     var body: some View {
-        stage
+        stageShowingOnRequest
         #if DEBUG
         .overlay(alignment: .topTrailing) {
             if ProcessInfo.processInfo.environment["MYO_TUNER"] == "1" { OrbPhysicsTuner() }
@@ -658,7 +668,7 @@ struct CoachStageView: View {
                     .animation(.easeOut(duration: 0.15), value: repCount)
                 Text(repCount > exercise.targetReps
                      ? "\(repCount - exercise.targetReps) past \(exercise.targetReps)"
-                     : "of \(exercise.targetReps) · \(exercise.name)")
+                     : "of \(exercise.targetReps)\(firstSide != nil ? " · second side" : "") · \(exercise.name)")
                     .myoStyle(.label)
                     .textCase(.uppercase)
                     .foregroundStyle(MyoColor.Text.tertiary.color)
@@ -1447,7 +1457,7 @@ struct CoachStageView: View {
             return
         }
         // "Add curls, 3 by 12" isn't counting, even though "12" reads as 1, 2.
-        guard WorkoutVoice.looksLikeCounting(transcript) else { return }
+        guard WorkoutVoice.looksLikeCounting(transcript, running: repCount > 0) else { return }
         let count = WorkoutVoice.repCount(in: transcript, from: countBase)
         guard count > repCount else { return }
         AudioHub.log("count \(repCount) → \(count) (heard: \(transcript.suffix(40)))")
@@ -1466,6 +1476,9 @@ struct CoachStageView: View {
         AudioHub.shared.play(cue: countedSet == nil && count >= exercise.targetReps ? .target : .tick)
         if let done = countedSet {
             appModel.updateSetReps(exerciseIndex: done.exercise, setNumber: done.set, reps: count)
+        } else if count >= exercise.targetReps, firstSide == nil, WorkoutVoice.isEachSide(exercise.name) {
+            switchSides(at: count)
+            return
         } else if count >= exercise.targetReps,
                   let set = appModel.completeNextSet(exerciseIndex: index, reps: count) {
             countedSet = (index, set)
@@ -1482,12 +1495,42 @@ struct CoachStageView: View {
         }
     }
 
+    /// One side done on an each-side lift: count the other from one. If the
+    /// other side never comes, the set is logged with the first side's reps.
+    private func switchSides(at count: Int) {
+        firstSide = count
+        repCount = 0
+        countBase = 0
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        show(notice: "Other side")
+        closeCountTask?.cancel()
+        closeCountTask = Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            if !Task.isCancelled, repCount == 0 { finishCount() }
+        }
+        // A fresh transcript, so the other side's "one" counts as one.
+        markRestartHandled()
+        voiceInput.stop()
+        if live.isActive || tips == .quiet || !speaksReplies {
+            // The live coach is held quiet for the whole set: a tone says it.
+            resumeListening()
+        } else {
+            voice.speak("Other side.", messageId: "local-\(UUID().uuidString)")
+        }
+    }
+
     /// The count is over: the set is logged with the reps actually done —
     /// fewer, exact, or more than the target — and Coach says so briefly.
     /// A stray "one" or "two" that never became a set is dropped.
     private func finishCount() {
         closeCountTask?.cancel()
         closeCountTask = nil
+        // An each-side lift: the set is the fewer of the two sides, or the
+        // first side alone if the second was never counted.
+        if let side = firstSide {
+            repCount = repCount >= 3 ? min(side, repCount) : side
+            firstSide = nil
+        }
         let finalCount = repCount
         let alreadyLogged = countedSet
         let countedIndex = alreadyLogged?.exercise ?? currentExerciseIndex
@@ -1843,7 +1886,13 @@ struct CoachStageView: View {
         cancelRest()
         swapChoice = nil
         let recap = appModel.consumeRecap()
-        let opener = tone == .hype ? "Great work!" : "Nice work."
+        let opener = Self.finishLine(hype: tone == .hype, first: recap?.firstWorkout == true)
+        // Make it feel like a finish: the body cheers, a chime, a buzz.
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        director.rest()
+        director.perform(.celebrate)
+        try? AudioHub.shared.start()
+        AudioHub.shared.play(cue: .fanfare)
         let said = ([opener] + (recap?.lines ?? [])).joined(separator: " ")
         if recap != nil { show(notice: recap?.lines.first ?? opener) }
         if !appModel.pendingSessionChanges.isEmpty, conversationActive {
@@ -1862,6 +1911,20 @@ struct CoachStageView: View {
                 voice.speak(said + " How did that feel?", messageId: "local-\(UUID().uuidString)")
             }
         }
+    }
+
+    /// The first thing said when a workout ends: a proper finish.
+    private static func finishLine(hype: Bool, first: Bool) -> String {
+        if first {
+            return hype
+                ? "That's your first MYO workout, done! The first one's the hardest, and you nailed it."
+                : "That's your first MYO workout done. The first one's the hardest. Well done."
+        }
+        return (hype
+            ? ["That's a wrap! You crushed it.", "Done! That was a strong session.", "Workout complete! Huge effort today.",
+               "And that's the workout! Proud of you."]
+            : ["That's the workout. Well done.", "All done. Good, steady work today.", "Finished. That was solid work."])
+            .randomElement()!
     }
 
     // MARK: - After the workout
@@ -2090,7 +2153,8 @@ struct CoachStageView: View {
             let weight = appModel.workingWeight(for: exercise)
             let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
-            lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(load).")
+            let side = WorkoutVoice.isEachSide(exercise.name) ? " each side" : ""
+            lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(side)\(load).")
             cues.append(.hold(0))
         }
         if style == .full, let motion {

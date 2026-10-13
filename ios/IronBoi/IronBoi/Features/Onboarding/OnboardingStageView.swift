@@ -535,6 +535,13 @@ struct OnboardingStageView: View {
             if voiced, chips["voice"] == nil { chips["voice"] = CoachVoiceOption.label(voiceName) }
         }
         if let days = draft["preferredDays"] as? [String], !days.isEmpty { self.days = Set(days) }
+        // The time you picked ("06:00"), not the 6 PM the picker starts on.
+        if let saved = draft["preferredTime"] as? String {
+            let parts = saved.split(separator: ":").compactMap { Int($0) }
+            if parts.count == 2, let picked = Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date()) {
+                time = picked
+            }
+        }
         if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
         about.adopt(draft)
         syncStep()
