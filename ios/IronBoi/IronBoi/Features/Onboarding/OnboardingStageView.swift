@@ -45,6 +45,7 @@ struct OnboardingStageView: View {
     @State private var days: Set<String> = ["Mon", "Wed", "Fri"]
     @State private var gear: Set<String> = []
     @State private var about = AboutYou()
+    @State private var safety = SafetyAnswers()
     @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
     @AppStorage(CoachingStyle.toneKey) private var toneSetting = CoachingStyle.Tone.hype.rawValue
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
@@ -54,6 +55,11 @@ struct OnboardingStageView: View {
     @State private var time = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
 
     private var isWeek: Bool { stepIndex >= Step.all.count }
+    /// The health screen says a doctor first: no plan until they're cleared.
+    private var showsClearance: Bool {
+        appModel.onboardingMissingFields.first == "medicalClearance" && inFlight == 0
+            && chips["injuriesOrLimitations"] != nil
+    }
     private var step: Step? { isWeek ? nil : Step.all[stepIndex] }
 
     private var phase: OrbPhase {
@@ -324,6 +330,7 @@ struct OnboardingStageView: View {
     private var captionText: String {
         if voiceInput.isListening { return voiceInput.transcript.isEmpty ? " " : voiceInput.transcript }
         if let notice { return notice }
+        if showsClearance { return "Before we start, please check with a doctor." }
         if isWeek {
             return appModel.pendingProgramProposal == nil ? "Putting your week together…" : "Here's your week."
         }
@@ -334,7 +341,19 @@ struct OnboardingStageView: View {
 
     @ViewBuilder
     private var card: some View {
-        if isWeek {
+        if showsClearance {
+            ClearanceCard(reasons: appModel.onboardingDraft["screenReasons"] as? [String] ?? []) {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                notice = nil
+                enqueue("My doctor cleared me", structured: ["medicalClearance": "cleared"], mode: .tap)
+            } onChange: {
+                if let index = Step.all.firstIndex(where: { $0.field == "injuriesOrLimitations" }) { change(index) }
+            }
+            .onAppear {
+                lastSpokenStep = nil
+                speak("Before we start, please check with a doctor. When they've cleared you, tap My doctor cleared me.")
+            }
+        } else if isWeek {
             if let proposal = appModel.pendingProgramProposal {
                 WeekCard(proposal: proposal, busy: appModel.isOnboardingBusy || inFlight > 0) {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -357,6 +376,10 @@ struct OnboardingStageView: View {
                     let list = GearCard.options.filter { gear.contains($0.key) }
                     answer(["equipment": list.map(\.key)], chip: list.map(\.label).joined(separator: " · "),
                            content: list.map(\.label).joined(separator: ", "))
+                }
+            case .safety:
+                SafetyCard(answers: $safety) {
+                    answer(safety.answer, chip: safety.chip, content: safety.chip)
                 }
             case .aboutYou:
                 AboutYouCard(about: $about) {
@@ -457,6 +480,10 @@ struct OnboardingStageView: View {
             notice = "Tap your pick below."
             return
         }
+        if case .safety = step.kind {
+            notice = "Tap your answers below, so nothing gets misheard."
+            return
+        }
         voice.stop()
         notice = nil
         awaitingParse = step.field
@@ -544,6 +571,7 @@ struct OnboardingStageView: View {
         }
         if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
         about.adopt(draft)
+        safety.adopt(draft)
         syncStep()
     }
 
@@ -654,6 +682,7 @@ private struct Step {
         case schedule
         case gear
         case aboutYou
+        case safety
         case customize
         case voice
     }
@@ -691,6 +720,10 @@ private struct Step {
         switch kind {
         case .customize, .voice:
             return nil
+        case .safety:
+            guard draft["healthScreen"] != nil || value is [Any] else { return nil }
+            let limits = (draft["injuriesOrLimitations"] as? [String]) ?? []
+            return limits.filter { $0 != "none" }.isEmpty ? "All clear" : "Health notes"
         case .gear:
             guard let list = value as? [String], !list.isEmpty else { return nil }
             return list.map { item in GearCard.options.first { $0.key == item }?.label ?? item.capitalized }
@@ -742,14 +775,8 @@ private struct Step {
         Step(field: "preferredDays", question: "Which days work, and what time?", kind: .schedule),
         Step(field: "ageYears", question: "A bit about you.", kind: .aboutYou),
         Step(field: "injuriesOrLimitations",
-             question: "Does anything hurt, or has a doctor told you to limit exercise?",
-             kind: .choices([
-                Option(label: "All good", chip: "No limits", answer: ["injuriesOrLimitations": ["none"]]),
-                Option(label: "Something hurts", chip: "Something hurts", answer: [:],
-                       asksForWords: "Tell me where, and what makes it worse."),
-                Option(label: "A doctor's limit, or chest pain, dizziness or fainting when active",
-                       chip: "Doctor's limit", answer: ["injuriesOrLimitations": ["doctor advised limit"]]),
-             ])),
+             question: "A few health questions, so I keep you safe.",
+             kind: .safety),
         Step(field: "customize", question: "Now make me yours. Pick my color.", kind: .customize),
         Step(field: "voice", question: "Last thing: how should I sound, and how should I coach you?", kind: .voice),
     ]
@@ -1047,7 +1074,8 @@ private struct AboutYouCard: View {
             HStack(spacing: MyoTheme.Spacing.sm) {
                 pickerPill("Age", value: "\(about.age)") {
                     Picker("Age", selection: $about.age) {
-                        ForEach(13...90, id: \.self) { Text("\($0)").tag($0) }
+                        // MYO is for adults for now.
+                        ForEach(18...90, id: \.self) { Text("\($0)").tag($0) }
                     }
                 }
                 pickerPill("Height", value: about.heightLabel) {
@@ -1109,6 +1137,9 @@ private struct AboutYouCard: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(MyoColor.Text.secondary.color)
                 Spacer()
+                Text("MYO is for adults, 18 and up")
+                    .font(.caption)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
             }
             DoneButton(title: "That's me", enabled: about.sex != nil, action: onDone)
         }
@@ -1199,6 +1230,188 @@ private struct VoiceCard: View {
                 }
             }
             DoneButton(title: "Sounds good", enabled: true, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+}
+
+/// The health screen's answers (functions/src/onboarding/healthScreen.ts
+/// decides what they mean).
+private struct SafetyAnswers {
+    var activeNow: String?
+    var conditions: Set<String> = []
+    var noneOfThese = false
+    var symptoms: Bool?
+    var pregnancyContraindication: Bool?
+    var hurts: Bool?
+    var pain = ""
+
+    static let activity: [(key: String, label: String)] = [
+        ("regular", "Most weeks"), ("some", "Sometimes"), ("none", "Not really"),
+    ]
+    static let conditionOptions: [(key: String, label: String)] = [
+        ("heart", "Heart condition"), ("high_blood_pressure", "High blood pressure"), ("diabetes", "Diabetes"),
+        ("kidney", "Kidney disease"), ("lung", "Lung condition, like asthma"), ("pregnant", "Pregnant"),
+        ("postpartum", "Had a baby this year"), ("surgery", "Surgery this year"), ("osteoporosis", "Osteoporosis"),
+        ("glaucoma", "Glaucoma"), ("falls", "A fall, or feeling unsteady"),
+    ]
+
+    var complete: Bool {
+        activeNow != nil && (noneOfThese || !conditions.isEmpty) && symptoms != nil && hurts != nil
+            && (!conditions.contains("pregnant") || pregnancyContraindication != nil)
+            && (hurts == false || !pain.trimmingCharacters(in: .whitespaces).isEmpty)
+    }
+
+    var answer: [String: Any] {
+        var screen: [String: Any] = [
+            "activeNow": activeNow ?? "none",
+            "conditions": Array(conditions).sorted(),
+            "symptoms": symptoms ?? false,
+        ]
+        if conditions.contains("pregnant") { screen["pregnancyContraindication"] = pregnancyContraindication ?? false }
+        let pain = pain.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["healthScreen": screen, "injuriesOrLimitations": hurts == true && !pain.isEmpty ? [pain] : ["none"]]
+    }
+
+    var chip: String {
+        conditions.isEmpty && symptoms != true && hurts != true ? "All clear" : "Health notes"
+    }
+
+    /// What the server already has (going back to change an answer).
+    mutating func adopt(_ draft: [String: Any]) {
+        guard let screen = draft["healthScreen"] as? [String: Any] else { return }
+        activeNow = screen["activeNow"] as? String
+        conditions = Set(screen["conditions"] as? [String] ?? [])
+        noneOfThese = conditions.isEmpty
+        symptoms = screen["symptoms"] as? Bool
+        pregnancyContraindication = screen["pregnancyContraindication"] as? Bool
+        let limits = (draft["injuriesOrLimitations"] as? [String]) ?? []
+        let own = limits.first { !$0.contains(":") && $0 != "none" && !$0.hasPrefix("Keep effort") }
+        hurts = own != nil
+        pain = own ?? ""
+    }
+}
+
+/// How active you are, conditions, symptoms, pain: all taps, nothing misheard.
+private struct SafetyCard: View {
+    @Binding var answers: SafetyAnswers
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+                    section("Do you exercise now, 30 minutes on 3 or more days a week?") {
+                        HStack(spacing: 8) {
+                            ForEach(SafetyAnswers.activity, id: \.key) { option in
+                                pill(option.label, on: answers.activeNow == option.key) { answers.activeNow = option.key }
+                            }
+                        }
+                    }
+                    section("Do any of these apply to you?") {
+                        FlowRow(spacing: 8) {
+                            ForEach(SafetyAnswers.conditionOptions, id: \.key) { option in
+                                pill(option.label, on: answers.conditions.contains(option.key)) {
+                                    if answers.conditions.contains(option.key) {
+                                        answers.conditions.remove(option.key)
+                                    } else {
+                                        answers.conditions.insert(option.key)
+                                        answers.noneOfThese = false
+                                    }
+                                }
+                            }
+                            pill("None of these", on: answers.noneOfThese) {
+                                answers.noneOfThese.toggle()
+                                if answers.noneOfThese { answers.conditions = [] }
+                            }
+                        }
+                        if answers.conditions.contains("pregnant") {
+                            Text("Has a doctor told you not to exercise, or do you have placenta previa, preeclampsia, a cerclage, or a risk of early labor?")
+                                .font(.footnote)
+                                .foregroundStyle(MyoColor.Text.secondary.color)
+                                .fixedSize(horizontal: false, vertical: true)
+                            yesNo(answers.pregnancyContraindication) { answers.pregnancyContraindication = $0 }
+                        }
+                    }
+                    section("When you're active, do you ever get chest pain, unusual shortness of breath, dizziness or fainting, or a racing heartbeat?") {
+                        yesNo(answers.symptoms) { answers.symptoms = $0 }
+                    }
+                    section("Does anything hurt right now?") {
+                        yesNo(answers.hurts) { answers.hurts = $0 }
+                        if answers.hurts == true {
+                            TextField("Where, and what makes it worse?", text: $answers.pain, axis: .vertical)
+                                .font(.body)
+                                .padding(MyoTheme.Spacing.sm)
+                                .myoGlass(in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 360)
+            DoneButton(title: "That's everything", enabled: answers.complete, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+
+    private func section<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.primary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            content()
+        }
+    }
+
+    private func yesNo(_ value: Bool?, set: @escaping (Bool) -> Void) -> some View {
+        HStack(spacing: 8) {
+            pill("No", on: value == false) { set(false) }
+            pill("Yes", on: value == true) { set(true) }
+        }
+    }
+
+    private func pill(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 40)
+                .contentShape(Capsule())
+                .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+/// A doctor first: why, and the way on once they're cleared.
+private struct ClearanceCard: View {
+    let reasons: [String]
+    let onCleared: () -> Void
+    let onChange: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            Text(reasons.isEmpty
+                 ? "Based on your answers, a doctor should say it's OK before you start. That's what a good coach would tell you too."
+                 : "Because of \(reasons.joined(separator: ", and ")), a doctor should say it's OK before you start. That's what a good coach would tell you too.")
+                .font(.body)
+                .foregroundStyle(MyoColor.Text.primary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("When they've cleared you, I'll start you gently and build up.")
+                .font(.footnote)
+                .foregroundStyle(MyoColor.Text.secondary.color)
+            DoneButton(title: "My doctor cleared me", enabled: true, action: onCleared)
+            Button("Change my answers", action: onChange)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+                .frame(maxWidth: .infinity)
         }
         .padding(MyoTheme.Spacing.lg)
         .myoCard()

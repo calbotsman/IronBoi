@@ -26,6 +26,7 @@ import { canonicalEquipment, fitPlanToUser } from "../workouts/planFit.js";
 import { trainingDaysPerWeek, welcomeMessage } from "../journey/recap.js";
 import { writeGeneralCoachMessage } from "../journey/messages.js";
 import { safeLogger } from "../logging/safeLogger.js";
+import { ALL_SCREEN_NOTES, MODERATE_NOTE, readHealthScreen, screenOutcome } from "./healthScreen.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -72,6 +73,8 @@ const QUESTIONS: Record<string, string> = {
   weightKg: "And roughly what do you weigh?",
   preferredDays: "Which days work, and what time?",
   injuriesOrLimitations: "Last one: does anything hurt, or has a doctor told you to limit exercise?",
+  medicalClearance:
+    "Before we start, please check with a doctor. When they've cleared you to exercise, tell me and I'll build your first week.",
 };
 
 /**
@@ -300,7 +303,7 @@ async function welcomeToCoach(db: Firestore, userId: string, proposalId: string,
       name: typeof name === "string" && name.length > 0 ? name : undefined,
       daysPerWeek: trainingDaysPerWeek(planSnap.get("days")),
       returning: !logsSnap.empty,
-      clearanceAdvised: Array.isArray(limits) && limits.includes(CLEARANCE_NOTE),
+      clearanceAdvised: startsGently(limits),
     });
     await writeGeneralCoachMessage(db, userId, `welcome_${proposalId}`, content, now);
   } catch (error) {
@@ -425,6 +428,26 @@ function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
     const cleared = [...new Set(items)];
     next.injuriesOrLimitations = cleared.length > 1 ? cleared.filter((item) => item !== "none") : cleared;
   }
+  // The health screen: its notes join the limitations (replacing any it
+  // added before, so a changed answer takes its note with it), and a screen
+  // that needs a doctor's clearance holds the plan back until it's given.
+  if (next.healthScreen !== undefined) {
+    const screen = readHealthScreen(next.healthScreen);
+    if (!screen) {
+      next.healthScreen = undefined;
+    } else {
+      if (next.medicalClearance === "cleared") screen.clearedByDoctor = true;
+      next.healthScreen = screen;
+      const outcome = screenOutcome(screen);
+      const own = Array.isArray(next.injuriesOrLimitations)
+        ? (next.injuriesOrLimitations as string[]).filter((item) => !ALL_SCREEN_NOTES.has(item))
+        : [];
+      const merged = [...new Set([...own, ...outcome.notes])];
+      next.injuriesOrLimitations = merged.length > 1 ? merged.filter((item) => item !== "none") : merged;
+      next.screenStatus = outcome.status;
+      next.screenReasons = outcome.reasons;
+    }
+  }
   if (typeof next.sexOrGender === "string") next.sexOrGender = normalizeSexOrGender(next.sexOrGender);
   if (typeof next.trainingExperience === "string") {
     // Unrecognised ("do a push-up") stays unanswered so it's asked again,
@@ -438,7 +461,7 @@ function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
     if (typeof next[field] === "string") next[field] = parseNumber(next[field]);
   }
   if (typeof next.ageYears === "string") next.ageYears = parseAge(next.ageYears);
-  if (typeof next.ageYears === "number" && !(Number.isInteger(next.ageYears) && next.ageYears >= 13 && next.ageYears <= 100)) {
+  if (typeof next.ageYears === "number" && !(Number.isInteger(next.ageYears) && next.ageYears >= 18 && next.ageYears <= 100)) {
     next.ageYears = undefined;
   }
   for (const field of ["heightCm", "weightKg"] as const) {
@@ -479,6 +502,11 @@ function normalizeStepValue(step: string, content: string) {
     case "daysPerWeek":
     case "sessionLengthMin":
       return parseNumber(content);
+    case "medicalClearance":
+      // "My doctor cleared me" (a tap sends structured "cleared"; said or typed lands here).
+      return /\b(clear(ed)?|yes|ok(ay)?|approved|go ahead|fine)\b/i.test(content) && !/\b(not|no|haven't|hasn't)\b/i.test(content)
+        ? "cleared"
+        : undefined;
     case "heightCm":
       return parseHeightCm(content);
     case "weightKg":
@@ -488,11 +516,19 @@ function normalizeStepValue(step: string, content: string) {
   }
 }
 
-function missingRequiredFields(draft: OnboardingDraft) {
-  return REQUIRED_FIELDS.filter((field) => {
+function missingRequiredFields(draft: OnboardingDraft): string[] {
+  const missing: string[] = REQUIRED_FIELDS.filter((field) => {
     const value = draft[field];
     return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
   });
+  // Screened as needing a doctor first: no plan until they say they're cleared.
+  if (draft.screenStatus === "clearance_needed") missing.push("medicalClearance");
+  return missing;
+}
+
+/** A doctor's limit, symptoms, or a condition from the screen: start at the gentlest loads. */
+function startsGently(limits: unknown): boolean {
+  return Array.isArray(limits) && (limits.includes(CLEARANCE_NOTE) || limits.includes(MODERATE_NOTE));
 }
 
 function buildProgramProposal(
@@ -503,8 +539,7 @@ function buildProgramProposal(
 ) {
   const preferredDays = Array.isArray(draft.preferredDays) ? (draft.preferredDays as string[]) : [];
   const preferredTime = typeof draft.preferredTime === "string" ? draft.preferredTime : undefined;
-  const clearanceAdvised = Array.isArray(draft.injuriesOrLimitations)
-    && (draft.injuriesOrLimitations as string[]).includes(CLEARANCE_NOTE);
+  const clearanceAdvised = startsGently(draft.injuriesOrLimitations);
   const profile = UserHealthProfile.parse({
     userId,
     ageYears: draft.ageYears,
@@ -1038,7 +1073,8 @@ function parseAge(value: string): number | undefined {
   const plus = value.match(/(\d{2})\s*\+/);
   if (plus) return Number(plus[1]) + 5;
   const n = parseNumber(value);
-  return n !== undefined && Number.isInteger(n) && n >= 13 && n <= 120 ? n : undefined;
+  // MYO is for adults: under 18 isn't an answer it can take yet.
+  return n !== undefined && Number.isInteger(n) && n >= 18 && n <= 120 ? n : undefined;
 }
 
 const DAY_WORDS: Array<[RegExp, (typeof WEEK_ORDER)[number]]> = [
@@ -1097,7 +1133,7 @@ function workoutTimeOfDay(time: string | undefined): "morning" | "afternoon" | "
 
 /** A yes to the doctor / chest pain / dizziness / fainting screen. */
 export function needsClearance(value: string): boolean {
-  return /\b(doctor|physician|cardiolog|chest pain|dizz|faint|pass(ed)? out|heart)/i.test(value);
+  return /\b(doctor|physician|cardiolog|chest pain|dizz|faint|pass(ed)? out|heart|diabet|kidney|renal|stroke|copd)/i.test(value);
 }
 
 /** A copy with every undefined value dropped, at any depth (Firestore rejects them). */
