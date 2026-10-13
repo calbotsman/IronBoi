@@ -158,11 +158,37 @@ export const LIVE_TOOL_NAMES = [
 ] as const;
 export type LiveToolName = (typeof LIVE_TOOL_NAMES)[number];
 
+/**
+ * Tools the live coach can call that the PHONE runs, not this server: they
+ * change the workout in progress, which only the phone holds. Not in
+ * LIVE_TOOL_NAMES, so coachLiveToolCallable refuses them if one ever
+ * arrives here.
+ */
+export const PHONE_TOOL_DECLARATIONS = [
+  {
+    name: "swap_workout_exercise",
+    description:
+      "During a workout: swap an exercise in today's session right now. No review card, and never ask for a weight — the app sets a starting weight. Call find_exercise_swaps first and offer two or three; as soon as they pick one (or name their own), call this with it.",
+    parameters: {
+      type: "object",
+      properties: {
+        exerciseName: {
+          type: "string",
+          description: "The exercise being replaced, as it is in today's workout. Omit for the one they're on.",
+        },
+        replacementName: { type: "string", description: "What they'll do instead, ideally an option from find_exercise_swaps." },
+      },
+      required: ["replacementName"],
+    },
+  },
+];
+
 export function liveToolDeclarations() {
-  return COACH_TOOL_DECLARATIONS.filter((tool) => (LIVE_TOOL_NAMES as readonly string[]).includes(tool.name)).map((tool) => {
+  const server = COACH_TOOL_DECLARATIONS.filter((tool) => (LIVE_TOOL_NAMES as readonly string[]).includes(tool.name)).map((tool) => {
     const properties = tool.parameters?.properties ?? {};
     return Object.keys(properties).length > 0 ? tool : { name: tool.name, description: tool.description };
   });
+  return [...server, ...PHONE_TOOL_DECLARATIONS];
 }
 
 const LIVE_RULES = [
@@ -173,7 +199,8 @@ const LIVE_RULES = [
   "- You remember everything in <conversation>, <memory_facts> and <coach_notes>. Never ask them for something they already told you there; use it.",
   "- When a tool changes the plan, say what changed in one sentence. A proposal is only applied when they say yes AFTER hearing it.",
   "- Lines in the conversation that start with [app] are notes from the app about what's on screen or what they just did, not the user speaking. Don't read them out.",
-  "- In a workout the app handles counting, \"set done\", weight changes and swaps itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- In a workout the app handles counting, \"set done\" and weight changes itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- Swapping an exercise in a workout: call find_exercise_swaps, offer two or three, and the moment they pick one call swap_workout_exercise. Don't use adapt_plan for it and never ask for a weight. Then say what they're doing now in one sentence.",
 ].join("\n");
 
 /** The whole coach brain as one locked system instruction for a live session. */

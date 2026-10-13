@@ -1452,7 +1452,9 @@ struct CoachStageView: View {
         guard count > repCount else { return }
         AudioHub.log("count \(repCount) → \(count) (heard: \(transcript.suffix(40)))")
         if live.isActive {
-            if repCount == 0 { live.hush() }
+            // Every number, not just the first: the coach may have started
+            // a late reply mid-count.
+            live.hush()
             live.setUplinkMuted(true)
         }
         repCount = count

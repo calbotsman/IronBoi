@@ -390,6 +390,9 @@ final class AppModel: NSObject, ObservableObject {
             },
             runTool: { [weak self] name, args, turnId, raw in
                 guard let self else { throw CancellationError() }
+                // Swapping a lift mid-workout happens here, on the phone that
+                // holds the session — no review card, no weight to ask for.
+                if name == "swap_workout_exercise" { return await self.liveSwap(args) }
                 guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
                 let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
                     "name": name,
@@ -781,6 +784,39 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
         sessionChanges.append("Added \(name), \(sets)×\(reps)\(weight > 0 ? " at \(Self.poundsText(weight)) lb" : "")")
         return index
+    }
+
+    /// The live coach's swap: `replacementName` in for `exerciseName` (or the
+    /// lift you're on), at the weight the swap list suggests for you.
+    func liveSwap(_ args: [String: Any]) async -> [String: Any] {
+        guard let workout = activeWorkout else { return ["ok": false, "error": "no_active_workout"] }
+        guard let replacement = (args["replacementName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !replacement.isEmpty else { return ["ok": false, "error": "replacementName_required"] }
+        func key(_ s: String) -> String { s.lowercased().filter { $0.isLetter } }
+        let named = (args["exerciseName"] as? String).map(key)
+        let index = named.flatMap { want in
+            workout.exercises.firstIndex { key($0.name) == want }
+                ?? workout.exercises.firstIndex { key($0.name).contains(want) || want.contains(key($0.name)) }
+        } ?? currentExerciseIndex
+        guard let index, workout.exercises.indices.contains(index) else {
+            return ["ok": false, "error": "exercise_not_in_workout"]
+        }
+        let from = workout.exercises[index].name
+        var weight = 0.0
+        var name = replacement
+        if case .loaded(let options) = await fetchSwapOptions(
+            exerciseName: from, dayKey: workout.dayKey, sessionId: workout.sessionId, availableEquipment: nil),
+           let match = options.first(where: { key($0.name) == key(replacement) })
+            ?? options.first(where: { key($0.name).contains(key(replacement)) || key(replacement).contains(key($0.name)) }) {
+            weight = match.suggestedWeightLb
+            name = match.name
+        }
+        guard let swapped = swapWorkoutExercise(index, to: name, weight: weight) else {
+            return ["ok": false, "error": "swap_failed"]
+        }
+        if swapped != index || currentExerciseIndex == index { focusedExerciseIndex = swapped }
+        return ["ok": true, "swapped": from, "to": name, "weightLb": weight,
+                "note": weight > 0 ? "Starting weight set." : "No starting weight known: they pick one."]
     }
 
     /// Replaces a lift with another, keeping its sets and reps. If sets were

@@ -372,6 +372,9 @@ final class LiveVoiceSession: ObservableObject {
     // MARK: - Audio out
 
     private func play(_ buffer: AVAudioPCMBuffer) {
+        // You're counting a set (the mic to the coach is muted for it): the
+        // coach stays quiet until it's logged, even audio already on its way.
+        if uplinkMuted { return }
         if !hub.engine.isRunning { try? hub.start() }
         state = .speaking
         uplink.coachSpeaking = true

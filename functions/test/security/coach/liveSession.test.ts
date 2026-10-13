@@ -2,7 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { deleteApp, getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import {
+  CoachLiveToolRequest,
   StartLiveCoachSessionRequest,
+  liveToolDeclarations,
   liveAllowedForSignInProvider,
   liveCoachPrompt,
   liveSetup,
@@ -81,5 +83,15 @@ describe("live voice session mint", () => {
     expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(true);
     expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(false);
     expect(await takeLiveMint(db, USER_ID, 2, new Date("2026-10-13T12:00:00Z"))).toBe(true);
+  });
+});
+
+describe("live swaps in a workout", () => {
+  it("offers the phone-run swap tool, which the server itself refuses", () => {
+    const swap = liveToolDeclarations().find((tool) => tool.name === "swap_workout_exercise");
+    expect(swap?.parameters?.required).toEqual(["replacementName"]);
+    expect(liveToolDeclarations().some((tool) => tool.name === "find_exercise_swaps")).toBe(true);
+    const sent = CoachLiveToolRequest.safeParse({ name: "swap_workout_exercise", args: {}, turnId: "t1" });
+    expect(sent.success).toBe(false);
   });
 });
