@@ -185,19 +185,50 @@ enum YouColor {
     ]
 }
 
-/// The coach's own color — its body. Amber unless you pick another.
+/// The coach's own color — its body. Amber unless you pick another: any hue
+/// on the ribbon, from soft to vivid. Stored as a hex string like YouColor.
 enum CoachColor {
     static let storageKey = "coachColorHex"
     static let defaultHex = "F6A609"
 
-    static let presets: [(name: String, hex: String)] = [
-        ("Amber", "F6A609"),
-        ("Coral", "F2734E"),
-        ("Rose", "E5638C"),
-        ("Lime", "8CC43C"),
-        ("Sky", "2BA6E8"),
-        ("Violet", "9B5CF0"),
+    /// Named places along the ribbon (hue in degrees); the picker shows the
+    /// nearest one as you drag.
+    static let stops: [(hue: Double, name: String)] = [
+        (0, "Cherry"), (14, "Ember"), (26, "Tangerine"), (38, "Amber"), (48, "Marigold"),
+        (58, "Lemon"), (78, "Lime"), (120, "Fern"), (155, "Jade"), (180, "Lagoon"),
+        (200, "Sky"), (220, "Cobalt"), (245, "Indigo"), (268, "Violet"), (290, "Orchid"),
+        (315, "Magenta"), (332, "Rose"), (348, "Raspberry"),
     ]
+
+    /// Hue 0…1 and vivid 0…1 (soft…full) to a hex. Vivid 1 at amber's hue is
+    /// the default amber, so the ribbon and the brand agree.
+    static func hex(hue: Double, vivid: Double) -> String {
+        let v = min(max(vivid, 0), 1)
+        let ui = UIColor(hue: CGFloat(hue.truncatingRemainder(dividingBy: 1)),
+                         saturation: CGFloat(0.42 + 0.54 * v),
+                         brightness: CGFloat(0.84 + 0.12 * v), alpha: 1)
+        return Color(uiColor: ui).hexString
+    }
+
+    static func color(hue: Double, vivid: Double) -> Color {
+        Color(hex: hex(hue: hue, vivid: vivid))
+    }
+
+    /// Where a stored hex sits on the ribbon.
+    static func position(of hex: String) -> (hue: Double, vivid: Double) {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(Color(hex: hex)).getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        return (Double(h), min(max((Double(s) - 0.42) / 0.54, 0), 1))
+    }
+
+    static func name(hue: Double) -> String {
+        let degrees = hue * 360
+        func distance(_ stop: Double) -> Double {
+            let d = abs(stop - degrees).truncatingRemainder(dividingBy: 360)
+            return min(d, 360 - d)
+        }
+        return stops.min { distance($0.hue) < distance($1.hue) }?.name ?? "Amber"
+    }
 }
 
 extension Color {

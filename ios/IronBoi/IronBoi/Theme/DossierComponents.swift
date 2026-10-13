@@ -220,3 +220,165 @@ extension View {
             .overlay(shape.stroke(Color.white.opacity(0.5), lineWidth: 0.75))
     }
 }
+
+/// The coach's color: drag along the ribbon for any hue, and along the slim
+/// track for soft to vivid. Wherever the coach's body is on screen, it is the
+/// preview — it changes as you drag. `swatch` adds a small one for screens
+/// without the body.
+struct CoachColorPicker: View {
+    @Binding var hex: String
+    var swatch = false
+
+    @State private var hue: Double = 0
+    @State private var vivid: Double = 1
+    @State private var dragging = false
+    /// The last hex this picker wrote, so outside changes can be told apart.
+    @State private var written = ""
+
+    private var name: String { CoachColor.name(hue: hue) }
+    private var current: Color { CoachColor.color(hue: hue, vivid: vivid) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: MyoTheme.Spacing.sm) {
+                if swatch {
+                    Circle()
+                        .fill(RadialGradient(colors: [MyoTheme.Colors.cream, current],
+                                             center: UnitPoint(x: 0.38, y: 0.32), startRadius: 1, endRadius: 22))
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().stroke(MyoColor.hairline, lineWidth: 1))
+                        .accessibilityHidden(true)
+                }
+                Text(name)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .contentTransition(.opacity)
+                    .animation(MyoTheme.Motion.fade, value: name)
+                Spacer()
+                if hex.uppercased() != CoachColor.defaultHex {
+                    roundButton("arrow.uturn.backward", label: "Back to amber") {
+                        set(hue: CoachColor.position(of: CoachColor.defaultHex).hue, vivid: 1, animated: true)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
+                roundButton("dice", label: "Surprise me", action: surprise)
+            }
+            .animation(MyoTheme.Motion.fade, value: hex.uppercased() == CoachColor.defaultHex)
+            ribbon
+            HStack(spacing: 10) {
+                Text("SOFT").font(.system(.caption2, design: .monospaced).weight(.medium))
+                track(height: 22, thumb: 24, fraction: vivid,
+                      colors: [CoachColor.color(hue: hue, vivid: 0), CoachColor.color(hue: hue, vivid: 1)]) { vivid = $0 }
+                    .accessibilityElement()
+                    .accessibilityLabel("Softness")
+                    .accessibilityValue(vivid < 0.34 ? "Soft" : vivid < 0.67 ? "Medium" : "Vivid")
+                    .accessibilityAdjustableAction { direction in
+                        set(hue: hue, vivid: vivid + (direction == .increment ? 0.2 : -0.2), animated: true)
+                    }
+                Text("VIVID").font(.system(.caption2, design: .monospaced).weight(.medium))
+            }
+            .foregroundStyle(MyoColor.Text.tertiary.color)
+        }
+        .onAppear(perform: load)
+        .onChange(of: hex) { _, value in
+            if value.uppercased() != written { load() }
+        }
+    }
+
+    private func roundButton(_ systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+                .frame(width: 40, height: 40)
+                .contentShape(Circle())
+                .myoGlass(in: Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private var ribbon: some View {
+        let colors = stride(from: 0.0, through: 1.0, by: 1.0 / 18).map { CoachColor.color(hue: $0, vivid: vivid) }
+        return track(height: 34, thumb: 32, fraction: hue, colors: colors) { value in
+            let before = name
+            hue = min(value, 0.999)
+            if name != before { UISelectionFeedbackGenerator().selectionChanged() }
+        }
+        .accessibilityElement()
+        .accessibilityLabel("Coach's color")
+        .accessibilityValue(name)
+        .accessibilityAdjustableAction { direction in
+            let step = 1.0 / Double(CoachColor.stops.count)
+            let next = (hue + (direction == .increment ? step : -step) + 1).truncatingRemainder(dividingBy: 1)
+            set(hue: next, vivid: vivid, animated: true)
+        }
+    }
+
+    /// A capsule of colour with a knob that follows your finger anywhere on it.
+    private func track(height: CGFloat, thumb: CGFloat, fraction: Double, colors: [Color],
+                       onDrag: @escaping (Double) -> Void) -> some View {
+        GeometryReader { geo in
+            let usable = max(geo.size.width - thumb, 1)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
+                    .frame(height: height)
+                    // A little paper through the colour, so it sits on the page.
+                    .overlay(Capsule().fill(MyoTheme.Colors.cream.opacity(0.16)))
+                    .overlay(Capsule().stroke(MyoColor.hairline, lineWidth: 1))
+                Circle()
+                    .fill(current)
+                    .overlay(Circle().stroke(MyoTheme.Colors.cream, lineWidth: 3))
+                    .overlay(Circle().stroke(MyoTheme.Colors.ink.opacity(0.18), lineWidth: 1).padding(-1))
+                    .frame(width: thumb, height: thumb)
+                    .scaleEffect(dragging ? 1.18 : 1)
+                    .offset(x: usable * fraction)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        if !dragging {
+                            withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { dragging = true }
+                        }
+                        onDrag(min(max((drag.location.x - thumb / 2) / usable, 0), 1))
+                        write()
+                    }
+                    .onEnded { _ in
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) { dragging = false }
+                    }
+            )
+        }
+        .frame(height: max(height, thumb) + 8)
+    }
+
+    private func surprise() {
+        set(hue: Double.random(in: 0..<1), vivid: Double.random(in: 0.45...1), animated: true)
+    }
+
+    private func set(hue newHue: Double, vivid newVivid: Double, animated: Bool) {
+        withAnimation(animated ? .spring(response: 0.45, dampingFraction: 0.72) : nil) {
+            hue = min(max(newHue, 0), 0.999)
+            vivid = min(max(newVivid, 0), 1)
+        }
+        write()
+    }
+
+    private func write() {
+        let value = CoachColor.hex(hue: hue, vivid: vivid)
+        written = value
+        hex = value
+    }
+
+    private func load() {
+        let position = CoachColor.position(of: hex)
+        hue = position.hue
+        vivid = position.vivid
+        written = hex.uppercased()
+    }
+}

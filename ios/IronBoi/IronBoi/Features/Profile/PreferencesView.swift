@@ -307,23 +307,7 @@ struct PreferencesView: View {
     private var youColorCard: some View {
         MyoGroupCard {
             MyoSectionLabel(text: "Coach's color")
-            HStack(spacing: 10) {
-                ForEach(CoachColor.presets, id: \.hex) { preset in
-                    Button {
-                        withAnimation(MyoTheme.Motion.fade) { coachHex = preset.hex }
-                    } label: {
-                        Circle()
-                            .fill(Color(hex: preset.hex))
-                            .frame(width: 30, height: 30)
-                            .overlay(Circle().stroke(MyoTheme.Colors.ink, lineWidth: coachHex.uppercased() == preset.hex ? 2 : 0).padding(-4))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(preset.name)
-                    .accessibilityAddTraits(coachHex.uppercased() == preset.hex ? [.isSelected] : [])
-                }
-            }
+            CoachColorPicker(hex: $coachHex, swatch: true)
 
             MyoHairline().padding(.vertical, MyoTheme.Spacing.xs)
 
@@ -336,7 +320,7 @@ struct PreferencesView: View {
                 // A little preview: Coach's body and one of your droplets.
                 ZStack(alignment: .bottomTrailing) {
                     Circle()
-                        .fill(RadialGradient(colors: [MyoTheme.Colors.cream, MyoTheme.Colors.coachAmber],
+                        .fill(RadialGradient(colors: [MyoTheme.Colors.cream, Color(hex: coachHex)],
                                              center: .center, startRadius: 2, endRadius: 30))
                         .frame(width: 52, height: 52)
                     Circle()

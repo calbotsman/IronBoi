@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Onboarding on the coach's own stage: the same body, the same tap-to-talk
 /// and type-to-talk as home. The coach asks six things out loud; each answer
-/// is a card you tap (or say, or type), and drops into a small "your plan"
-/// stack at the top, so it feels like building something rather than filling
-/// in a form. The last answer turns the stack into your week.
+/// is a card you tap (or say, or type), and lights a dot in the one-line
+/// "your plan" header (tap it to see and change answers), so it feels like
+/// building something rather than filling in a form. The last answer turns
+/// it into your week.
 ///
 /// The server is the source of truth for which answers it has
 /// (onboardingMissingFields); taps advance straight away and are sent in
@@ -18,25 +19,27 @@ struct OnboardingStageView: View {
 
     /// The question on screen (index into `Step.all`; `Step.all.count` = your week).
     @State private var stepIndex = 0
-    /// What each answer looks like in the plan stack, by field.
+    /// What each answer looks like in your plan, by field.
     @State private var chips: [String: String] = [:]
     /// Answers on their way to the server, in order.
     @State private var sendQueue: Task<Void, Never>?
     @State private var inFlight = 0
     /// A spoken or typed answer: wait for the server to read it before moving on.
     @State private var awaitingParse: String?
-    /// Going back to change one answer from the stack.
+    /// Going back to change one answer from your plan.
     @State private var editing = false
     @State private var showKeyboard = false
     @State private var notice: String?
     @State private var lastSpokenStep: Int?
     @State private var showMenu = false
+    /// The answers list, opened from the header line.
+    @State private var planOpen = false
     @State private var stageSize: CGSize = .zero
     /// Where things are on screen, so the body can share the space: the
-    /// bottom of the header (dots + plan stack), the top of the question,
-    /// and each chip in the stack.
+    /// bottom of the header, the top of the question, and the plan line.
     @State private var frames: [String: CGRect] = [:]
-    /// The chip that landed most recently — the body looks at it.
+    /// The answer that landed most recently — shown in the header line, and
+    /// the body looks up at it.
     @State private var lastChipField: String?
     // The schedule card's own state.
     @State private var days: Set<String> = ["Mon", "Wed", "Fri"]
@@ -75,7 +78,7 @@ struct OnboardingStageView: View {
                     ambient: true,
                     youTalking: !voiceInput.transcript.isEmpty,
                     ceiling: frames["header"].map { $0.maxY - origin.y },
-                    gaze: lastChipField.flatMap { frames["chip.\($0)"] }
+                    gaze: lastChipField.flatMap { _ in frames["plan"] }
                         .map { CGPoint(x: $0.midX - origin.x, y: $0.midY - origin.y) },
                     nudge: chips.count
                 )
@@ -104,12 +107,26 @@ struct OnboardingStageView: View {
                     .opacity(showKeyboard ? 0 : 1)
                     .allowsHitTesting(!showKeyboard)
             }
+
+            if planOpen {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture { planOpen = false }
+                VStack(spacing: 0) {
+                    planPanel
+                        .padding(.top, (frames["plan"]?.maxY ?? 52) + 6)
+                    Spacer(minLength: 0)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
         }
         .coordinateSpace(name: Self.space)
         .onPreferenceChange(StageFramesKey.self) { frames = $0 }
         .background(PaperBackground())
         .animation(.spring(response: 0.42, dampingFraction: 0.86), value: stepIndex)
         .animation(MyoTheme.Motion.fade, value: chips)
+        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: planOpen)
         .safeAreaInset(edge: .bottom) {
             if showKeyboard {
                 TypeBar(isPresented: $showKeyboard, onSend: { answerInWords($0, mode: .text) })
@@ -167,51 +184,106 @@ struct OnboardingStageView: View {
         }
     }
 
-    // MARK: - Header: progress dots and the plan stack
+    // MARK: - Header: one line of progress; tap it to see and change answers
 
     private var header: some View {
-        VStack(spacing: MyoTheme.Spacing.sm) {
-            HStack(spacing: 6) {
-                ForEach(Step.all.indices, id: \.self) { index in
-                    Capsule()
-                        .fill(index < answeredCount ? MyoTheme.Colors.coachAmber : MyoColor.hairline)
-                        .frame(width: index == stepIndex ? 22 : 8, height: 8)
-                }
-                Spacer()
-                Button { showMenu = true } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(MyoColor.Text.secondary.color)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("More")
-            }
-            .animation(.spring(response: 0.35, dampingFraction: 0.8), value: stepIndex)
-
-            if !chips.isEmpty {
-                // Your plan, taking shape. Tap one to change it.
-                FlowRow(spacing: 6) {
-                    ForEach(Step.all.indices.filter { chips[Step.all[$0].field] != nil }, id: \.self) { index in
-                        Button { change(index) } label: {
-                            Text(chips[Step.all[index].field] ?? "")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(MyoColor.Text.primary.color)
-                                .padding(.horizontal, 12)
-                                .frame(height: 32)
-                                .myoGlass(tint: index == stepIndex ? MyoTheme.Colors.coachAmber.opacity(0.35) : nil)
+        HStack(spacing: MyoTheme.Spacing.sm) {
+            Button {
+                guard !chips.isEmpty else { return }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                planOpen.toggle()
+            } label: {
+                HStack(spacing: 10) {
+                    HStack(spacing: 5) {
+                        ForEach(Step.all.indices, id: \.self) { index in
+                            Capsule()
+                                .fill(chips[Step.all[index].field] != nil ? MyoTheme.Colors.coachAmber : MyoColor.hairline)
+                                .frame(width: index == stepIndex ? 18 : 7, height: 7)
                         }
-                        .buttonStyle(.plain)
-                        .background { measure("chip.\(Step.all[index].field)") }
-                        .transition(.scale(scale: 0.6, anchor: .leading).combined(with: .opacity))
+                    }
+                    if let latest = latestChip {
+                        Text(latest)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                            .lineLimit(1)
+                            .contentTransition(.opacity)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                            .rotationEffect(.degrees(planOpen ? 180 : 0))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, chips.isEmpty ? 0 : 14)
+                .frame(height: 36)
+                .contentShape(Capsule())
+                .modifier(PlanPill(on: !chips.isEmpty))
             }
+            .buttonStyle(.plain)
+            .background { measure("plan") }
+            .accessibilityLabel("Your answers, \(answeredCount) of \(Step.all.count)")
+            .accessibilityHint(chips.isEmpty ? "" : "Shows your answers. Tap one to change it.")
+            Spacer(minLength: 0)
+            Button { showMenu = true } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(MyoColor.Text.secondary.color)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("More")
         }
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: stepIndex)
         .padding(.horizontal, MyoTheme.Spacing.md)
         .padding(.top, MyoTheme.Spacing.sm)
+    }
+
+    /// Your answers, opened from the header line. Tap one to go back to it.
+    private var planPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Tap an answer to change it")
+                .myoStyle(.label)
+                .textCase(.uppercase)
+                .kerning(0.6)
+                .foregroundStyle(MyoColor.Text.tertiary.color)
+                .padding(.horizontal, MyoTheme.Spacing.md)
+                .padding(.top, 14)
+                .padding(.bottom, 6)
+            ForEach(Step.all.indices.filter { chips[Step.all[$0].field] != nil }, id: \.self) { index in
+                Button {
+                    planOpen = false
+                    change(index)
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: MyoTheme.Spacing.sm) {
+                        Text(Step.all[index].short.uppercased())
+                            .font(.system(.caption2, design: .monospaced).weight(.medium))
+                            .foregroundStyle(MyoColor.redPen)
+                            .frame(width: 78, alignment: .leading)
+                        Text(chips[Step.all[index].field] ?? "")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        Image(systemName: index == stepIndex ? "pencil" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                    }
+                    .padding(.horizontal, MyoTheme.Spacing.md)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.bottom, 6)
+        .myoCard()
+        .padding(.horizontal, MyoTheme.Spacing.md)
+    }
+
+    /// The answer that landed most recently, for the header line.
+    private var latestChip: String? {
+        if let field = lastChipField, let chip = chips[field] { return chip }
+        return Step.all.last { chips[$0.field] != nil }.flatMap { chips[$0.field] }
     }
 
     private var answeredCount: Int {
@@ -346,7 +418,7 @@ struct OnboardingStageView: View {
 
     // MARK: - Answering
 
-    /// A tap: in the stack and on to the next question at once; sent behind.
+    /// A tap: into your plan and on to the next question at once; sent behind.
     private func answer(_ structured: [String: Any], chip: String, content: String) {
         guard let step else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -409,7 +481,7 @@ struct OnboardingStageView: View {
         stepIndex = next ?? Step.all.count
     }
 
-    /// Tap a chip in the stack: back to that question.
+    /// Tap an answer in your plan: back to that question.
     private func change(_ index: Int) {
         guard index != stepIndex else { return }
         voice.stop()
@@ -430,7 +502,7 @@ struct OnboardingStageView: View {
 
     // MARK: - Keeping in step with the server
 
-    /// Fill the stack from what the server already has (an onboarding
+    /// Fill your plan from what the server already has (an onboarding
     /// started earlier, or on another device) and pick up where it left off.
     private func restoreFromServer() {
         let draft = appModel.onboardingDraft
@@ -474,7 +546,7 @@ struct OnboardingStageView: View {
             guard let proposal = appModel.pendingProgramProposal else { return }
             lastSpokenStep = stepIndex
             let days = proposal.workoutDays.filter { !$0.exerciseNames.isEmpty }.map { Self.dayName($0.dayKey) }
-            speak("Here's your week: \(Self.list(days)). Tap Start with this, or tap any answer up top to change it.")
+            speak("Here's your week: \(Self.list(days)). Tap Start with this, or tap your answers up top to change one.")
             return
         }
         guard let step else { return }
@@ -500,9 +572,8 @@ struct OnboardingStageView: View {
         }
     }
 
-    /// The free space between the plan stack and the question: the body
-    /// stands in it, feet just above the question, and shrinks as the stack
-    /// grows so it always fits underneath.
+    /// The free space between the header and the question: the body
+    /// stands in it, feet just above the question, and shrinks to fit.
     private func bodyRoom(in size: CGSize) -> (center: CGFloat, scale: CGFloat) {
         let top = frames["header"]?.maxY ?? size.height * 0.12
         let bottom = frames["caption"]?.minY ?? size.height * 0.5
@@ -542,7 +613,7 @@ private struct Step {
     struct Option: Identifiable {
         var id: String { label }
         let label: String
-        /// What it looks like in the plan stack.
+        /// What it looks like in your plan.
         let chip: String
         let answer: [String: Any]
         /// Tapping it asks for words instead (e.g. "Something hurts").
@@ -561,6 +632,19 @@ private struct Step {
     let question: String
     let kind: Kind
 
+    /// Its name in the answers list.
+    var short: String {
+        switch field {
+        case "goals": return "Goal"
+        case "trainingExperience": return "Experience"
+        case "equipment": return "Gear"
+        case "preferredDays": return "When"
+        case "ageYears": return "You"
+        case "injuriesOrLimitations": return "Limits"
+        default: return "Coach"
+        }
+    }
+
     /// The server fields this card answers ("About you" is four).
     var fields: [String] {
         switch kind {
@@ -570,7 +654,7 @@ private struct Step {
         }
     }
 
-    /// The stack label for an answer the server already has.
+    /// The plan label for an answer the server already has.
     func chip(for value: Any?, draft: [String: Any]) -> String? {
         guard let value else { return nil }
         switch kind {
@@ -809,6 +893,14 @@ private struct FlowRow: Layout {
     }
 }
 
+/// Glass round the header line once there's an answer in it; bare dots before.
+private struct PlanPill: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on { content.myoGlass() } else { content }
+    }
+}
+
 /// Frames of the onboarding stage's parts, by name.
 private struct StageFramesKey: PreferenceKey {
     static var defaultValue: [String: CGRect] = [:]
@@ -1016,26 +1108,9 @@ private struct CustomizeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-            HStack(spacing: 10) {
-                ForEach(CoachColor.presets, id: \.hex) { preset in
-                    let on = coachHex.uppercased() == preset.hex
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        withAnimation(MyoTheme.Motion.fade) { coachHex = preset.hex }
-                    } label: {
-                        Circle()
-                            .fill(Color(hex: preset.hex))
-                            .frame(width: 34, height: 34)
-                            .overlay(Circle().stroke(MyoTheme.Colors.ink, lineWidth: on ? 2 : 0).padding(-4))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(preset.name)
-                    .accessibilityAddTraits(on ? .isSelected : [])
-                }
-            }
-            VStack(spacing: 8) {
+            CoachColorPicker(hex: $coachHex)
+            MyoHairline()
+            FlowRow(spacing: 8) {
                 ForEach(Self.styles, id: \.label) { style in
                     let on = tone == style.tone.rawValue && tips == style.tips.rawValue
                     Button {
@@ -1043,19 +1118,16 @@ private struct CustomizeCard: View {
                         tone = style.tone.rawValue
                         tips = style.tips.rawValue
                     } label: {
-                        HStack {
-                            Text(style.label).font(.body.weight(.semibold))
-                                .foregroundStyle(MyoColor.Text.primary.color)
-                            Spacer()
-                            if on { Image(systemName: "checkmark").font(.footnote.weight(.bold)).foregroundStyle(MyoTheme.Colors.coachAmber) }
-                        }
-                        .padding(.horizontal, MyoTheme.Spacing.lg)
-                        .frame(maxWidth: .infinity, minHeight: 46)
-                        .contentShape(RoundedRectangle(cornerRadius: 23))
-                        .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.3) : nil,
-                                  in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                        Text(style.label)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 42)
+                            .contentShape(Capsule())
+                            .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
             DoneButton(title: "Looks good", enabled: true, action: onDone)
