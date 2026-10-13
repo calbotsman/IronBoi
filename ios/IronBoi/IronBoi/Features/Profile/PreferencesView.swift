@@ -27,6 +27,9 @@ struct PreferencesView: View {
     @State private var contentVisible = false
     @State private var showDeleteAccountConfirm = false
     @State private var showDeleteAccountFinalConfirm = false
+    @AppStorage(CoachVoiceOption.storageKey) private var voiceName = CoachVoiceOption.defaultName
+    /// Plays a line when you try a voice.
+    @StateObject private var tryVoice = CoachVoice()
 
     private var hasLocalEdits: Bool { draft != appModel.profile }
 
@@ -52,6 +55,7 @@ struct PreferencesView: View {
                     setupCard
                     coachCard
                     youColorCard
+                    paperCard
                     limitsCard
                     MemorySummaryCard()
                     regenerateCard
@@ -358,9 +362,29 @@ struct PreferencesView: View {
         }
     }
 
+    /// The paper the whole app is printed on.
+    private var paperCard: some View {
+        MyoGroupCard {
+            MyoSectionLabel(text: "Paper")
+            Text("The page everything sits on: background, type and shadows.")
+                .font(.caption)
+                .foregroundStyle(MyoColor.Text.tertiary.color)
+            PaperPicker()
+        }
+    }
+
     private var coachCard: some View {
         MyoGroupCard {
             MyoSectionLabel(text: "Your coach")
+
+            Text("Voice")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+            CoachVoicePicker(name: $voiceName) { sample in
+                tryVoice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+                tryVoice.speak(sample, messageId: "try-voice-\(UUID().uuidString)")
+            }
+            .padding(.bottom, MyoTheme.Spacing.xs)
 
             MyoValueRow(label: "Tone") {
                 Picker("Tone", selection: $draft.preferences.coachingTone) {

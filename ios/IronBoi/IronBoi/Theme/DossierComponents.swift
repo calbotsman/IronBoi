@@ -196,7 +196,7 @@ extension View {
                     .blendMode(.plusLighter)
                     .allowsHitTesting(false)
             )
-            .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 10, y: 4)
+            .shadow(color: MyoTheme.Colors.shadow.opacity(0.08), radius: 10, y: 4)
     }
 
     @ViewBuilder
@@ -380,5 +380,132 @@ struct CoachColorPicker: View {
         hue = position.hue
         vivid = position.vivid
         written = hex.uppercased()
+    }
+}
+
+/// The coach's voice: female or male, then how it sounds. Every tap plays a
+/// line in that voice through `onTry`.
+struct CoachVoicePicker: View {
+    @Binding var name: String
+    let onTry: (String) -> Void
+    @AppStorage(CoachVoiceOption.chosenKey) private var chosen = false
+
+    private var voice: CoachVoiceOption.Voice { CoachVoiceOption.voice(named: name) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 0) {
+                side("Female", on: voice.female) { pick(female: true, feel: voice.feel) }
+                side("Male", on: !voice.female) { pick(female: false, feel: voice.feel) }
+            }
+            .padding(3)
+            .myoGlass()
+            HStack(spacing: 8) {
+                ForEach(CoachVoiceOption.Feel.allCases, id: \.self) { feel in
+                    let on = voice.feel == feel
+                    Button { pick(female: voice.female, feel: feel) } label: {
+                        HStack(spacing: 4) {
+                            if on {
+                                Image(systemName: "waveform")
+                                    .font(.caption2.weight(.bold))
+                                    .symbolEffect(.variableColor.iterative, isActive: on)
+                            }
+                            Text(feel.label)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.85)
+                        }
+                        .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                        .contentShape(Capsule())
+                        .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(feel.label) voice")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+        }
+    }
+
+    private func side(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.secondary.color)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background {
+                    if on { Capsule().fill(MyoTheme.Colors.coachAmber.opacity(0.4)) }
+                }
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) voice")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private func pick(female: Bool, feel: CoachVoiceOption.Feel) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            name = CoachVoiceOption.name(female: female, feel: feel)
+        }
+        chosen = true
+        onTry(feel.sample)
+    }
+}
+
+/// The paper the app is printed on: a few good ones, each shown as a tiny
+/// page — its paper, its type, a raised card and its shadow.
+struct PaperPicker: View {
+    private var store = PaperStore.shared
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(Paper.all) { paper in
+                    let on = store.paper == paper
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.easeInOut(duration: 0.35)) { store.paper = paper }
+                    } label: {
+                        VStack(spacing: 6) {
+                            page(paper)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(on ? MyoTheme.Colors.coachAmber : MyoColor.hairline, lineWidth: on ? 2.5 : 1)
+                                        .padding(on ? -3 : 0)
+                                )
+                            Text(paper.name)
+                                .font(.caption.weight(on ? .semibold : .regular))
+                                .foregroundStyle(on ? MyoColor.Text.primary.color : MyoColor.Text.secondary.color)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(paper.name) paper")
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private func page(_ paper: Paper) -> some View {
+        ZStack(alignment: .topLeading) {
+            paper.base
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Aa")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(paper.ink)
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(paper.raised)
+                    .frame(width: 34, height: 16)
+                    .shadow(color: paper.shadow.opacity(paper.isDark ? 0.6 : 0.18), radius: 3, y: 2)
+                Capsule().fill(paper.ink.opacity(0.35)).frame(width: 26, height: 3)
+            }
+            .padding(8)
+        }
+        .frame(width: 58, height: 76)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }

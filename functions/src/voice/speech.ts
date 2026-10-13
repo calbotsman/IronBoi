@@ -7,17 +7,31 @@ import { z } from "zod";
  * own service account (metadata server), so there's no extra key to manage;
  * billed to the project (~$30 per million characters).
  */
+/**
+ * The voices a person can pick for their coach: four female, four male,
+ * one per feel (warm, upbeat, firm, calm). A fixed allowlist, not a free
+ * knob — every one is the same Chirp 3 HD family and price, and each is
+ * also a Gemini Live voice, so live and spoken replies sound the same.
+ */
+export const COACH_VOICES = [
+  "Sulafat", "Laomedeia", "Kore", "Achernar",
+  "Achird", "Puck", "Orus", "Algieba",
+] as const;
+
+/** A voice from the allowlist; anything else is dropped, not an error. */
+export const CoachVoiceChoice = z.enum(COACH_VOICES).optional().catch(undefined);
+
 export const SynthesizeSpeechRequest = z.object({
   text: z.string().min(1).max(600),
+  voice: CoachVoiceChoice,
 });
 
 export const DEFAULT_COACH_VOICE = "Sulafat";
 const VOICE_NAME = /^[A-Za-z]+$/;
 
 /**
- * The coach has ONE voice, chosen by the operator (IRONBOI_COACH_VOICE, a
- * Chirp 3 HD voice name), never by the client. A client-selectable voice
- * was an unbounded knob on a billed API for no product reason.
+ * The coach's voice when the person hasn't picked one from COACH_VOICES:
+ * chosen by the operator (IRONBOI_COACH_VOICE, a Chirp 3 HD voice name).
  */
 export function coachVoice(env: NodeJS.ProcessEnv = process.env): string {
   const configured = env.IRONBOI_COACH_VOICE?.trim();
@@ -61,7 +75,7 @@ export async function synthesizeSpeech(
   request: z.infer<typeof SynthesizeSpeechRequest>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ audio: string; mimeType: "audio/wav" }> {
-  const voice = coachVoice();
+  const voice = request.voice ?? coachVoice();
   const res = await fetchImpl(TTS_URL, {
     method: "POST",
     headers: {

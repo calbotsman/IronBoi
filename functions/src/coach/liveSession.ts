@@ -8,6 +8,7 @@ import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import { VOICE_MODE_RULES } from "./orchestrate.js";
+import { CoachVoiceChoice } from "../voice/speech.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
 import { executeTool } from "../tools/executor.js";
 import { findLatestPendingProposal, publishDraftProposals, severeMarkerHit } from "../workouts/planAdjustments.js";
@@ -26,6 +27,8 @@ export const StartLiveCoachSessionRequest = z.object({
   // Reconnecting after the ~10-minute connection limit: the handle from
   // the last sessionResumptionUpdate, so the conversation carries on.
   resumeHandle: z.string().min(1).max(4096).optional(),
+  // The person's pick from COACH_VOICES, so live sounds like spoken replies.
+  voice: CoachVoiceChoice,
 }).strict();
 
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Onboarding on the coach's own stage: the same body, the same tap-to-talk
-/// and type-to-talk as home. The coach asks six things out loud; each answer
+/// and type-to-talk as home. The coach asks a few things out loud; each answer
 /// is a card you tap (or say, or type), and lights a dot in the one-line
 /// "your plan" header (tap it to see and change answers), so it feels like
 /// building something rather than filling in a form. The last answer turns
@@ -49,6 +49,8 @@ struct OnboardingStageView: View {
     @AppStorage(CoachingStyle.toneKey) private var toneSetting = CoachingStyle.Tone.hype.rawValue
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
     @AppStorage("onboarding.customized") private var customized = false
+    @AppStorage("onboarding.voiced") private var voiced = false
+    @AppStorage(CoachVoiceOption.storageKey) private var voiceName = CoachVoiceOption.defaultName
     @State private var time = Calendar.current.date(bySettingHour: 18, minute: 0, second: 0, of: Date()) ?? Date()
 
     private var isWeek: Bool { stepIndex >= Step.all.count }
@@ -361,11 +363,17 @@ struct OnboardingStageView: View {
                     answer(about.answer, chip: about.chip, content: about.chip)
                 }
             case .customize:
-                CustomizeCard(coachHex: $coachHex, tone: $toneSetting, tips: $tipsSetting) {
+                ColorCard(coachHex: $coachHex) {
                     customized = true
-                    chips[step.field] = "Your coach"
-                    lastChipField = step.field
-                    advance()
+                    finishLocal(step, chip: CoachColor.name(hue: CoachColor.position(of: coachHex).hue))
+                }
+            case .voice:
+                VoiceCard(voiceName: $voiceName, tone: $toneSetting, tips: $tipsSetting) { sample in
+                    lastSpokenStep = stepIndex
+                    voice.speak(sample, messageId: "onboarding-voice-\(UUID().uuidString)")
+                } onDone: {
+                    voiced = true
+                    finishLocal(step, chip: CoachVoiceOption.label(voiceName))
                 }
             case .schedule:
                 ScheduleCard(days: $days, time: $time) {
@@ -430,13 +438,23 @@ struct OnboardingStageView: View {
         advance()
     }
 
+    /// "Make it yours" answers live on this phone, not the server.
+    private func finishLocal(_ step: Step, chip: String) {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        voice.stop()
+        notice = nil
+        chips[step.field] = chip
+        lastChipField = step.field
+        advance()
+    }
+
     /// Said or typed: the server reads it, and the question moves on only if
     /// it understood.
     private func answerInWords(_ text: String, mode: CoachInputMode) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let step else { return }
-        if case .customize = step.kind {
-            notice = "Tap a color and a style below."
+        if step.fields.isEmpty {
+            notice = "Tap your pick below."
             return
         }
         voice.stop()
@@ -509,8 +527,12 @@ struct OnboardingStageView: View {
         for step in Step.all where chips[step.field] == nil {
             if let label = step.chip(for: draft[step.field], draft: draft) { chips[step.field] = label }
         }
-        if customized, chips["customize"] == nil, Step.all.dropLast().allSatisfy({ chips[$0.field] != nil }) {
-            chips["customize"] = "Your coach"
+        // The phone-only answers count once the server ones are all in.
+        if Step.all.filter({ !$0.fields.isEmpty }).allSatisfy({ chips[$0.field] != nil }) {
+            if customized, chips["customize"] == nil {
+                chips["customize"] = CoachColor.name(hue: CoachColor.position(of: coachHex).hue)
+            }
+            if voiced, chips["voice"] == nil { chips["voice"] = CoachVoiceOption.label(voiceName) }
         }
         if let days = draft["preferredDays"] as? [String], !days.isEmpty { self.days = Set(days) }
         if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
@@ -626,6 +648,7 @@ private struct Step {
         case gear
         case aboutYou
         case customize
+        case voice
     }
 
     let field: String
@@ -641,7 +664,8 @@ private struct Step {
         case "preferredDays": return "When"
         case "ageYears": return "You"
         case "injuriesOrLimitations": return "Limits"
-        default: return "Coach"
+        case "voice": return "Voice"
+        default: return "Color"
         }
     }
 
@@ -649,7 +673,7 @@ private struct Step {
     var fields: [String] {
         switch kind {
         case .aboutYou: return ["ageYears", "sexOrGender", "heightCm", "weightKg"]
-        case .customize: return []
+        case .customize, .voice: return []
         default: return [field]
         }
     }
@@ -658,7 +682,7 @@ private struct Step {
     func chip(for value: Any?, draft: [String: Any]) -> String? {
         guard let value else { return nil }
         switch kind {
-        case .customize:
+        case .customize, .voice:
             return nil
         case .gear:
             guard let list = value as? [String], !list.isEmpty else { return nil }
@@ -719,7 +743,8 @@ private struct Step {
                 Option(label: "A doctor's limit, or chest pain, dizziness or fainting when active",
                        chip: "Doctor's limit", answer: ["injuriesOrLimitations": ["doctor advised limit"]]),
              ])),
-        Step(field: "customize", question: "Last thing. Make me yours: my color, and how I coach you.", kind: .customize),
+        Step(field: "customize", question: "Now make me yours. Pick my color.", kind: .customize),
+        Step(field: "voice", question: "Last thing: how should I sound, and how should I coach you?", kind: .voice),
     ]
 }
 
@@ -1093,12 +1118,30 @@ private struct AboutYouCard: View {
     }
 }
 
-/// The coach's color (its body changes as you tap) and how it talks to you.
-private struct CustomizeCard: View {
+/// The coach's color: its body is the preview, changing as you drag.
+private struct ColorCard: View {
     @Binding var coachHex: String
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            CoachColorPicker(hex: $coachHex)
+            DoneButton(title: "Love it", enabled: true, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
+    }
+}
+
+/// How the coach sounds (each tap plays it) and how it coaches you. Picking
+/// a style suggests a feel until you pick a voice yourself.
+private struct VoiceCard: View {
+    @Binding var voiceName: String
     @Binding var tone: String
     @Binding var tips: String
+    let onTry: (String) -> Void
     let onDone: () -> Void
+    @AppStorage(CoachVoiceOption.chosenKey) private var voiceChosen = false
 
     private static let styles: [(label: String, tone: CoachingStyle.Tone, tips: CoachingStyle.Tips)] = [
         ("Hype me up", .hype, .full),
@@ -1108,7 +1151,7 @@ private struct CustomizeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-            CoachColorPicker(hex: $coachHex)
+            CoachVoicePicker(name: $voiceName, onTry: onTry)
             MyoHairline()
             FlowRow(spacing: 8) {
                 ForEach(Self.styles, id: \.label) { style in
@@ -1117,6 +1160,11 @@ private struct CustomizeCard: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         tone = style.tone.rawValue
                         tips = style.tips.rawValue
+                        if !voiceChosen {
+                            let current = CoachVoiceOption.voice(named: voiceName)
+                            voiceName = CoachVoiceOption.name(
+                                female: current.female, feel: CoachVoiceOption.feel(tone: style.tone, tips: style.tips))
+                        }
                     } label: {
                         Text(style.label)
                             .font(.subheadline.weight(.semibold))
@@ -1130,7 +1178,7 @@ private struct CustomizeCard: View {
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
-            DoneButton(title: "Looks good", enabled: true, action: onDone)
+            DoneButton(title: "Sounds good", enabled: true, action: onDone)
         }
         .padding(MyoTheme.Spacing.lg)
         .myoCard()

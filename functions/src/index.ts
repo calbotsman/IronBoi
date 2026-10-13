@@ -564,7 +564,7 @@ export const startLiveCoachSession = onCall(
     const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
     if (!apiKey) throw new HttpsError("failed-precondition", "live_voice_not_configured");
     const model = process.env.IRONBOI_LIVE_MODEL || LIVE_MODEL_DEFAULT;
-    const voice = process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT;
+    const voice = parsed.voice ?? (process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT);
     // The whole brain — profile, plan, recent workouts, memory facts, coach
     // notes, the shared conversation — locked into the session.
     const instruction = await buildLiveSystemInstruction({

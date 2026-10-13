@@ -33,7 +33,7 @@ struct LiveWorkoutCard: View {
         }
         .frame(maxWidth: .infinity)
         .myoCard()
-        .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 20, y: 8)
+        .shadow(color: MyoTheme.Colors.shadow.opacity(0.08), radius: 20, y: 8)
     }
 
     // MARK: - Minimized

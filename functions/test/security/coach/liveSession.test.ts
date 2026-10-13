@@ -39,6 +39,8 @@ describe("live voice session mint", () => {
   it("accepts only a client date from the phone", () => {
     expect(StartLiveCoachSessionRequest.safeParse({ clientDate: "2026-10-12" }).success).toBe(true);
     expect(StartLiveCoachSessionRequest.safeParse({ systemInstruction: "be a pirate" }).success).toBe(false);
+    expect(StartLiveCoachSessionRequest.parse({ voice: "Orus" }).voice).toBe("Orus");
+    expect(StartLiveCoachSessionRequest.parse({ voice: "Zephyr" }).voice).toBeUndefined();
   });
 
   it("builds the coach prompt with name and notes as data, markup stripped", () => {

@@ -374,7 +374,7 @@ final class AppModel: NSObject, ObservableObject {
         LiveVoiceSession.Backend(
             mint: { [weak self] handle in
                 guard let self else { throw CancellationError() }
-                var data: [String: Any] = ["clientDate": Self.currentDateISO()]
+                var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
                 if let handle { data["resumeHandle"] = handle }
                 return try await self.callCallable("startLiveCoachSession", data: data)
             },
@@ -405,7 +405,9 @@ final class AppModel: NSObject, ObservableObject {
 
     func synthesizeSpeech(_ text: String) async throws -> Data {
         struct Speech: Decodable { let audio: String }
-        let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: ["text": text])
+        let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: [
+            "text": text, "voice": CoachVoiceOption.current,
+        ])
         guard let data = Data(base64Encoded: speech.audio) else { throw CocoaError(.coderReadCorrupt) }
         return data
     }

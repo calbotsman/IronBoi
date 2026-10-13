@@ -28,12 +28,11 @@ struct IronBoiApp: App {
         WindowGroup {
             AppRootView()
                 .environmentObject(appModel)
-                // The design uses a fixed cream paper background that
-                // doesn't switch on Dark Mode. Force the app into light
-                // scheme so SwiftUI doesn't auto-pick white text on
-                // cream and make everything unreadable. Cream-always is
-                // doctrine (Deter ruled forced-light is the intent).
-                .preferredColorScheme(.light)
+                // The app is printed on the paper you picked, not on the
+                // system's Dark Mode: light papers force the light scheme
+                // (so SwiftUI never puts white text on cream), Night forces
+                // dark, so system controls match it.
+                .modifier(PaperScheme())
                 // Doctrine: selection is the coach's red pen. This sets
                 // tab selection, links, and any control without an
                 // explicit tint to brick instead of system blue.
@@ -94,3 +93,9 @@ struct AppRootView: View {
     }
 }
 
+/// The colour scheme follows the paper, not the system.
+private struct PaperScheme: ViewModifier {
+    func body(content: Content) -> some View {
+        content.preferredColorScheme(PaperStore.shared.paper.isDark ? .dark : .light)
+    }
+}
