@@ -1,7 +1,7 @@
 # MYO Privacy Policy
 
 **Effective date:** 2026-06-02
-**Last updated:** 2026-10-07
+**Last updated:** 2026-10-12
 
 This is the privacy policy for **MYO** ("MYO," "we," "us"), an AI fitness coaching app for iOS published under the App Store name "IronBoi" by The Combination Rule (bundle identifier `com.thecombinationrule.ironboi`).
 
@@ -50,6 +50,7 @@ Two things stay on your phone and never reach us: a workout you have started but
 - **To speak replies aloud.** In a voice conversation, the text of each coach reply is sent to Google Cloud Text-to-Speech, which returns the audio. If the voice service is unavailable or you reach the daily voice limit, your iPhone's built-in voice reads the reply instead and nothing leaves the device.
 - **To save your progress.** Workouts, daily checks, and your custom plan are stored so you can see them across devices and sessions.
 - **To enforce safety limits.** Per-user daily caps on messages, model tokens, and spoken-reply characters prevent abuse. Hitting a cap is recorded in your audit log.
+- **To tell whether MYO is working.** Once a day we count, across all users, things like how many people finished a first workout or trained twice in a week. The result is totals only, with no names or account IDs, and nothing new is collected to make it. Training-day reminders, if you turn them on, are scheduled on your iPhone; nothing about them is sent to us.
 - **To respond if something goes wrong.** Errors are logged with your account ID so we can debug; no chat content or personal data appears in error logs.
 
 We do **not** use your data:

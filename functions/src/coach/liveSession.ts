@@ -149,6 +149,7 @@ export const LIVE_TOOL_NAMES = [
   "clear_plan_overrides",
   "remember_user_fact",
   "set_preferred_name",
+  "update_training_setup",
   "forget_user_fact",
   "find_exercise_swaps",
 ] as const;

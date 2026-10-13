@@ -72,6 +72,21 @@ describe("acceptProgramProposal", () => {
       clientDecidedAt,
     });
     expect(proposalSnap.data()?.serverDecidedAt).toBeTruthy();
+    // The habit clock starts here (journey/metrics.ts).
+    expect(profileSnap.data()?.onboardingCompletedAt).toBe(result.decidedAt);
+  });
+
+  it("greets the new user in the coach conversation, pointing at today's first session", async () => {
+    await db.doc(programProposalPath(ACCEPT_USER, "proposal-1")).set(makeProposal());
+
+    await acceptProgramProposal(db, ACCEPT_USER, { proposalId: "proposal-1" });
+
+    const welcome = await db.doc(`users/${ACCEPT_USER}/coachSessions/general/messages/welcome_proposal-1`).get();
+    expect(welcome.exists).toBe(true);
+    expect(welcome.data()).toMatchObject({ role: "coach", status: "complete" });
+    expect(welcome.get("content")).toMatch(/1 day a week/);
+    expect(welcome.get("content")).toMatch(/first session is today/);
+    expect(welcome.get("serverCreatedAt")).toBeTruthy();
   });
 
   it("rejects non-pending proposals without activating a plan", async () => {

@@ -10,12 +10,22 @@ import {
 } from "../contracts/coach-agent.js";
 import {
   activeWorkoutPath,
+  profilePath,
   userRoot,
   workoutLogPath,
   workoutPlanPath,
   workoutSessionPath,
 } from "../paths.js";
 import { nextOccurrenceOfWeekday } from "./planAdjustments.js";
+import {
+  buildWorkoutRecap,
+  nextPlannedDay,
+  previousBests,
+  trimToStarter,
+  type WorkoutRecap,
+} from "../journey/recap.js";
+import { writeGeneralCoachMessage } from "../journey/messages.js";
+import { safeLogger } from "../logging/safeLogger.js";
 import { normalizeExerciseKey } from "./exerciseCatalog.js";
 import {
   baselineDocFor,
@@ -34,6 +44,10 @@ export const StartWorkoutSessionRequest = z.object({
   // "today only" dailyOverride for the day being started. Older clients
   // omit it; the session then falls back to startedAt's UTC date.
   clientDate: z.string().date().optional(),
+  // The app asks for the first-ever session as a short starter. Honoured
+  // only while the user has no finished workout, so it can't be used to
+  // trim a normal day.
+  starter: z.boolean().optional(),
 });
 
 export const FinishWorkoutSessionRequest = z.object({
@@ -43,6 +57,8 @@ export const FinishWorkoutSessionRequest = z.object({
   perceivedEffort: z.number().min(1).max(10).optional(),
   postSessionNotes: z.string().optional(),
   exercises: z.array(ActiveWorkoutExercise),
+  // The client's local date, for "next up: Thursday" in the recap.
+  clientDate: z.string().date().optional(),
 });
 
 type StartWorkoutSessionRequest = z.infer<typeof StartWorkoutSessionRequest>;
@@ -65,7 +81,7 @@ export async function startWorkoutSession(
     request.sessionId ??
     `${startedAt.slice(0, 10)}_${request.dayKey.toLowerCase()}_${randomUUID().slice(0, 8)}`;
   const sessionDate = request.clientDate ?? startedAt.slice(0, 10);
-  const { day: dayPlan, fromOverride, planDays } = await loadWorkoutDay(
+  const { day: plannedDay, fromOverride, planDays } = await loadWorkoutDay(
     db,
     userId,
     request.planId,
@@ -73,6 +89,10 @@ export async function startWorkoutSession(
     sessionDate,
     defaultPlan,
   );
+  const dayPlan =
+    request.starter && !fromOverride && !(await hasFinishedWorkout(db, userId))
+      ? trimToStarter(plannedDay)
+      : plannedDay;
 
   // The prescription is DERIVED, not read straight off the plan: an exercise
   // the user has rebaselined starts from their own anchor, advanced by
@@ -180,7 +200,11 @@ export async function finishWorkoutSession(
 ) {
   const activeRef = db.doc(activeWorkoutPath(userId));
   const sessionRef = db.doc(workoutSessionPath(userId, request.sessionId));
-  const [activeSnap, sessionSnap] = await Promise.all([activeRef.get(), sessionRef.get()]);
+  const [activeSnap, sessionSnap, priorLogs] = await Promise.all([
+    activeRef.get(),
+    sessionRef.get(),
+    loadPriorLogs(db, userId, request.sessionId),
+  ]);
   const source = (activeSnap.exists ? activeSnap.data() : sessionSnap.data()) ?? {};
 
   const workoutName =
@@ -267,7 +291,103 @@ export async function finishWorkoutSession(
   // client already makes avoids a second round trip on the finish screen.
   const baselineSuggestions = deriveBaselineSuggestions(completedExercises);
 
-  return { activeWorkout: completedSession, workoutLog: log, baselineSuggestions };
+  const recap = await recapFinishedWorkout(db, userId, request, completedExercises, startedAt, priorLogs);
+
+  return { activeWorkout: completedSession, workoutLog: log, baselineSuggestions, recap };
+}
+
+/**
+ * The end of a workout says something: what you did, one thing noticed, what's
+ * next — written into the conversation so it stays in history, and returned
+ * so the app can say it straight away. Best-effort: the workout is already
+ * saved, so a failure here costs the recap, never the workout.
+ */
+async function recapFinishedWorkout(
+  db: Firestore,
+  userId: string,
+  request: FinishWorkoutSessionRequest,
+  exercises: FinishWorkoutSessionRequest["exercises"],
+  startedAt: string,
+  priorLogs: Array<Record<string, unknown>> | undefined,
+): Promise<WorkoutRecap | undefined> {
+  // Couldn't read history: no recap rather than calling a regular's
+  // workout their "starting point".
+  if (!priorLogs) return undefined;
+  try {
+    const firstWorkout = priorLogs.length === 0;
+    const planSnap = await db.doc(workoutPlanPath(userId, "current")).get();
+    const elapsed = (Date.parse(request.completedAt) - Date.parse(startedAt)) / 1000;
+    const recap = buildWorkoutRecap({
+      exercises,
+      previous: previousBests(priorLogs),
+      firstWorkout,
+      durationSec: request.durationSec ?? (Number.isFinite(elapsed) ? Math.round(elapsed) : undefined),
+      nextDay: nextPlannedDay(planSnap.get("days"), request.clientDate ?? request.completedAt.slice(0, 10)),
+    });
+    const now = new Date().toISOString();
+    await Promise.all([
+      writeGeneralCoachMessage(db, userId, `recap_${request.sessionId}`, recap.lines.join(" "), now),
+      firstWorkout
+        ? db.doc(profilePath(userId)).set({ firstWorkoutAt: request.completedAt }, { merge: true })
+        : Promise.resolve(),
+    ]);
+    return recap;
+  } catch (error) {
+    safeLogger.warn("Workout recap failed", {
+      event: "workout_recap_failed",
+      userId,
+      errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+    });
+    return undefined;
+  }
+}
+
+/** Earlier finished workouts, newest first — what this one is compared with. */
+async function loadPriorLogs(db: Firestore, userId: string, sessionId: string) {
+  try {
+    const snap = await db
+      .collection(`${userRoot(userId)}/workoutLogs`)
+      .orderBy("createdAt", "desc")
+      .limit(30)
+      .get();
+    return snap.docs.filter((doc) => doc.id !== sessionId).map((doc) => doc.data());
+  } catch {
+    return undefined;
+  }
+}
+
+async function hasFinishedWorkout(db: Firestore, userId: string) {
+  const snap = await db.collection(`${userRoot(userId)}/workoutLogs`).limit(1).get();
+  return !snap.empty;
+}
+
+export const RateWorkoutSessionRequest = z.object({
+  sessionId: z.string().min(1),
+  effort: z.enum(["easy", "about_right", "too_much"]),
+});
+export type RateWorkoutSessionRequest = z.infer<typeof RateWorkoutSessionRequest>;
+
+// "How did that feel?" on the 1–10 effort scale the log already carries.
+const EFFORT_SCORE: Record<RateWorkoutSessionRequest["effort"], number> = {
+  easy: 4,
+  about_right: 6,
+  too_much: 9,
+};
+
+/** Saves the answer to "How did that feel?" on the finished workout's log. */
+export async function rateWorkoutSession(
+  db: Firestore,
+  userId: string,
+  request: RateWorkoutSessionRequest,
+) {
+  const logRef = db.doc(workoutLogPath(userId, request.sessionId));
+  const snap = await logRef.get();
+  if (!snap.exists) return { rated: false };
+  await logRef.set(
+    { perceivedEffort: EFFORT_SCORE[request.effort], serverUpdatedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  );
+  return { rated: true, perceivedEffort: EFFORT_SCORE[request.effort] };
 }
 
 async function seedMissingProgressionBaselines(

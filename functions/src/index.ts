@@ -16,6 +16,8 @@ import {
   isRecord,
 } from "./coach/sendMessage.js";
 import { sweepCoachFollowUps } from "./followups/sweep.js";
+import { runHabitMetrics } from "./journey/metrics.js";
+import { TrainingSetupChange, updateTrainingSetup } from "./workouts/trainingSetup.js";
 import { recomputeProgressSummaryIfStale } from "./progress/store.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
@@ -23,6 +25,7 @@ import {
   CoachTips,
   CoachTone,
   LiveWorkoutState,
+  TrainingExperience,
   TrainingFocus,
   ConsentRecord,
   DailyCheck,
@@ -51,6 +54,8 @@ import {
 import {
   FinishWorkoutSessionRequest,
   AbandonWorkoutSessionRequest,
+  RateWorkoutSessionRequest,
+  rateWorkoutSession,
   abandonWorkoutSession,
   StartWorkoutSessionRequest,
   finishWorkoutSession,
@@ -260,9 +265,13 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
   // training focus. Coerce a minimal object so this works for partial
   // profiles too — a user who edited daysPerWeek alone on the You tab still
   // gets a plan.
-  const focus = TrainingFocus.safeParse(profileData.trainingFocus);
+  // Saved under preferences (onboarding, the You tab); top level is legacy.
+  const focus = TrainingFocus.safeParse(profileData.preferences?.trainingFocus ?? profileData.trainingFocus);
+  const experience = TrainingExperience.safeParse(profileData.trainingExperience);
   const profile = {
     trainingFocus: focus.success ? focus.data : undefined,
+    equipment: Array.isArray(profileData.equipment) ? (profileData.equipment as string[]) : undefined,
+    trainingExperience: experience.success ? experience.data : undefined,
     schedule: {
       daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
         ? profileData.schedule.daysPerWeek
@@ -665,6 +674,23 @@ export const abandonWorkoutSessionCallable = onCall(CALLABLE_OPTS, async (reques
   const userId = requireUserId(request.auth);
   const parsed = AbandonWorkoutSessionRequest.parse(request.data ?? {});
   const result = await abandonWorkoutSession(db, userId, parsed);
+  return { ok: true, ...result };
+});
+
+// The You screen's "Your setup": goal, experience, equipment, days, time.
+// Same path the coach uses when you tell it (update_training_setup).
+export const updateTrainingSetupCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = TrainingSetupChange.safeParse(request.data ?? {});
+  if (!parsed.success) throw new HttpsError("invalid-argument", "invalid_training_setup");
+  return await updateTrainingSetup(db, userId, parsed.data, "user");
+});
+
+// "How did that feel?" after a workout — saved on that workout's log.
+export const rateWorkoutSessionCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = RateWorkoutSessionRequest.parse(request.data ?? {});
+  const result = await rateWorkoutSession(db, userId, parsed);
   return { ok: true, ...result };
 });
 
@@ -1100,6 +1126,19 @@ export const dailyCoachFollowUps = onSchedule(
   },
   async () => {
     await sweepCoachFollowUps(db);
+  },
+);
+
+// Is MYO becoming a habit? Counts only, no user ids — see journey/metrics.ts.
+export const dailyHabitMetrics = onSchedule(
+  {
+    schedule: "every day 03:00",
+    timeZone: "America/New_York",
+    region: "us-central1",
+    retryCount: 1,
+  },
+  async () => {
+    await runHabitMetrics(db);
   },
 );
 

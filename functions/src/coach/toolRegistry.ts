@@ -22,6 +22,7 @@ import {
   rejectLatestPlanAdjustmentFromChat,
 } from "../workouts/planAdjustments.js";
 import { safeLogger } from "../logging/safeLogger.js";
+import { TrainingSetupChange, updateTrainingSetup } from "../workouts/trainingSetup.js";
 import type { ToolRegistry } from "../tools/executor.js";
 import type { CoachToolDeclaration } from "./modelProvider.js";
 
@@ -214,6 +215,35 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       type: "object",
       properties: { name: { type: "string", maxLength: 40, description: "Just the name, as they said it." } },
       required: ["name"],
+    },
+  },
+  {
+    name: "update_training_setup",
+    description:
+      "Change the person's standing setup — the things onboarding asked — when they tell you in this message that it has changed for good: their goal, experience, equipment, which days or how many days a week, session length, or when they like to train. Saves it and rebuilds their plan from it (adjustments already ahead, like an injury week, are kept). NOT for one-off or this-week changes (a short day, travel, a sore knee) — those are adapt_plan. Only fields they actually stated; omit the rest. Then say in one line what changed and which days they train now.",
+    parameters: {
+      type: "object",
+      properties: {
+        goals: {
+          type: "array",
+          items: { type: "string", enum: ["strength", "muscle_gain", "fat_loss", "general_fitness", "mobility", "endurance", "habit_building", "return_to_training"] },
+          description: "Their goal now, if they changed it.",
+        },
+        trainingExperience: { type: "string", enum: ["new", "beginner", "intermediate", "advanced"] },
+        equipment: {
+          type: "array",
+          items: { type: "string" },
+          description: "Everything they have now, in their words ('kettlebells', 'dumbbells', 'full gym', 'bodyweight'). A full replacement list, not just what's new — include what they still have if they said so.",
+        },
+        preferredDays: {
+          type: "array",
+          items: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+          description: "Only if they named the days.",
+        },
+        daysPerWeek: { type: "integer", minimum: 1, maximum: 7, description: "If they gave a count but not which days." },
+        sessionLengthMin: { type: "integer", minimum: 15, maximum: 120 },
+        preferredTime: { type: "string", description: "24h HH:MM, if they said when they train ('6am' → 06:00)." },
+      },
     },
   },
   {
@@ -641,6 +671,25 @@ export function buildCoachToolRegistry(
         payload: {},
       });
       return { ok: true, name };
+    },
+    update_training_setup: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      // Only from something the person said, never on the coach's own idea.
+      if (!(context.rawUserText ?? "").trim()) {
+        return { ok: false, error: "no_user_message", hint: "Only change their setup when they ask in this message." };
+      }
+      const parsed = TrainingSetupChange.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "update_training_setup", parsed.error.issues);
+        return { ok: false, error: "invalid_training_setup", hint: "Send only the fields they stated, with the allowed values." };
+      }
+      const result = await updateTrainingSetup(db, userId, parsed.data, "coach");
+      safeLogger.info("Coach updated training setup", {
+        event: "coach_training_setup_updated",
+        userId,
+        outcome: result.rebuiltPlan ? "rebuilt" : "saved",
+      });
+      return result;
     },
     forget_user_fact: async (rawArgs) => {
       const { userId, ...args } = rawArgs;
