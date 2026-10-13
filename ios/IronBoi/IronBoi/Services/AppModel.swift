@@ -24,9 +24,18 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var profileLoaded = false
     @Published private(set) var onboardingStep: String = "goals"
     @Published private(set) var onboardingMissingFields: [String] = []
+    /// The answers so far (server-normalized), so onboarding can resume with
+    /// its "your plan" stack filled in.
+    @Published private(set) var onboardingDraft: [String: Any] = [:]
     @Published private(set) var pendingProgramProposal: ProgramProposalSummary?
     @Published private(set) var pendingPlanAdjustmentProposal: PlanAdjustmentProposalSummary?
-    @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
+    @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary? {
+        // Reminders follow the plan's training days.
+        didSet {
+            guard !isPreviewSession, let days = currentWorkoutPlan?.days else { return }
+            TrainingReminders.shared.update(trainingDays: days.filter { !$0.exercises.isEmpty }.map(\.dayKey))
+        }
+    }
     @Published private(set) var activeWorkout: ActiveWorkoutSession? {
         didSet {
             saveLocalWorkout()
@@ -104,6 +113,17 @@ final class AppModel: NSObject, ObservableObject {
     /// After finishing: today's changes, waiting on "keep them?".
     @Published var pendingSessionChanges: [String] = []
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
+    /// The first snapshot of workoutLogs has arrived — until then an empty
+    /// list means "not loaded", not "never trained".
+    @Published private(set) var workoutLogsLoaded = false
+    /// What the coach says as the workout that just finished ends; the coach
+    /// screen takes it once (consumeRecap) when the workout closes.
+    @Published private(set) var lastRecap: WorkoutRecap?
+    /// The workout waiting on "How did that feel?".
+    @Published private(set) var pendingEffortSessionId: String?
+    /// When the workout that just finished started — the reminder card
+    /// suggests that time.
+    private(set) var lastWorkoutStartedAt: Date?
     @Published private(set) var progressSummary: ProgressSummaryModel?
     /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
     /// otherwise — the memory screen groups proposed / active / ended.
@@ -651,6 +671,23 @@ final class AppModel: NSObject, ObservableObject {
     /// what to do next.
     @Published private(set) var planChangesAccepted = 0
 
+    /// Signed up, plan accepted, no workout finished yet: the first session
+    /// is a short starter, and it's on offer even on a rest day.
+    var isNewToTraining: Bool {
+        workoutLogsLoaded && workoutLogs.isEmpty && activeWorkoutIsFirstSessionCandidate
+    }
+
+    /// A workout already underway with sets logged isn't "new" any more.
+    private var activeWorkoutIsFirstSessionCandidate: Bool {
+        activeWorkout == nil || !activeWorkoutHasProgress
+    }
+
+    /// The recap for the workout that just ended, once.
+    func consumeRecap() -> WorkoutRecap? {
+        defer { lastRecap = nil }
+        return lastRecap
+    }
+
     func startTodaysWorkout() async {
         await startWorkout(dayKey: Self.currentDayKey())
     }
@@ -693,6 +730,9 @@ final class AppModel: NSObject, ObservableObject {
                     // Local calendar date — the backend uses it to resolve a
                     // "just today" dailyOverride for the day being started.
                     "clientDate": Self.currentDateISO(),
+                    // The first-ever session is a short starter (the server
+                    // checks it really is the first).
+                    "starter": isNewToTraining,
                 ]
             )
             activeWorkout = response.activeWorkout
@@ -991,8 +1031,12 @@ final class AppModel: NSObject, ObservableObject {
         let performed = activeWorkout.exercises.filter {
             !skippedExercises.contains($0.exerciseIndex) || $0.completedSets.contains(where: \.completed)
         }
+        lastWorkoutStartedAt = Self.parseISO(activeWorkout.startedAt)
         #if DEBUG
         if isPreviewSession {
+            let sets = performed.reduce(0) { $0 + $1.completedSetCount }
+            lastRecap = WorkoutRecap(lines: ["\(performed.count) moves, \(sets) sets."], firstWorkout: workoutLogs.isEmpty)
+            pendingEffortSessionId = activeWorkout.sessionId
             self.activeWorkout = nil
             pendingSessionChanges = changes
             return
@@ -1004,9 +1048,15 @@ final class AppModel: NSObject, ObservableObject {
             let response: FinishWorkoutResponse = try await callCallable("finishWorkoutSessionCallable", data: [
                     "sessionId": activeWorkout.sessionId,
                     "completedAt": completedAt,
+                    "clientDate": Self.currentDateISO(),
                     "exercises": try Self.jsonObject(from: performed),
                 ]
             )
+            // Set before the workout closes: the coach screen reads it the
+            // moment activeWorkout goes nil.
+            lastRecap = response.recap
+            pendingEffortSessionId = activeWorkout.sessionId
+            TrainingReminders.shared.markTrainedToday()
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
             pendingSessionChanges = changes
             // Surface the rebaseline card. Nothing has been written yet —
@@ -1018,6 +1068,28 @@ final class AppModel: NSObject, ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// "How did that feel?" — saved on the finished workout's log. The card
+    /// goes away either way; the answer is a nice-to-have, not a gate.
+    func rateWorkout(_ effort: WorkoutEffort) async {
+        guard let sessionId = pendingEffortSessionId else { return }
+        pendingEffortSessionId = nil
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        do {
+            try await callCallable("rateWorkoutSessionCallable", data: [
+                "sessionId": sessionId,
+                "effort": effort.rawValue,
+            ])
+        } catch {
+            AudioHub.log("effort not saved: \(error.localizedDescription)")
+        }
+    }
+
+    func skipEffortQuestion() {
+        pendingEffortSessionId = nil
     }
 
     // MARK: - Exercise swaps
@@ -1246,6 +1318,7 @@ final class AppModel: NSObject, ObservableObject {
         profileLoaded = false
         onboardingStep = "goals"
         onboardingMissingFields = []
+        onboardingDraft = [:]
 
         guard let userId else { return }
 
@@ -1269,6 +1342,12 @@ final class AppModel: NSObject, ObservableObject {
                     self?.profileLoaded = true
                     self?.onboardingStep = data["onboardingStep"] as? String ?? "goals"
                     self?.onboardingMissingFields = data["onboardingMissingFields"] as? [String] ?? []
+                    self?.onboardingDraft = data["onboardingDraft"] as? [String: Any] ?? [:]
+                    // A training time set elsewhere (onboarding, or told to the
+                    // coach) moves the phone's reminders too.
+                    if let time = data["preferredTime"] as? String {
+                        TrainingReminders.shared.adoptServerTime(time)
+                    }
                     // Full profile struct — Preferences view reads from this
                     // and pre-fills its form fields.
                     self?.profile = UserProfile.from(firestoreData: data)
@@ -1305,6 +1384,21 @@ final class AppModel: NSObject, ObservableObject {
     /// or preferredDays — the chat-based onboarding generates the plan
     /// the first time, this lets the user request a fresh one without
     /// re-running onboarding.
+    /// Change what onboarding asked (goal, experience, equipment, days,
+    /// time). The server saves it and rebuilds the plan when it should; the
+    /// listeners bring the new profile and plan back.
+    func updateTrainingSetup(_ change: [String: Any]) async -> TrainingSetupResult? {
+        #if DEBUG
+        if isPreviewSession { return nil }
+        #endif
+        do {
+            return try await callCallable("updateTrainingSetupCallable", data: change)
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func regenerateWorkoutPlan() async {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
@@ -1436,6 +1530,8 @@ final class AppModel: NSObject, ObservableObject {
     func recomputeCurrentWorkoutPlanForToday() {
         guard let latestWorkoutPlanData else { return }
         currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: latestWorkoutPlanData)
+        // Back in the app: roll the two-week reminder window forward.
+        if !isPreviewSession { Task { await TrainingReminders.shared.reschedule() } }
     }
 
     private func listenForActiveWorkout(userId: String?) {
@@ -1488,6 +1584,7 @@ final class AppModel: NSObject, ObservableObject {
     private func listenForWorkoutLogs(userId: String?) {
         workoutLogListener?.remove()
         workoutLogs = []
+        workoutLogsLoaded = false
 
         guard let userId else { return }
 
@@ -1505,6 +1602,7 @@ final class AppModel: NSObject, ObservableObject {
                     }
                     self?.workoutLogs = (snapshot?.documents ?? [])
                         .compactMap { Self.makeWorkoutLogSummary(from: $0.data()) }
+                    self?.workoutLogsLoaded = true
                 }
             }
     }

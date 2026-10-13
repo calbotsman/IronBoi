@@ -51,7 +51,8 @@ struct AppRootView: View {
                 // Signed in, profile still loading: plain paper, no guessing.
                 PaperBackground().ignoresSafeArea()
             } else if appModel.user != nil && appModel.onboardingStatus != .complete {
-                OnboardingView()
+                // Same stage as home: the coach asks, you tap, talk or type.
+                OnboardingStageView()
             } else {
                 // One screen: the coach. Plan, History and You live behind
                 // the profile icon in its corner.

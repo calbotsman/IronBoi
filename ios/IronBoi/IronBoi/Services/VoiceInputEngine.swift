@@ -398,6 +398,45 @@ final class VoiceInputEngine: ObservableObject {
         }
     }
 
+    // MARK: - Permissions, asked before a workout rather than mid-set
+
+    /// Speech recognition or the mic hasn't been asked about yet.
+    static var permissionsUndetermined: Bool {
+        SFSpeechRecognizer.authorizationStatus() == .notDetermined || micPermission == .undetermined
+    }
+
+    /// Both granted: counting reps out loud can work.
+    static var permissionsGranted: Bool {
+        SFSpeechRecognizer.authorizationStatus() == .authorized && micPermission == .granted
+    }
+
+    private enum MicPermission { case granted, denied, undetermined }
+
+    private static var micPermission: MicPermission {
+        if #available(iOS 17.0, *) {
+            switch AVAudioApplication.shared.recordPermission {
+            case .granted: return .granted
+            case .denied: return .denied
+            default: return .undetermined
+            }
+        }
+        switch AVAudioSession.sharedInstance().recordPermission {
+        case .granted: return .granted
+        case .denied: return .denied
+        default: return .undetermined
+        }
+    }
+
+    /// Shows iOS's prompts now (after MYO has said why). True if both granted.
+    func requestPermissionsIfNeeded() async -> Bool {
+        do {
+            try await requestPermissions()
+            return true
+        } catch {
+            return false
+        }
+    }
+
     private func requestPermissions() async throws {
         let speechStatus = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in

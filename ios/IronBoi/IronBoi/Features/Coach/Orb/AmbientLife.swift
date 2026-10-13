@@ -51,6 +51,11 @@ struct AmbientLife {
         return frame(at: t)
     }
 
+    // One act at a time, for GenerativeLife's occasional showpiece.
+    mutating func startAct(at t: Float) { act = next(at: t) }
+    func isFinished(at t: Float) -> Bool { finished(at: t) }
+    func currentFrame(at t: Float) -> BodyPose? { frame(at: t) }
+
     /// Talking, thinking, listening: be a blob, back in the middle, and pick
     /// back up a beat after.
     mutating func rest(until t: Float) {

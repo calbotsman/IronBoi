@@ -27,7 +27,6 @@ final class CoachVoice: NSObject, ObservableObject {
 
     private let hub = AudioHub.shared
     private var generation = 0
-    private var meterTapInstalled = false
 
     // On-device fallback.
     private let synthesizer = AVSpeechSynthesizer()
@@ -149,14 +148,24 @@ final class CoachVoice: NSObject, ObservableObject {
 
     /// The orb reacts to what you actually hear: loudness, syllables and
     /// spectral bands analysed off the player's output.
+    /// The voice whose meter is on the shared player, and the player it's on.
+    /// More than one screen has a voice (onboarding, then the coach), and the
+    /// player allows ONE tap: installing a second aborts the app.
+    private static weak var tapOwner: CoachVoice?
+    private static weak var tappedPlayer: AVAudioNode?
+
     private func installMeterTap() {
-        guard !meterTapInstalled else { return }
+        let player = hub.player
+        guard Self.tapOwner !== self || Self.tappedPlayer !== player else { return }
+        // Whoever had it (another screen's voice): this voice's body moves now.
+        if Self.tappedPlayer === player { player.removeTap(onBus: 0) }
         let analyzer = MicAnalyzer()
         let meter = self.meter
-        hub.player.installTap(onBus: 0, bufferSize: 1_024, format: AudioHub.voiceFormat) { buffer, _ in
+        player.installTap(onBus: 0, bufferSize: 1_024, format: AudioHub.voiceFormat) { buffer, _ in
             analyzer.process(buffer, into: meter)
         }
-        meterTapInstalled = true
+        Self.tapOwner = self
+        Self.tappedPlayer = player
     }
 
     /// Sentences, merged so each request is a natural phrase (≤ ~220 chars)

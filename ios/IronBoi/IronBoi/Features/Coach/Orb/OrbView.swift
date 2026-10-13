@@ -174,7 +174,11 @@ final class OrbModel {
     private(set) var armDepth: Float = 0
     private var bodyScale: Float = 1
     private var life = WorkoutLife()
-    private var ambientLife = AmbientLife()
+    private var ambientLife = GenerativeLife()
+    /// Where the body is heading; it glides there instead of jumping when
+    /// the layout moves it.
+    private var anchorShown: SIMD2<Float>?
+    private var anchorVelocity = SIMD2<Float>(0, 0)
     /// Scaled with the body, so the person shrinks with the blob when a card
     /// takes the space below.
     var jointArray: [Float] {
@@ -190,7 +194,8 @@ final class OrbModel {
               demo: ExerciseMotion? = nil, ambient: Bool = false,
               lesson: LessonCue? = nil, counting: Bool = false, youTalking: Bool = false,
               spawnY: Float? = nil, stagedBloops: Bool = false, resting: Bool = false,
-              scale: Float = 1, reduceMotion: Bool) {
+              scale: Float = 1, ceiling: Float? = nil, gaze: SIMD2<Float>? = nil, nudge: Int = 0,
+              showpieces: Bool = false, reduceMotion: Bool) {
         bodyScale += (scale - bodyScale) * 0.15
         let now = CACurrentMediaTime()
         let dt = Float(min(max(now - (lastFrame ?? now), 0), 0.05))
@@ -228,7 +233,18 @@ final class OrbModel {
             liftVelocity += (-(w * w) * (lift - liftTarget) - 2 * z * w * liftVelocity) * dt
             lift += liftVelocity * dt
         }
-        center = anchor + SIMD2(0, lift)
+        // Glide to a new resting place (a spring), so a layout change moves
+        // the body rather than teleporting it.
+        var shown = anchorShown ?? anchor
+        if reduceMotion {
+            shown = anchor
+        } else {
+            let w: Float = 9, z: Float = 0.85
+            anchorVelocity += ((anchor - shown) * (w * w) - anchorVelocity * (2 * z * w)) * dt
+            shown += anchorVelocity * dt
+        }
+        anchorShown = shown
+        center = shown + SIMD2(0, lift)
         // Mass: where the blob is going, and how fast.
         if let previous = previousCenter, dt > 0 {
             let v = (center - previous) / dt
@@ -346,8 +362,15 @@ final class OrbModel {
                 if !reduceMotion, let alive = life.pose(motion: loop, setsDone: setsDone, time: time) {
                     pose = alive
                 }
-            } else if ambient, phase == .rest, !reduceMotion, let alive = ambientLife.pose(time: time) {
-                pose = alive
+            } else if ambient, phase == .rest, !reduceMotion {
+                // What's around it, in its own joint units.
+                let unit = max(bodyScale * Self.size, 0.01)
+                let context = LifeContext(
+                    headroom: ceiling.map { ($0 - center.y) / unit } ?? .infinity,
+                    gaze: gaze.map { ($0 - center) / unit },
+                    nudge: nudge,
+                    showpieces: showpieces)
+                if let alive = ambientLife.pose(time: time, context: context) { pose = alive }
             }
         }
         // The blob, as a person: every joint at its centre, as wide as it
@@ -612,6 +635,15 @@ struct OrbView: View {
     /// Between sets: breathe slow and deep.
     var resting = false
     var setsDone = 0
+    /// The lowest thing on screen above the body, in points from the top —
+    /// it crouches to fit under it.
+    var ceiling: CGFloat? = nil
+    /// Something to look at, in points.
+    var gaze: CGPoint? = nil
+    /// Bump when something new lands above: it ducks and looks.
+    var nudge = 0
+    /// Now and then break into a big act (walk, jump, dance) — home only.
+    var showpieces = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(YouColor.storageKey) private var youHex = YouColor.defaultHex
@@ -628,7 +660,11 @@ struct OrbView: View {
                                    ambient: ambient, lesson: lesson, counting: counting, youTalking: youTalking,
                                    spawnY: bloopStart.map { -Float(($0 - size.height / 2) / (min(size.width, size.height) / 2)) },
                                    stagedBloops: stagedBloops, resting: resting,
-                                   scale: Float(scale), reduceMotion: reduceMotion)
+                                   scale: Float(scale),
+                                   ceiling: ceiling.map { toShader(CGPoint(x: 0, y: $0), in: size).y },
+                                   gaze: gaze.map { toShader($0, in: size) },
+                                   nudge: nudge, showpieces: showpieces,
+                                   reduceMotion: reduceMotion)
                 Rectangle()
                     .fill(Color.white)
                     .colorEffect(ShaderLibrary.oneBody(
@@ -664,9 +700,14 @@ struct OrbView: View {
     /// Converts the resting point from points to shader units.
     private func anchor(in size: CGSize) -> SIMD2<Float> {
         guard let focus, size.width > 0, size.height > 0 else { return .zero }
+        return toShader(focus, in: size)
+    }
+
+    private func toShader(_ point: CGPoint, in size: CGSize) -> SIMD2<Float> {
+        guard size.width > 0, size.height > 0 else { return .zero }
         let half = Float(min(size.width, size.height)) / 2
-        return SIMD2(Float(focus.x - size.width / 2) / half,
-                     -Float(focus.y - size.height / 2) / half)
+        return SIMD2(Float(point.x - size.width / 2) / half,
+                     -Float(point.y - size.height / 2) / half)
     }
 }
 

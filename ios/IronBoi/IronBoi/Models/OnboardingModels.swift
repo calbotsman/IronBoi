@@ -14,15 +14,6 @@ enum CoachInputMode: String {
     case liveVoice = "live_voice"
 }
 
-struct OnboardingChoice: Identifiable, Equatable {
-    let id: String
-    let label: String
-    let structuredAnswer: [String: Any]
-
-    static func == (lhs: OnboardingChoice, rhs: OnboardingChoice) -> Bool {
-        lhs.id == rhs.id && lhs.label == rhs.label
-    }
-}
 
 struct ProgramProposalSummary: Identifiable, Equatable {
     let id: String

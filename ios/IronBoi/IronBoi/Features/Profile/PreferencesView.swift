@@ -9,6 +9,9 @@ struct PreferencesView: View {
     @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = false
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
+    /// Training-day nudges — on the phone, not part of the saved profile.
+    @ObservedObject private var reminders = TrainingReminders.shared
+    @State private var reminderNote: String?
 
     // Local editing copy. Seeded from appModel.profile on appear and
     // refreshed if Firestore pushes a new version while we're not editing.
@@ -41,6 +44,8 @@ struct PreferencesView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: MyoTheme.Spacing.xl) {
+                    // What onboarding asked, editable with the same choices.
+                    SetupCard()
                     trainingCard
                     whoYouAreCard
                     goalsCard
@@ -74,8 +79,12 @@ struct PreferencesView: View {
                 draft = appModel.profile
                 withAnimation(.easeOut(duration: 0.2)) { contentVisible = true }
             }
-            .onChange(of: appModel.profile) { _, next in
-                if !appModel.isSavingProfile, !hasLocalEdits { draft = next }
+            .onChange(of: appModel.profile) { previous, next in
+                // Changed elsewhere (the setup card, the coach): follow it,
+                // unless you were mid-edit here. Comparing with the PREVIOUS
+                // profile — against the new one, every outside change looked
+                // like an unsaved edit and lit up Save.
+                if !appModel.isSavingProfile, draft == previous { draft = next }
             }
         }
     }
@@ -231,22 +240,6 @@ struct PreferencesView: View {
                     .monospacedDigit()
                     .frame(maxWidth: 96)
             }
-
-            MyoHairline().padding(.vertical, MyoTheme.Spacing.xs)
-
-            MyoSectionLabel(text: "Experience")
-            // Single-select chip row instead of a system segmented control,
-            // to hold the cream palette (Deter: no system chrome on paper).
-            FlowLayout(spacing: MyoTheme.Spacing.sm) {
-                ForEach(TrainingExperience.allCases) { level in
-                    MyoSelectChip(
-                        label: level.displayName,
-                        isSelected: draft.trainingExperience == level
-                    ) {
-                        draft.trainingExperience = level
-                    }
-                }
-            }
         }
     }
 
@@ -254,28 +247,8 @@ struct PreferencesView: View {
 
     private var goalsCard: some View {
         MyoGroupCard {
-            MyoSectionLabel(text: "Your goals")
-
-            FlowLayout(spacing: MyoTheme.Spacing.sm) {
-                ForEach(GoalType.allCases) { goal in
-                    MyoSelectChip(
-                        label: goal.displayName,
-                        isSelected: draft.goals.contains(goal)
-                    ) {
-                        if let i = draft.goals.firstIndex(of: goal) {
-                            draft.goals.remove(at: i)
-                        } else {
-                            draft.goals.append(goal)
-                        }
-                    }
-                }
-            }
-
-            if draft.goals.isEmpty {
-                Text("Pick at least one.")
-                    .font(.caption)
-                    .foregroundStyle(MyoTheme.Colors.ochre)
-            }
+            // The goal itself is in "Your setup" at the top.
+            MyoSectionLabel(text: "A specific target")
 
             TextField(
                 "Any specific target? e.g. squat 2× bodyweight",
@@ -294,18 +267,8 @@ struct PreferencesView: View {
 
     private var setupCard: some View {
         MyoGroupCard {
-            MyoSectionLabel(text: "Your program")
-
-            Stepper(value: Binding(
-                get: { draft.schedule.daysPerWeek ?? 3 },
-                set: { draft.schedule.daysPerWeek = $0 }
-            ), in: 1...7) {
-                MyoValueRow(label: "Days per week") {
-                    Text("\(draft.schedule.daysPerWeek ?? 3)")
-                        .font(.body).monospacedDigit()
-                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
-                }
-            }
+            // Days and time are in "Your setup" at the top.
+            MyoSectionLabel(text: "Sessions")
 
             Stepper(value: Binding(
                 get: { draft.schedule.sessionLengthMin ?? 45 },
@@ -318,24 +281,16 @@ struct PreferencesView: View {
                 }
             }
 
-            MyoValueRow(label: "Preferred time") {
-                Picker("Preferred time", selection: $draft.preferences.preferredWorkoutTime) {
-                    ForEach(PreferredWorkoutTime.allCases) { Text($0.displayName).tag($0) }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-            }
-
             MyoHairline().padding(.vertical, MyoTheme.Spacing.xs)
 
-            MyoSectionLabel(text: "Equipment")
+            MyoSectionLabel(text: "All your equipment")
             tagEditor(
                 tags: $draft.equipment,
                 draft: $newEquipment,
                 placeholder: "Add equipment (e.g. barbell)",
                 sentinel: "Bodyweight"
             )
-            Text("What you have access to. Helps Coach pick exercises you can actually do.")
+            Text("Anything beyond the basics in Your setup — a pull-up bar, a rower. Coach picks exercises you can actually do.")
                 .font(.caption)
                 .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
         }
@@ -411,6 +366,45 @@ struct PreferencesView: View {
             MyoValueRow(label: "Live voice (beta)") {
                 Toggle("Live voice (beta)", isOn: $liveVoiceBeta).labelsHidden()
             }
+
+            MyoValueRow(label: "Training-day reminders") {
+                Toggle("Training-day reminders", isOn: Binding(
+                    get: { reminders.enabled },
+                    set: { on in
+                        if on {
+                            Task {
+                                let ok = await reminders.enable(at: reminders.time)
+                                reminderNote = ok ? nil : "Notifications are off for MYO in Settings."
+                            }
+                        } else {
+                            reminders.disable()
+                            reminderNote = nil
+                        }
+                    }
+                ))
+                .labelsHidden()
+            }
+            if reminders.enabled {
+                MyoValueRow(label: "Reminder time") {
+                    DatePicker("Reminder time", selection: Binding(
+                        get: { reminders.time },
+                        set: { time in Task { await reminders.enable(at: time) } }
+                    ), displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                }
+            }
+            if let reminderNote {
+                Text(reminderNote)
+                    .font(.footnote)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+            }
+            #if DEBUG
+            Button("Send a test reminder in 10 seconds") {
+                Task { await reminders.sendTest() }
+            }
+            .font(.footnote.weight(.semibold))
+            .tint(MyoTheme.Colors.ink)
+            #endif
 
             MyoValueRow(label: "Methodology") {
                 Picker("Methodology", selection: $draft.preferences.trainingFocus) {
