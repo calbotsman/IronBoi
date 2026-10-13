@@ -2,298 +2,373 @@
 
 ## Context
 
-Josh asked on 2026-10-13: what happens when someone opens MYO and says "I want to do yoga" or "I'm a runner"? Is the system smart, flexible and generative enough? It isn't today. This plan covers how to make MYO coach any training (lifting, yoga and mobility, running and cardio, sports, or a mix) without losing what makes it good: a coach that talks, remembers you and keeps you safe.
+Josh asked on 2026-10-13: what happens when someone opens MYO and says "I want to do yoga" or "I'm a runner"? Is the system smart, flexible and generative enough? It isn't today. This plan covers how MYO grows past lifting without losing what makes it good: a coach that talks, remembers you and keeps you safe.
 
-Everything under "today" was checked in the code on 2026-10-13. Sources for the science and data are linked inline.
+Everything under "today" was checked in the code on 2026-10-13.
+
+**Revision 2 (same day), after an adversarial review.** Four independent critics attacked the first draft: engineering, safety and liability, product strategy, and licensing. Their main findings were verified in the code and at the sources. The biggest changes:
+1. **Sequencing.** Fix voice first and prove lifting retention, behind two gates, before any big rebuild.
+2. **Data.** The "public domain" exercise database turned out to contain scraped text and images, so we take facts only and write our own words.
+3. **Safety.** Today's doctor screen is a keyword match, not a real screen; it gets fixed now.
+4. **Generated content.** Nothing the AI writes is shared or shown on the body until a qualified person reviews it.
+
+Section 11 lists every change.
 
 ## The short version
 
-1. **A workout stops being "sets × reps × weight".** It becomes a list of blocks, and each block is one of six kinds: reps, hold, timed intervals, distance, flow, or free activity.
-2. **A real library replaces the 74-lift list.** Exercises, poses, drills and run workouts, each with cues, muscles worked, who should avoid it, easier and harder versions, and a move for the body. It is searchable by meaning, not just by keyword.
-3. **The AI designs the plan; the rules check it.** The coach writes each plan from your goals using the library, and code-level rules for safety, volume and progression accept or fix it. Today the coach never builds plans: two fixed templates do.
-4. **Anything missing gets written once and kept.** A pose or drill the library doesn't have is drafted by the AI, checked, and saved for everyone.
-5. **The app coaches each block its own way.** It counts reps, times holds, calls intervals, tracks a run, and walks you through a flow. The body shows the pose or the move.
-6. **No model training.** It all runs on retrieval: the coach looks things up as it goes, so adding knowledge means adding data, never retraining a model.
+1. **Not yet: fix the floor first.** Voice reliability, counting and reply speed are still open. No retention data on lifting exists. Expansion waits behind two gates (§8).
+2. **Now, small and safe:**
+   - a real **hold** (timed) block, so a plank stops being "4 sets of 60";
+   - session time actually logged;
+   - a proper **safety screen** (today's is one question and a keyword match);
+   - the coach saying honestly what it doesn't coach yet;
+   - a **"what do you like to do?"** question that measures demand before we build.
+3. **Next, if lifting retains: mobility inside lifting plans.** Warm-ups, cool-downs, "my back is tight today". It's the same wedge user, needs no new onboarding branch, and we can measure whether it lifts lifting retention.
+4. **Then the AI planner,** for lifting and mobility only. It's checked by code-level rules and judged against a fixed test set before it replaces templates.
+5. **Then running or yoga, whichever real users ask for.** If running: strength for runners first (read their runs from Apple Health, plan strength around them), then Couch to 5K on the phone's timer (no GPS needed).
+6. **The model underneath:** a workout becomes a list of **blocks**: reps, hold, intervals, distance, flow, free. It's introduced gradually, with old app builds still working.
+7. **The library:** facts from open sources (names, muscles, equipment, levels); every word of instruction written by us; no third-party images. The body, our own renders, is the visual.
+8. **No model training.** The coach looks things up as it goes. Adding knowledge means adding data.
 
 ## Today (verified)
 
-**One shape for everything.** Every exercise in the system is `{name, sets, reps, weight}`.
-- Timed work is squeezed in by putting seconds in `reps`: Plank 4×60, "HIIT Sprints (20s on/10s off)" 8×1 with the interval in the name, and Sandbag Carry 4×40 with no unit at all.
-- The schema says so in a comment: "Timed holds live in `reps` as seconds" (`functions/src/contracts/tool-calls.ts:132-146`).
-- Workout logs already have `durationSec` and `distanceM` fields per set, but nothing ever writes them (`workouts/activeWorkout.ts:236-245`). iOS doesn't even send session length.
+**One shape for everything.** Every exercise is `{name, sets, reps, weight}`.
+- Timed work is squeezed in by putting seconds in `reps`: Plank 4×60, "HIIT Sprints (20s on/10s off)" 8×1 with the interval in the name, and Sandbag Carry 4×40 with no unit. The schema says so: "Timed holds live in `reps` as seconds" (`functions/src/contracts/tool-calls.ts:132-146`).
+- Per-set `durationSec`/`distanceM` exist on workout logs (`contracts/coach-agent.ts:329-330`) but are never written.
+- Session `durationSec` is written by the server (`workouts/activeWorkout.ts:248`) but is always empty, because iOS doesn't send it (`AppModel.swift:1115-1120`). The recap works the time out from `startedAt` instead.
 
-**Plans come from templates, not from the coach.**
-- `buildWorkoutPlanFromProfile` (`onboarding/flow.ts:616`) picks training days, builds a full-body or split week from a fixed 5-day push/pull/legs seed (`domain/ironlab-seed.json`), filters by equipment and scales loads.
-- The focuses `mobility_recovery` and `endurance_conditioning` exist, but both turn into a full-body *lifting* week (`flow.ts:650-665`).
-- Ask the coach for yoga and you get squats, push-ups, lunges, a 30-second plank and jumping jacks (`workouts/planAdjustments.ts:1886, 2201-2207`).
-- The only place the AI touches a plan is `adapt_plan`, and its patches are sets, reps and pounds.
+**Plans come from templates, not the coach.**
+- `buildWorkoutPlanFromProfile` (`onboarding/flow.ts:616`) builds a full-body or split week from a fixed push/pull/legs seed (`domain/ironlab-seed.json`), filters by equipment, and scales loads. It's deterministic and takes milliseconds.
+- `mobility_recovery` and `endurance_conditioning` both become a lifting week (`flow.ts:650-665`).
+- Ask for yoga and you get squats, push-ups, lunges, a 30-second plank and jumping jacks (`workouts/planAdjustments.ts:1886, 2201-2207`).
+- The AI only touches plans through `adapt_plan`, in sets, reps and pounds.
 
 **The library is small and lifting-only.**
-- 74 catalog entries with muscles, equipment, pattern and a load class (`workouts/exerciseCatalog.ts`). Cues and demo videos live separately, on the phone (`Models/ExerciseKnowledge.swift`).
-- 19 hand-written knowledge entries, retrieved by keyword and tag scoring, not by meaning (`corpus/researchCorpus.ts:497-560`).
+- 74 catalog entries (`workouts/exerciseCatalog.ts`), with cues and videos kept separately on the phone (`Models/ExerciseKnowledge.swift`).
+- 18 hand-written knowledge entries, retrieved by keyword and tag scoring (`corpus/researchCorpus.ts:497-560`).
+
+**Identity is the name.** Baselines, history and swaps are keyed by `normalizeExerciseKey(name)` (`workouts/exerciseBaselines.ts:90, 201`). Renaming or merging exercises breaks a user's starting weights and progression state.
 
 **Progress only understands weight.**
-- Progression, baselines, the rep gate, e1RM, volume and the recap's "new best" are all about weight and reps (`workouts/exerciseBaselines.ts`, `rollover.ts`, `progress/build.ts`, `journey/recap.ts`).
-- A held plank's seconds are compared as reps. Bodyweight and timed work count for nothing.
+- Progression, baselines, the rep gate (`workouts/rollover.ts`), e1RM and volume (`progress/build.ts`), and the recap's "new best" are weight-and-reps only.
+- A plank's 60 seconds is logged as 60 reps, which already pollutes volume history.
 
 **The phone can only do reps.**
-- The workout card shows "sets × reps" with a ±5 lb stepper. The coach announces a plank as "4 sets of 60". Voice counting needs three counted reps to log a set.
-- Rest is 60 or 90 seconds. There's no hold timer, interval timer, GPS or pace anywhere.
-- "Is this timed?" is guessed from the name (plank, jog, sprint) just to relabel a column (`WorkoutView.swift:562`).
-- The backend can take in Apple Health workouts (`health/ingest.ts`), but the app has no HealthKit code.
+- The card shows "sets × reps" with a ±5 lb stepper. A plank is announced as "4 sets of 60".
+- Rest is 60 or 90 seconds. There's no hold timer, interval timer, GPS or pace.
+- Old app builds drop any exercise without `sets` and `reps`: `makePlannedExercise` returns nil (`AppModel.swift:2129-2141`). Server schemas are `.strict()`, so unknown fields are rejected.
+- Background audio is the only background mode (`Info.plist`). There's no HealthKit code or entitlement, though the backend can take in Health data (`health/ingest.ts`).
 
-**So:** a runner gets a lifting plan with a jog in it, and a yogi gets bodyweight squats. The foundation (a talking coach, memory, a safety screen, a body that can demonstrate) is strong. The training model under it is narrow.
+**The safety screen is thin.**
+- Onboarding asks one free-text question ("does anything hurt, or has a doctor told you to limit exercise?") and flags clearance with a keyword match: `doctor|physician|cardiolog|chest pain|dizz|faint|pass out|heart` (`onboarding/flow.ts:74, 1099`).
+- "Type 2 diabetes" or "kidney disease" don't trigger it, while "my heart isn't in it" does.
+- It never asks how active someone is now, about known heart, metabolic or kidney disease, or how hard they want to train: the three things the ACSM screening model uses.
+
+**So:** a runner gets a lifting plan with a jog in it, a yogi gets bodyweight squats, and the safety screen can miss real conditions. The foundation (a talking coach, memory, a body that demonstrates) is strong. The training model and the screen under it are narrow.
 
 ## Who this is for (and the wedge)
 
-MYO's wedge is the anxious or returning lifter the gym-bro apps lose in week two (`docs/strategy/myo-wedge-and-competitor-map.md`). Flexibility *widens the front door* for that same person; it doesn't change who they are:
+MYO's wedge is the anxious or returning lifter the gym-bro apps lose in week two (`docs/strategy/myo-wedge-and-competitor-map.md`). The positioning stays **"strength without the gym-bro"**. Mobility and runs come in as *supporting* work, not as a pivot to "a coach for everything". Competing head-on with Down Dog, Fitness+, Peloton (whose AI is moving into flexibility) or Strava with Runna is the losing game. Where a conversational coach wins is fitting other training *around* the person's strength work, and explaining why.
 
-| They say | What they need from MYO |
+| They say | What MYO does (eventually) |
 |---|---|
-| "I want to do yoga" | Short guided flows they can do at home, poses shown by the body, alignment cues, and a path to more |
-| "I'm a runner" | Easy and hard runs in the right mix, paced progression, intervals called out loud, the plan on their Apple Watch, plus 2 short strength days runners skip and need |
-| "I want to get back into running" | A walk/run start (Couch to 5K shape), nothing that hurts, comebacks after missed weeks |
-| "I play tennis twice a week" | The sport counted as training, with lifting and mobility built around it, not on top of it |
-| "My back hurts, I want to move better" | Mobility first, strength slowly, and the pain screen kept front and centre |
-| "I'm 62 and want to stay strong" | Balance, strength and walking, with longer holds (30–60 s), and nothing that risks a fall |
-| "I'm pregnant" | Modified everything: no lying flat for long, no hot yoga, no inversions or contact; doctor clearance respected |
-| "Just make me fit, I don't care how" | A mix the coach picks, and explains |
+| "My back is tight, I want to move better" | Mobility blocks in their lifting days; pain means stop and refer, never diagnose |
+| "I run, and I know I should lift" | Reads their runs from Apple Health, counts them in the week, plans two short strength days around them |
+| "I want to get back into running" | A Couch to 5K walk/run start on the phone's timer, at the pace the plan sets |
+| "I play tennis twice a week" | The sport counted as training, with strength and mobility around it |
+| "I'm 62 and want to stay strong" | Strength, walking, and **balance work 3+ days a week** (supported by a chair or wall, then progressed), as WHO recommends to prevent falls |
+| "I'm pregnant" | Clearance and contraindications screened; modified everything; stop signs wired into the session |
+| "I want to do yoga" | Until yoga is built: an honest answer and mobility now. After Gate 2: guided flows |
 
-**The promise:** tell MYO what you do and what you want, in your own words, and it builds a week that fits, coaches each part properly, and gets smarter as it learns you.
+## 1. The workout model: blocks
 
-## 1. The workout model: blocks, not sets
+A session is **sections** (warm-up, main, cool-down) of **blocks**. Each block is one of:
 
-A session is a list of **sections** (warm-up, main, cool-down), and each section holds **blocks**. A block is one of:
+| Kind | Example | Target | Logged as |
+|---|---|---|---|
+| **reps** | Goblet squat 3×10 @ 35 lb | sets, reps, load or reps in reserve | reps and load per set |
+| **hold** | Side plank 3×30 s each side | seconds or breaths, sets, each side | seconds held per set |
+| **intervals** | 6 × (1 min run / 90 s walk) | work and rest steps, repeats, effort per step | each step done or skipped, effort |
+| **distance** | Easy run 3 km or 30 min | distance or time, effort (pace only for experienced runners) | distance, time, pace, effort |
+| **flow** | 12-minute mobility flow | a sequence of poses with breaths or seconds | completed, how it felt |
+| **free** | Tennis 60 min | time and effort | time, effort |
 
-| Kind | Example | Target | What the phone does | Logged as |
-|---|---|---|---|---|
-| **reps** | Goblet squat 3×10 @ 35 lb | sets, reps, load or "leave 2 in the tank" | counts reps out loud (what exists today) | reps and load per set |
-| **hold** | Side plank 3×30 s each side; Warrior II 5 breaths | seconds or breaths, sets, each side | a countdown you can hear, the body holding the pose, breath cues | seconds held per set |
-| **intervals** | 6 × (1 min run / 90 s walk); 8 × 20 s on / 10 s off | work and rest times or distances, repeats, intensity per step | calls "go", "walk", "last one", with a ring timer | each step done or skipped, time, effort |
-| **distance** | Easy run 3 km; Long run 45 min | distance or time, pace or effort zone | GPS distance and pace, split cues, or the Watch | distance, time, pace, effort |
-| **flow** | Sun salutation A × 3; 12-min mobility flow | a sequence of poses, each with breaths or seconds | steps through the poses, the body flowing between them | completed, plus how it felt |
-| **free** | Tennis 60 min; climbing class | time and how hard | a timer, or it's logged after | time and effort (and METs) |
+- **Intensity in the user's language:** pounds or kg, reps in reserve ("leave 2 in the tank"), effort 1–10, pace in min/km or min/mile. Units follow the user's setting (today it's pounds everywhere, `contextBundle.ts:250`).
+- **Each side** becomes a property (it replaces today's name regex, `WorkoutVoice.isEachSide`).
+- **Matches Apple's structure.** WorkoutKit custom workouts are warm-up, interval blocks of work and recovery steps (time, distance or open goals), then cool-down ([docs](https://developer.apple.com/documentation/workoutkit)). Intervals and distance blocks map onto it later.
 
-Rules of the model:
-- **Every block carries an intensity in the user's language.** Load in pounds, reps in reserve ("leave 2 in the tank"), an effort scale (1–10 RPE), a pace, or a heart-rate zone if they have a Watch. One coach, one vocabulary.
-- **Each side** is a property, not a name trick (this replaces the regex added today, `WorkoutVoice.isEachSide`).
-- **Old plans keep working.** A sets × reps exercise is just a `reps` block. Plans are read in both shapes during migration, and a timed lift in the old shape (Plank 4×60) is converted to a `hold`.
-- **It matches Apple's structure.** Apple's WorkoutKit models custom workouts as warm-up, interval blocks of work and recovery steps (each with a time, distance or open goal), then cool-down ([WWDC23](https://developer.apple.com/videos/play/wwdc2023-10016), [docs](https://developer.apple.com/documentation/workoutkit)). Our `intervals` and `distance` blocks map onto it one-to-one, so a run plan can go straight to the Watch.
+### Migration, done safely
 
-Where it changes code: `PlannedExercise`/`ActiveWorkoutExercise`/`WorkoutLog` in `contracts/coach-agent.ts` and their Swift mirrors in `Models/WorkoutModels.swift`; the `adapt_plan` patch schema; `finishWorkoutSession`; the context bundle's plan rendering (`coach/contextBundle.ts:251-270`); the prompt lines that say "sets, reps and pounds" (`coach/prompt.ts:116, 142, 146`).
+This is the critical path, and the biggest single job.
+- **Dual-write.** For as long as old builds are in use, plans keep the legacy `sets/reps/weight` fields *alongside* blocks. An old build still shows a plank (as "4×60"); a new build shows a hold.
+- **`schemaVersion`** on every plan, a **minimum app build** check, and a **feature flag per user and per kind**. Today's flags are environment-wide, like `IRONBOI_LIVE_VOICE_ENABLED`. Rollback means "drop the blocks, keep the legacy fields".
+- **Stable exercise IDs.** Add `exerciseId` to catalog entries, plans, logs and baselines. A backfill maps today's names to IDs; name lookup stays as a fallback. Without this, a library with aliases resets people's starting weights.
+- **Converting timed lifts** uses the catalog's own fields (each entry gets `kind: hold`), not name guessing.
+- **The full scope:**
+  - `PlannedExercise`/`ActiveWorkoutExercise`/`WorkoutLog` (`contracts/coach-agent.ts`) and the Swift mirrors (`Models/WorkoutModels.swift`, `WorkoutLogModels.swift`);
+  - `trainingPrograms` weeks and the rollover that rewrites them;
+  - `exerciseSwap.ts`, `program.ts`, `adapt_plan` and its validator (`tool-calls.ts:122-151`);
+  - `finishWorkoutSession`;
+  - Firestore rules (`onlyKeys` and the schema drift test, `firestore.rules:75-95`), noting that clients write `workoutLogs` directly, so old-shape logs keep arriving;
+  - the context bundle and the prompt lines that say "sets, reps and pounds" (`coach/prompt.ts:116, 142, 146`);
+  - `progress/build.ts` (exclude hold seconds from volume and e1RM, and clean the polluted history);
+  - the recap;
+  - the 618 security tests.
 
 ## 2. The library
 
 ### What an entry holds
 
-One shared, searchable library of **movements** (exercises, poses, drills) and **sessions** (a run workout, a flow, a circuit):
+- **Identity:** an `exerciseId`, a canonical name, aliases (English and Sanskrit), and its kind (lift, pose, drill, run session, sport).
+- **What it trains:** muscles, pattern, energy system.
+- **What it needs:** equipment and space.
+- **How hard it is:** level, plus easier and harder versions linked by ID.
+- **How to do it:** setup, cues, common mistakes, breathing. **Every word written by us.**
+- **Safety properties, as checkable fields, not prose:** loaded, inverted, head below heart, impact, end-range spinal flexion or twist, breath-hold strain, fall risk. Plus written "who should avoid it".
+- **How it's shown:** a `MoveSpec` for the body, or text only. No third-party images.
+- **Provenance:** source of each fact, license, author, review status, version.
 
-- **Identity:** a canonical name, aliases ("downward dog", "down dog", "adho mukha svanasana"), and its kind (lift, pose, drill, run, sport).
-- **What it trains:** muscles, movement pattern, energy system (strength, aerobic, anaerobic, mobility, balance).
-- **What it needs:** equipment and space ("needs a wall", "outdoors").
-- **How hard it is:** level, plus **easier and harder versions** linked to other entries. This ladder is what lets the coach meet you where you are.
-- **How to do it:** setup, 2–4 cues, common mistakes, breathing.
-- **Who should avoid it:** with reasons. For example, inversions with glaucoma or uncontrolled high blood pressure; long lying-flat positions in later pregnancy.
-- **How it's shown:** a `MoveSpec` for the body (the format built for build 51), a pose for holds, and links to videos where licensed.
-- **Where it came from:** source, license, and whether a person reviewed it.
+### Where the content comes from (verified at the source)
 
-The cues and videos now on the phone (`ExerciseKnowledge.swift`) move into the library, so the coach and the app read the same entry.
-
-### Where the content comes from
-
-| Source | What we take | License and what it obliges |
+| Source | What we may take | Notes |
 |---|---|---|
-| [free-exercise-db](https://github.com/yuhonas/free-exercise-db) | 800+ exercises: instructions, muscles, equipment, level, about 2,600 images | **Unlicense (public domain).** No obligations. **Ingest first.** Check where the images came from before shipping them. |
-| [Compendium of Physical Activities 2024](https://pacompendium.com/) | MET values for 1,000+ activities, plus older-adult and wheelchair compendia | Free for commercial use. Values must be cited and not changed or merged. Use for "free" blocks and energy estimates. |
-| [Zoned](https://github.com/alarboulletmarin/zoned) | 256 structured workouts (run, bike, swim, strength), 9 plans from 5K to marathon | MIT (check the repo's license file). Keep the notice. Seed for run and interval sessions. |
-| [yoga-api (alexcumplido)](https://github.com/alexcumplido/yoga-api) | Pose names (English and Sanskrit), descriptions, benefits, levels, images | MIT. Use only the CC0 images; the Flaticon sets need attribution. Thin: no alignment cues or contraindications. |
-| **Written by us** (with the AI, reviewed) | Yoga alignment and who-should-avoid, flows, mobility sequences, run coaching cues, sport guidance | Ours. This is where MYO gets better than the open data, and it becomes an asset. |
-| [wger](https://wger.de/api/v2/exerciseinfo/) | About 930 exercises, multilingual | **Data is CC-BY-SA:** attribution, and anything adapted from it must stay share-alike. Code is AGPL. **Only as a separate, attributed layer, or skip it.** |
+| [free-exercise-db](https://github.com/yuhonas/free-exercise-db) | **Facts only:** exercise names, muscles, equipment, level, mechanic | The repo is Unlicense, but its images and instructions were scraped. The upstream project says they were "scrapped off the internet" and advises against commercial use ([wrkout CONTRIBUTING](https://github.com/wrkout/exercises.json/blob/master/CONTRIBUTING.md)). Users have matched the images to ExRx and Bodybuilding.com ([#13](https://github.com/yuhonas/free-exercise-db/issues/13), [wrkout#305](https://github.com/wrkout/exercises.json/issues/305)), and the sample instruction is word-for-word Bodybuilding.com. **No images, no text, and the text never goes into a prompt.** |
+| [Compendium of Physical Activities](https://pacompendium.com/) | MET values (adult, older adult, wheelchair), from the website | Free for commercial use. Cite it; don't change or merge values. Not from the paper (CC BY-NC-ND), and not the Youth compendium. MET values are for internal effort accounting only, never shown as "calories burned" (see the habit plan's rules). |
+| [Zoned](https://github.com/alarboulletmarin/zoned) | Endurance workout and plan **structures** (about 250 templates) | MIT for its own content; keep the notice. **Not** its exercise images (copied from free-exercise-db). |
+| [yoga-api](https://github.com/alexcumplido/yoga-api) | **Pose names only** (English and Sanskrit) | The MIT license covers code. The data is credited to unlicensed repos and partly matches Yoga Journal's copy. Images are Flaticon or Noun Project (attribution) or unknown origin. Write everything else ourselves. |
+| [NHS website](https://www.nhs.uk/our-policies/terms-and-conditions/) | Couch to 5K structure; exercise guidance | Open Government Licence; commercial use OK. Adaptations need an "as at" date or refreshing. No logos or third-party images. |
+| [CDC / HHS](https://www.cdc.gov/other/agencymaterials.html), [NIA](https://newsinhealth.nih.gov/2014/12/go4life) | Physical activity guidelines, older-adult exercise material | US government works (public domain); NIA asks for credit. Never imply endorsement; check images one by one. |
+| **Written by us**, reviewed by a qualified person | All instructions, cues, alignment, who-should-avoid, flows, run coaching | This is MYO's moat. The AI drafts **without any copyrighted source text in front of it**; a CSCS, physio or registered yoga teacher reviews safety-relevant entries. |
+| [wger](https://wger.de/api/v2/exerciseinfo/) | Optional: its 21 CC0 exercises; otherwise skip | Most records are CC-BY-SA 3.0/4.0 with per-record authors, so adapted text must stay share-alike. The code is AGPL. Not worth the obligations. |
 
 **Off-limits:**
-- [ExerciseDB](https://exercisedb.notion.site/ExerciseDB-API-Terms-of-Use-226983b728ca8090bf7be79564e4b356): its terms forbid storing the data.
-- API Ninjas: no redistribution on the paid tier, non-commercial on the free tier.
-- Any repo with no license (e.g. LunaticPrakash/yoga-api).
-- The PAR-Q+ questions word for word, which are © the PAR-Q+ Collaboration and need permission.
+- [ExerciseDB](https://exercisedb.notion.site/ExerciseDB-API-Terms-of-Use-226983b728ca8090bf7be79564e4b356) (storing is prohibited).
+- [API Ninjas](https://api-ninjas.com/terms) (no permanent library from it on any tier).
+- wrkout/exercises.json images, and anything compiled from it or from wger under a looser label (e.g. exercemus).
+- Yoga Journal-derived text.
+- Repos with no license.
+- The **PAR-Q+** wording (© PAR-Q+ Collaboration, all rights reserved; ask before using it).
+- **YouTube:** links out are fine. Embeds only via the official player, unmodified, never cached, and never inside a paid gate.
 
-### How it's searched
+### Search
 
-- **By meaning.** "Something for tight hips I can do at my desk" should find pigeon, figure-four and hip-flexor stretches without those words being typed. Each entry gets an embedding stored next to it; Firestore's built-in vector search keeps everything on the stack MYO already uses.
-- **Filtered by hard facts first:** equipment, space, level, who-should-avoid against the user's safety notes.
-- **The knowledge corpus moves to meaning-based search too.** It's the guidance the coach cites (today 19 entries, keyword-scored).
+- **No vector database at this size.** For 1–2k entries, use hard filters (kind, equipment, level, safety properties against the person's notes), then an alias table, then either in-memory similarity (embeddings loaded at cold start, about 3 MB) or the model choosing from the filtered shortlist.
+- Firestore vector search (`findNearest`) works on this project, but it adds an embedding pipeline, separate indexes and emulator questions. Revisit past about 10k entries.
+- The knowledge corpus (18 entries today) gets the same approach.
 
-### Programming knowledge (what the rules and the coach rely on)
-
-Written as our own paraphrases with citations, not copied text.
+### Programming knowledge (our paraphrases, with citations)
 
 **Strength**
-- **ACSM's 2026 position stand** ([Phillips et al., MSSE, April 2026](https://acsm.org/science-spotlight-acsm-releases-new-position-stand-on-resistance-training/)), an overview of 137 systematic reviews:
-  - Train every major muscle group twice a week or more.
-  - About 10+ sets per muscle per week for growth.
+- **[ACSM 2026 position stand](https://acsm.org/science-spotlight-acsm-releases-new-position-stand-on-resistance-training/)** (healthy adults; an overview of 137 systematic reviews):
+  - Train all major muscle groups twice a week or more.
+  - About 10+ sets per muscle per week *optimizes* growth, but **any** resistance training is the headline benefit, so the checker never requires 10 sets of a beginner.
   - Stopping 1–2 reps short of failure works as well as going to failure.
-  - Once volume and effort are equal, tempo and periodization style matter little.
-  - Adherence comes first.
-- **ACSM 2009** ([Ratamess et al.](https://pubmed.ncbi.nlm.nih.gov/19204579/)) for progression detail: raise load 2–10% once the target reps are beaten by 1–2 on two sessions running.
+- **[ACSM 2009](https://pubmed.ncbi.nlm.nih.gov/19204579/)** for progression: raise load 2–10% once the person beats the target by 1–2 reps. (The "two sessions in a row" version is NSCA's 2-for-2 rule; we use that as our own conservative choice.)
 
 **Aerobic** ([WHO 2020](https://www.who.int/publications/i/item/9789240015128))
-- 150–300 minutes a week moderate, or 75–150 vigorous, plus strength on two or more days.
-- Any activity beats none.
+- 150–300 min/week moderate, or 75–150 vigorous, plus strength on two or more days.
+- For older adults: balance and strength on 3+ days a week, to prevent falls.
 
-**Flexibility** ([ACSM, Garber 2011](https://pubmed.ncbi.nlm.nih.gov/21694556/))
-- Two or three days a week, daily is best.
-- Static holds of 10–30 s, or 30–60 s for older adults, about 60 s total per muscle group.
+**Flexibility** ([Garber 2011](https://pubmed.ncbi.nlm.nih.gov/21694556/))
+- Two or three days a week, ideally daily.
+- Static holds of 10–30 s (30–60 s for older adults), about 60 s total per muscle group.
 
 **Running**
-- **Start like Couch to 5K** ([NHS](https://www.nhs.uk/better-health/get-active/get-running-with-couch-to-5k/)): three runs a week, rest days between, from 1-minute run / 90-second walk up to 30 minutes continuous over 9+ weeks.
-- **Limit single-run jumps, not weekly mileage.** In 5,205 runners, injury risk rose when one run was more than 10% longer than their longest run in the previous 30 days. The week-to-week ratio didn't predict injury ([Frandsen et al., BJSM 2025](https://blogs.bmj.com/bjsm/?p=11751)). So the rule MYO encodes is "no run more than ~10% longer than your longest in 30 days", not the classic 10%-a-week.
-- **No "acute:chronic workload" injury warnings.** That ratio has been shown to be a statistical artifact ([Impellizzeri et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC7534938/)).
-- **Mostly easy:** about 75–80% easy, 5% threshold, 15–20% hard, as a default rather than dogma ([Oliveira 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11329428/)).
+- **Beginners (under 8 weeks of running): a Couch to 5K progression** ([NHS](https://www.nhs.uk/better-health/get-active/get-running-with-couch-to-5k/)). Three sessions a week with rest days between, from 1-minute run / 90-second walk up to 30 minutes.
+- **Once there's 30 days of history:** cap any single run below 10% longer than the longest in the last 30 days. Evidence: [Frandsen et al. 2025](https://pmc.ncbi.nlm.nih.gov/articles/PMC12421110) (5,205 runners, median 9.5 years' running, observational, self-reported injuries; the authors suggest a cutoff below 10%).
+- **No acute:chronic workload warnings.** The link to injury may be a statistical artifact ([Impellizzeri et al.](https://pmc.ncbi.nlm.nih.gov/articles/PMC7534938/)).
+- **Intensity:** beginners run nearly everything easy. For experienced runners only, the option of a polarized mix (about 75–80% easy, under 10% threshold, the rest hard). Its benefit over other mixes is small and mostly on VO2peak ([Oliveira 2024](https://pmc.ncbi.nlm.nih.gov/articles/PMC11329428/)).
 
 **HIIT**
-- Work bouts of 15 s to 4 min, work:rest from 2:1 to 1:2, 6–10 repeats.
-- Two or three sessions a week, never on back-to-back days ([ACSM guidance, summarized](https://uq.pressbooks.pub/exercisedelivery/chapter/hiit/)).
+- Work bouts of 15 s to 4 min at 80–95% of max heart rate.
+- Two or three sessions a week, never on back-to-back days.
+- **Not for** inactive people, anyone flagged for clearance, pregnant users, or anyone 60+ until they've done 4+ weeks of moderate training. (HIIT is vigorous exercise, which triggers clearance under ACSM.)
 
-**Yoga safety**
-- No inversions with glaucoma or uncontrolled high blood pressure.
-- Modify deep forward folds and strong twists for osteoporosis or disc problems.
-- Pregnancy ([ACOG 804](https://www.acog.org/clinical/clinical-guidance/committee-opinion/articles/2020/04/physical-activity-and-exercise-during-pregnancy-and-the-postpartum-period)): modified yoga is fine. No hot yoga, no long lying-flat or face-down positions, no inversions.
-- Sequencing (warm-up, standing poses, peak, cool-down, rest) is teaching practice, not a guideline. We write it as our own rules.
+**Yoga and mobility safety, as filters on the safety properties**
+- **Glaucoma:** no *head-below-heart* poses (downward dog raised eye pressure most in [Jasien 2015](https://doaj.org/article/5a338a993f6c45419a6b1cf1359c3f54); also standing folds, plough, legs-up-the-wall).
+- **Osteoporosis:** no end-range or loaded spinal flexion, and no flexion-plus-twist (spinal flexion poses were linked to vertebral fractures in [Sinaki 2013](https://newsnetwork.mayoclinic.org/discussion/people-with-osteoporosis-should-avoid-certain-spinal-poses-in-yoga-mayo-clinic-study-says)).
+- **High blood pressure:** ask whether it's controlled. If unknown or uncontrolled: no head-below-heart, no breath-hold strain.
+- **Pregnancy** ([ACOG 804](https://www.acog.org/clinical/clinical-guidance/committee-opinion/articles/2020/04/physical-activity-and-exercise-during-pregnancy-and-the-postpartum-period)):
+  - Screen ACOG's absolute contraindications (for example placenta previa after 26 weeks, preeclampsia, cerclage). Any yes means no plan until cleared.
+  - Avoid prolonged lying flat after the first trimester, positions that drop blood pressure, fall risk, and hot yoga.
+  - **In-session stop signs:** bleeding, dizziness, calf pain or swelling, fluid leakage, regular contractions. Saying any of these stops the session and refers them on.
+  - Ask the trimester again over time.
 
-**Who needs a doctor first** ([ACSM 2015 pre-participation screening](https://pubmed.ncbi.nlm.nih.gov/26473759/)): decided by three things: are they active now, do they have known heart, metabolic or kidney disease or symptoms, and how hard do they want to go. MYO's existing doctor/chest-pain screen is built on this logic, in our own words.
+### The safety screen (replaces today's keyword match)
 
-## 3. The planner: the AI designs, the rules check
+Built on the [ACSM 2015](https://pubmed.ncbi.nlm.nih.gov/26473759/) model, in our own words, with the wording reviewed by a clinician (or PAR-Q+ licensed):
+- **Asked:** current activity; known heart, metabolic or kidney disease; symptoms (chest pain, unusual breathlessness, dizziness or fainting, and others); the intensity they want.
+- **Symptoms:** no plan until cleared.
+- **Known disease and inactive:** clearance first.
+- **Known disease and active:** moderate only until cleared.
+- **Also screened:**
+  - **Age:** under 18 is blocked or gets a separate youth path; under 13 is never allowed (COPPA).
+  - **Pregnancy or postpartum:** trimester, contraindications, pelvic floor and abdominal separation.
+  - **Recent surgery or joint replacement:** for example, hip precautions rule out pigeon pose.
+  - **Falls (STEADI-style):** fallen in the past year, feeling unsteady, worried about falling.
+  - **Medications that change the rules:** beta-blockers (heart-rate zones are wrong), blood thinners (fall stakes), insulin (low blood sugar).
+  - **Disordered eating or compulsive exercise:** volume capped, no streak pressure.
+- **Asked again** when anything changes and periodically. Pain means stop and refer, never diagnose.
 
-### How a plan gets made
+## 3. The planner: the AI drafts, the rules check
 
-1. **Understand the person.** From onboarding and memory: what they do, what they want, days and time, equipment, experience per kind of training ("lifted for years, never run"), safety notes, and any event ("a 10K in March").
-2. **Draft.** The coach model (the same brain as the conversation) writes a week of sessions in the block format. It uses tools: `search_library` (movements and sessions by meaning and filters), `get_guidance` (the programming knowledge above), and the person's history.
-3. **Check.** Code-level rules review the draft before anyone sees it:
-   - **Safety:** nothing on the person's avoid list; a doctor's limit means low intensity until cleared.
-   - **Volume:** weekly sets per muscle in range; total minutes in range for their level.
-   - **Recovery:** no HIIT on back-to-back days; no heavy legs the day before a long run.
-   - **Progression:** no single run more than ~10% longer than their longest in 30 days; load jumps within 2–10%.
-   - **Balance:** the strength/aerobic/mobility mix matches the goal; the running intensity split.
-   - **Practicality:** fits the time they gave, uses their equipment.
-4. **Fix or fall back.** If a rule fails, the reason goes back to the model for one repair pass. If it still fails, a safe template for that kind of training is used. Nobody is ever stuck without a plan.
-5. **Explain.** The coach says why in one breath: "Three runs, mostly easy, one short faster one, and two 20-minute strength days. Runners who lift get hurt less."
+1. **Instant first.** The template plan appears right away, as today. That keeps the speed and gives a fallback that always exists.
+2. **The AI drafts in the background,** using structured output (a response schema, not freeform tool JSON). Tools: `search_library` and `get_guidance`. The output limit is raised for plans: today's 2,048 tokens (`coach/modelProvider.ts:145`) is already tight for seven days of sets and reps.
+3. **The rules check it:**
+   - **Safety:** the person's screen against entry safety properties.
+   - **Volume:** ranges by level.
+   - **Recovery:** no HIIT on back-to-back days; no heavy legs before a long run.
+   - **Progression:** the rules above.
+   - **Balance:** the mix of training kinds matches the goal.
+   - **Practicality:** fits their time and equipment.
+4. **The checker fixes mechanical problems itself:** trims volume, moves a day, swaps in an easier version. Only problems of meaning go back to the AI, for one repair. If it still fails, the template stays.
+5. **Swap in only if it passes,** with the coach explaining the plan in one breath. No unsubstantiated claims: "runners who lift get hurt less" is out unless we can cite it.
+6. **A kind is only drafted once its template and history source exist.** For example, running waits until run templates exist and run history is read from Apple Health.
 
-**Why not let the AI decide alone, or keep templates?** Templates can't cover "tennis twice a week plus a 10K". The AI alone can overreach: too much volume, an unsafe pose, a big jump in a long run. The model drafting and code checking gets both flexibility and safety, and every rule has a citation.
+**How we know it's good: an evaluation set.** 30–50 fixed person descriptions (the table above and harder ones) × several runs, scored by the rule checker plus an AI judge, with spot checks by a qualified person. Recorded replays run in CI. The AI planner replaces templates only when:
+- zero rule violations remain after repair;
+- the repair rate is under 20%;
+- fallback happens under 5% of the time;
+- 95% of plans finish drafting in under about 8 seconds (in the background).
 
-### Changing the plan
+Plan changes (`adapt_plan`) go through the same loop. The `style_preference` path that turns "yoga" into squats is replaced by an honest answer until a kind is built.
 
-The same loop handles the coach's existing plan changes (`adapt_plan`): "make Thursday a yoga day", "I've got a race in 8 weeks", "my knee hurts when I run". Today's `style_preference` path that turns "yoga" into squats goes away.
-
-### Progression by kind
+**Progression by kind:**
 
 | Kind | Progresses by | Steps back when |
 |---|---|---|
-| reps (lifting) | load once reps are beaten (exists), or reps then load for bodyweight | reps are missed twice (exists: the rep gate) |
-| hold | seconds (+5–10 s), then a harder version on the ladder | the hold is cut short twice |
-| intervals | more repeats, longer work, shorter rest, in that order | steps get skipped, or effort reads "too much" |
-| distance | longest run +≤10% against the last 30 days; time before pace | a missed week, pain reported, effort high |
-| flow | more rounds, longer holds, then the next flow on the ladder | "too much", or a pose skipped every time |
-| free | the person's own goal | n/a |
+| reps | load once reps are beaten (exists) | reps missed twice (exists) |
+| hold | seconds, then a harder version | the hold is cut short twice |
+| intervals | more repeats, then longer work, then shorter rest | steps skipped, or effort reads "too much" |
+| distance | beginners: the next Couch to 5K step; experienced: the single-run rule | a missed week, pain, high effort |
+| flow | more rounds, longer holds, the next flow | "too much", or a pose always skipped |
 
-The rep-gate and rollover code (`workouts/rollover.ts`) becomes one rule set per kind instead of one weight-only path.
+## 4. Generated entries: private until reviewed
 
-## 4. Filling gaps: generated entries
+When something the library doesn't have is requested ("crow pose", "a fartlek"):
 
-When a plan, a swap, or a person names something the library doesn't have ("Bulgarian bag spins", "crow pose", "a fartlek"):
+1. **Find before writing.** Check aliases and similarity against existing entries, so "crow", "bakasana" and "crow pose" don't become three entries.
+2. **Draft.** Facts, our own wording, safety properties, linked easier and harder versions, and a `MoveSpec` draft. No copyrighted text in the prompt.
+3. **Classify by checked properties.**
+   - **Low risk:** no load, no inversion or head below heart, no impact, no end-range spinal flexion or twist.
+   - **High risk:** arm balances, inversions, jumping and other plyometrics, Olympic lifts.
+4. **Gate:**
+   - Low-risk unreviewed entries can be used **only by the person who asked**, as **text only, with no body demo**, and never for anyone pregnant, 60+, under 18, flagged for clearance, or with a related safety note.
+   - High-risk entries are blocked until reviewed.
+5. **Never shared before review.** Unreviewed text never enters another user's coach prompt. (Otherwise one user's words, "crow pose, ignore prior rules…", would reach everyone: stored prompt injection.)
+6. **Reviewed by a qualified person** (CSCS, physio, or registered yoga teacher), not by a second AI pass. Then shared, with a body demo if its `MoveSpec` passes.
+7. **Versioned and recallable.** A rejected entry is removed from every plan, and affected users are told.
+8. **Rate-limited per user;** anonymous users can't trigger it.
 
-1. **Draft.** The AI writes a full entry: names, kind, muscles, equipment, level, cues, who should avoid it, easier and harder versions linked to existing entries, and a `MoveSpec` so the body can show it.
-2. **Check.**
-   - The schema must pass.
-   - The `MoveSpec` must pass its validator (`MoveSpec.isValid`: bones hold, feet on the floor).
-   - "Who should avoid it" must not be empty for anything inverted, loaded overhead, or high-impact.
-   - A second model pass reviews safety.
-3. **Use and mark.** It's usable at once but marked *unreviewed*. The coach is a little more careful with it (it says so if asked, and it isn't used for anyone with a related safety note).
-4. **Review queue.** A simple list for Josh (or a trainer later) to approve, edit or reject. The most-used unreviewed entries come first.
-5. **Shared.** Once written, everyone gets it. The library grows where real people actually go.
-
-This is the generative-moves idea from earlier (step 3 of the build-51 plan), widened from body moves to full entries.
-
-## 5. The phone: coaching each kind of block
+## 5. The phone
 
 | Block | The coach | The body | The screen |
 |---|---|---|---|
-| reps | counts out loud, catches each side (done today) | does the lift with you | set, reps, load |
-| hold | "30 seconds, breathe… 10 left… and rest", breath cues; you can say "done" early or "more time" | holds the pose, breathing | a draining ring |
-| intervals | "Run… one minute… walk… last one!" with a tone at each change, music ducked | jogs, walks, sprints | big step name and timer, repeat count |
-| distance | split cues ("1 km, 6:10 pace, nice and easy"), "halfway", "turn for home" | idle or jogging | distance, time, pace, effort zone |
-| flow | names each pose, counts breaths, cues the next one ("step back to plank") | flows between poses | the pose name, what's next, a progress strip |
-| free | starts and stops a timer, asks how hard it was | idle | elapsed time |
+| hold | "30 seconds, breathe… 10 left… rest"; "done" or "more time" by voice | holds the pose (reviewed entries only) | a draining ring |
+| intervals | "Run… walk… last one!" with tones; music ducked | jogs or walks | step name, timer, repeat count |
+| distance | split cues; effort check-ins | idle or jogging | distance, time, effort |
+| flow | names each pose, counts breaths, cues the next | flows between poses | pose, next pose, progress |
+| free | starts and stops a timer, asks how hard | idle | elapsed time |
 
-**What it takes:**
-- **A timer engine** for holds, intervals and flows, driven by the same voice and cue system as counting. "Go", "rest", "pause", "skip", "more time" are handled on the phone, instantly.
+- **Timer engine.** Runs on the phone and owns all cue audio: tones and short phrases. **Live voice is ducked during block changes**, so timer cues and the live coach never talk over each other. No library searches during live voice: its tools are fixed when the session token is minted (`coach/liveSession.ts`).
+- **Locked screen.** Timers keep working only while the audio session is active (the background-audio mode exists). No silent-audio tricks, which risk App Review. Testing on device with the screen locked is part of done.
 - **Running:**
-  - **Phase A:** push run and interval workouts to the Apple Watch with WorkoutKit (the Watch does GPS and heart rate), then read the finished run back through HealthKit.
-  - **Phase B:** phone-only runs with GPS (Core Location) and the coach in your ears.
-  - **HealthKit needs adding.** The backend can take in Health data already (`health/ingest.ts`), but the app has no HealthKit code or entitlement.
-- **Poses for the body:** a `hold` uses a `MoveSpec` held at one key; a flow chains `MoveSpec`s. Floor poses already work (bridges, crunches, leg raises in build 51). Standing balance and inversions need new keys and a check that each still reads clearly as a soft body.
-- **The workout card** grows a layout per block kind instead of "sets × reps ± 5 lb".
+  - **First:** Couch to 5K as intervals on the phone timer. No GPS, no Watch.
+  - **Then:** read runs and workouts from Apple Health (needs the HealthKit entitlement, usage text, consent and the App Store disclosures).
+  - **Then:** WorkoutKit to the Watch, as an extra for people with a Watch (watchOS 10+).
+  - **Phone GPS last:** background location mode, review justification, battery testing.
+- **In-session stop words:** "chest pain", "dizzy", "stop" end any interval or run block and refer the person on. Pregnancy stop signs too.
+- **Accessibility:** VoiceOver announcements and haptics at every timer change.
+- **Offline:** the library is cached on the phone, and the timer engine works with no signal.
+- **The workout card** gets a layout per block kind.
 
 ## 6. Onboarding and the coach
 
-**Onboarding**
-- The first question becomes "What do you like to do, or want to do?" Tap any (Lift, Run, Yoga, Mobility, A sport, Not sure yet), or say it.
-- Only the follow-ups that matter are asked:
-  - **runners:** how much you run now, your longest recent run, any race and its date;
-  - **yoga:** how familiar you are, at home or in a class;
-  - **sport:** which one, and how often.
-- Everything else is learned in conversation, the same principle as the habit-journey plan.
-
-**The coach**
-- The prompt stops saying "sets, reps and pounds" and learns the block vocabulary.
-- It gets `search_library` and `get_guidance` as tools in both regular and live voice.
-- Its context renders a hold as "Side plank 3 × 30 s each side", not "3×30 @ 0 lb".
-- It explains plans with the guidance it relied on, keeping MYO's cite-or-refuse habit.
+- **One added question:** "What do you like to do?" with tap chips: Lift, Run, Yoga, Mobility, A sport, Not sure. No per-kind follow-up questions up front; the rest is learned in conversation, keeping the 6-question onboarding the habit plan just shipped. Until a kind is built, a tap is logged (demand data), and the coach says what it can do now: "I'll build your strength plan with mobility in it. Running plans are coming."
+- **The coach:**
+  - learns the block vocabulary;
+  - renders holds as "Side plank 3 × 30 s each side";
+  - gets `search_library` and `get_guidance` (regular voice only, not live);
+  - keeps cite-or-refuse;
+  - **never diagnoses** pain: stop and refer.
 
 ## 7. Measurement
 
-- **Steer by:** weeks with 2+ workouts per person (the habit-journey number), now counting any kind of training.
-- **Plan quality:**
-  - share of first plans accepted without edits, per kind;
-  - how often the validator has to repair or fall back;
-  - which rules fire most.
-- **Library:**
-  - searches that found nothing;
-  - generated entries per week;
-  - review backlog;
-  - how often a generated entry gets swapped out (a sign it's bad).
-- **Safety:** pain reports per 100 sessions per kind; any run progression that broke the 30-day rule (should be zero).
+**Guardrails that must not get worse while any of this ships:**
+- **Voice:** miscounted sets per 100, the delay before a tick is heard, transcription accuracy on counts (from the voice log).
+- **Safety:** pain reports per 100 sessions.
 
-## 8. Build order
+**Demand:** "What do you like to do?" taps, and non-lifting requests in chat, per 100 users.
 
-Each phase ships something people can use.
+**Retention, per kind:** activation, workout #2, still training at week 4. Plus whether mobility blocks raise lifting completion. The habit number (weeks with 2+ workouts) is reported **per kind**, so easy 10-minute sessions can't inflate it or hide whether lifting retains.
 
-| Phase | What ships | Done when |
+**Plan quality:**
+- first-week swaps and abandons, per kind (not "accepted without edits": anxious users don't edit, they leave);
+- the AI planner's repair and fallback rates against the evaluation set.
+
+**Safety:**
+- a check-in after sessions about pain lasting more than 48 hours, with a follow-up two days later;
+- "why did you stop?" for people who drop off;
+- every safety number **reported separately** for pregnant, 60+, clearance-flagged, and generated-entry exposures;
+- every pain report linked to the plan that produced it (AI draft, repaired draft, or template).
+
+**Instrumentation:** an event pipeline (today the metrics exist in `journey/metrics.ts` but there's no general event stream) and a per-user cost cap on AI planning calls.
+
+## 8. Build order, with gates
+
+| Step | What | Done when |
 |---|---|---|
-| **0. Foundations** | The block model (server and app, old plans still read); `durationSec` actually logged; the library schema with free-exercise-db and the current 74 entries migrated in; meaning-based search; the rule checker with the strength rules | Existing lifting users notice nothing. A plank is a 30-second hold, not "4 sets of 60". |
-| **1. Holds, mobility and yoga** | The hold and flow blocks; the timer engine; 40–60 poses with cues and who-should-avoid (seeded from yoga-api, written by us); 10 flows; floor and standing poses on the body; "I want to do yoga" makes a real plan | Someone who says yoga gets three guided flows a week and finishes one |
-| **2. The AI planner** | The coach drafts every plan in blocks with library search; rules check and repair; templates become the fallback; plan changes go through the same loop | "Tennis twice a week plus lifting" gets a sensible week without a template for it |
-| **3. Running** | Intervals and distance blocks; Couch to 5K and easy/long/interval templates (seeded from Zoned); push to the Watch with WorkoutKit; HealthKit read; the 30-day single-run rule; run progression | A new runner does week 1 of a walk/run plan from their Watch, and it's logged |
-| **4. Generated entries** | Draft, check, mark, review queue, shared | "Crow pose" or "fartlek" works the first time someone asks |
-| **5. Sports, events, mixed** | Free blocks with METs; race-date plans (taper); phone-only GPS runs | A 10K in 8 weeks gets a plan that peaks on race day |
-
-Phases 1 and 2 can overlap. Phase 0 comes first because everything else stands on blocks and the library.
+| **Now (about 4 weeks)** | Voice reliability, counting and reply speed (in progress: the new recogniser, the voice log). **The safety screen (§2).** A minimal `hold` block with dual-write and `durationSec` logged. Honest coach answers for non-lifting asks. The "What do you like to do?" question and demand logging. Recruit 5–10 testers who fit the wedge. | Miscounts and cue delay measured and improving; the screen catches the listed conditions in tests; a plank is a hold on new builds and still shows on old ones |
+| **Gate 1** | Lifting retention: at least 10 testers, week-4 retention at the habit plan's 25% target | Pass, or fix lifting first |
+| **Mobility inside lifting** | Stable exercise IDs and backfill; the block model (0a); about 30 reviewed mobility movements and holds; warm-up and cool-down blocks; "my back is tight today" | Mobility blocks completed, and lifting completion doesn't drop |
+| **The library (0b)** | Facts imported from free-exercise-db behind a filter (no text, no images); our own instructions; safety properties; filter-and-alias search | Swaps for current lifters no worse; searches that find nothing tracked |
+| **The AI planner** | Background drafting for lifting and mobility; checker and repair; the evaluation set in CI | Meets the evaluation bar above |
+| **Gate 2** | Demand: at least 25–30% of testers asking for running or yoga | Pick one, or neither |
+| **If running** | Strength for runners via Apple Health; then Couch to 5K on the timer; then WorkoutKit for Watch owners; GPS last | A new runner finishes week 1 of Couch to 5K; their runs show in the week |
+| **If yoga** | 40–60 reviewed poses with checked safety properties; 10 flows; new standing and balance body keys | A beginner completes three flows in a week |
+| **Later** | Generated entries (private until reviewed); sports with MET accounting; race-date plans | As defined then |
 
 ## 9. Risks
 
-- **Safety of generated plans and poses.** Mitigated by the rule checker, who-should-avoid filtering, unreviewed marking, the review queue, and the existing doctor screen. Pain reports are watched per kind.
+- **Safety and liability.** The screen, the safety properties, private-until-reviewed generated content, qualified review, and the stratified safety metrics. Plus a **claims register:** every health claim the coach or the store page makes has a citation, or it isn't made.
+- **Regulation:**
+  - **FDA general wellness:** stay in "training guidance". Pain, osteoporosis or back-pain programming must not read as treating a condition. Stop and refer.
+  - **FTC:** health claims must be substantiated.
+  - **App Store:** explicit consent before sending health details (pregnancy, conditions) to third-party AI (5.1.2(i)); HealthKit disclosures (5.1.3); remind users to check with a doctor (1.4.1).
+  - **Breach and privacy:** the FTC Health Breach Notification Rule covers fitness apps; Washington's My Health My Data Act.
 - **Licensing.**
-  - Ingest only public-domain, MIT or permitted sources, and keep provenance on every entry.
-  - wger stays out, or in its own attributed layer.
-  - Ask the PAR-Q+ Collaboration before using their wording.
-- **Quality looks thin in new areas.** Yoga in the open data has no alignment or contraindications. We write that content, and that's the moat.
-- **Scope.** This is months of work if done all at once. The phases keep each step shippable. Lifting stays the default experience until each new kind is good.
-- **Cost and speed of AI planning.** Plans are drafted in the background (onboarding already waits a few seconds for the week). Library search and rules are cheap; one draft plus at most one repair per plan.
-- **The body can't show everything.** Some poses (a headstand, a full wheel) won't read well as a soft figure. The library marks which ones show a video instead.
-- **App Store and health claims.** Coaching language stays "training guidance", not medical advice. The doctor screen gates intensity.
+  - Facts only from open datasets; our own words; no third-party images; provenance on every entry.
+  - The rule that copyrighted text never goes into a prompt or the corpus.
+- **Wedge dilution.** Positioning stays strength-first; new kinds only past Gate 2.
+- **Voice.** Every timer and cue feature inherits today's voice problems, which is why voice comes first.
+- **Scope.** The migration (0a) is the biggest single phase; the gates stop the rest from starting before it's earned.
+- **Cost.** A per-user cap; templates first; one AI draft plus at most one repair.
+- **Pricing.** Not decided. A generalist at Fitbod's price ($95.99/yr) competes with Strava+Runna and Fitness+ bundles. Strength-first with supporting kinds keeps the comparison favourable.
 
 ## 10. Decisions for Josh
 
-1. **Order:** yoga and mobility first (simplest new block, broadest appeal, fits the anxious beginner) or running first (big market, Apple Watch pull)? **Recommendation: yoga and mobility, then running.**
-2. **Reviewing generated content:** Josh at first, then a trainer or physio? Or ship unreviewed with the safety rules alone?
-3. **Videos:** keep YouTube links where licensed, or rely on the body plus stills? Video is the biggest licensing and cost question.
-4. **Watch first for running** (WorkoutKit, quick) or phone GPS first?
-5. **Scope of "any training":** which sports matter at launch (tennis, climbing, cycling, swimming, team sports)?
+1. **Approve the sequencing:** voice and the safety screen now, expansion behind the two gates. *Recommended.*
+2. **A qualified reviewer:** budget a CSCS, physio or registered yoga teacher (a few hundred dollars for the first 30–60 entries). *Recommended: yes, before any mobility content ships.*
+3. **The PAR-Q+:** write to the PAR-Q+ Collaboration for commercial permission, or have a clinician review our own screen wording.
+4. **Testers:** recruit 5–10 people who fit the wedge (returning, anxious, 30–60), so Gate 1 can be measured.
+5. **Videos:** links out only, or none. *Recommended: the body plus our own words, no third-party video.*
+
+## 11. What the adversarial review changed
+
+| Finding | Change |
+|---|---|
+| Expanding before voice works and lifting retains risks the wedge (product) | Gated sequencing (§8); voice and the screen first; mobility inside lifting before any new kind |
+| Yoga-first is the most crowded, content-heavy choice (product) | Mobility inside lifting first; running or yoga chosen by measured demand; runners via strength-for-runners first |
+| free-exercise-db's text and images are scraped (licensing, verified in wrkout's CONTRIBUTING and issues) | Facts only; our own words; no images; copyrighted text never in a prompt |
+| yoga-api data is unlicensed and partly Yoga Journal; Zoned images come from free-exercise-db (licensing) | Names only from yoga-api; Zoned structures only; NHS, CDC and NIA added as clean sources |
+| The doctor screen is a keyword match, not ACSM logic (safety, verified at `flow.ts:1099`) | A real screen in §2, shipped now |
+| Unreviewed shared AI entries can't be defended, and are a stored prompt-injection path (safety, engineering) | Private until a qualified review; low-risk only; text only; never in others' prompts; recall |
+| The running rules don't fit beginners; the polarized split was overstated (safety) | Couch to 5K under 8 weeks; the single-run rule only with history and below 10%; beginners run easy |
+| Contraindications too narrow (glaucoma, osteoporosis, blood pressure, pregnancy); missing screens (youth, surgery, falls, medications, eating disorders) (safety) | Safety properties as filters; the expanded screen; in-session stop words |
+| Old app builds drop blocks; IDs are names; migration scope under-listed (engineering, verified at `AppModel.swift:2129-2141`, `exerciseBaselines.ts:90`) | Dual-write, `schemaVersion`, minimum build, stable IDs with backfill, full scope list |
+| AI planning is slower and token-limited compared with today's instant templates (engineering, verified at `modelProvider.ts:145`) | Template first, AI in the background, structured output, the checker auto-fixes, an evaluation set with a bar |
+| Vector search is over-built at this size (engineering) | Filters plus aliases plus in-memory similarity |
+| iOS background limits, Watch dependency, live voice colliding with timer cues (engineering) | Phone timer first, Watch optional, the timer owns cues, live voice ducked |
+| Metrics flatter the expansion and hide harm (product, safety) | Per-kind retention, voice guardrails, stratified safety, pain linked to the plan's source |
+| Citation details wrong (safety) | ACSM 2009, ACSM 2026, Impellizzeri, Oliveira and Frandsen corrected; the corpus count is 18 |
+| Missing: units, offline, accessibility, flags, events, cost caps, regulation, pricing (all) | Added to §1, §5, §7 and §9 |
