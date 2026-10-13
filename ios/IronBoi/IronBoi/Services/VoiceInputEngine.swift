@@ -60,6 +60,9 @@ final class VoiceInputEngine: ObservableObject {
     /// outside the main actor behind a lock.
     private let requestBox = RequestBox()
     private var recognitionTask: SFSpeechRecognitionTask?
+    /// The newer recogniser's listen (iOS 26, once its model is on the
+    /// phone); the old SFSpeech request otherwise.
+    private var analyzerRecognition: AnyObject?
     /// Bumped on every new recognition request; a callback from an older
     /// request is ignored (its "final" must not stop a fresh one).
     private var requestGeneration = 0
@@ -140,6 +143,7 @@ final class VoiceInputEngine: ObservableObject {
     }
 
     init() {
+        if #available(iOS 26.0, *) { AnalyzerRecognition.prepare() }
         // Audio was rebuilt under us (AirPods in or out, a call): the tap's
         // format is stale, so take it off; the next listen puts a new one on.
         resetObserver = NotificationCenter.default.addObserver(
@@ -159,11 +163,21 @@ final class VoiceInputEngine: ObservableObject {
         rotationTask?.cancel()
         rotationTask = nil
         meter.reset()
+        endRecognition()
+        isListening = false
+    }
+
+    /// Ends whichever recogniser this listen is on; the tap keeps running.
+    private func endRecognition() {
         request?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         request = nil
-        isListening = false
+        if #available(iOS 26.0, *), let recognition = analyzerRecognition as? AnalyzerRecognition {
+            recognition.cancel()
+        }
+        analyzerRecognition = nil
+        requestBox.current = nil
     }
 
     /// Live voice owns the mic tap during a workout and hands every buffer
@@ -260,6 +274,14 @@ final class VoiceInputEngine: ObservableObject {
     private func beginRequest(session mine: Int) {
         requestGeneration += 1
         let generation = requestGeneration
+        if #available(iOS 26.0, *), AnalyzerRecognition.ready {
+            transcript = ""
+            settledUtterances = ""
+            liveUtterance = ""
+            liveUtteranceStart = -1
+            beginAnalyzer(session: mine, generation: generation)
+            return
+        }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
@@ -323,6 +345,29 @@ final class VoiceInputEngine: ObservableObject {
         }
     }
 
+    /// A listen on the newer recogniser: one continuous stream, so it needs
+    /// no utterance stitching and no rotation mid-count.
+    @available(iOS 26.0, *)
+    private func beginAnalyzer(session mine: Int, generation: Int) {
+        let recognition = AnalyzerRecognition(words: Self.workoutWords, onText: { [weak self] whole in
+            Task { @MainActor in
+                guard let self, self.session == mine, self.requestGeneration == generation,
+                      whole != self.transcript else { return }
+                self.transcript = whole
+                AudioHub.log("heard (analyzer): \(whole.suffix(60))")
+                self.schedulePauseCheck()
+            }
+        }, onEnd: { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.session == mine, self.requestGeneration == generation else { return }
+                AudioHub.log("analyzer ended: \(error?.localizedDescription ?? "finished")")
+                if self.holdOpen { self.rotateRequest() } else { self.stop() }
+            }
+        })
+        analyzerRecognition = recognition
+        requestBox.current = recognition
+    }
+
     /// Is this result a new utterance, or a revision of the one in
     /// progress? A revision keeps the same start time and most of its
     /// opening words ("one two tree" → "one two three"); a new utterance
@@ -348,16 +393,15 @@ final class VoiceInputEngine: ObservableObject {
     private func rotateRequest() {
         guard isListening, hasInstalledTap else { return }
         AudioHub.log("recogniser rotated (count open)")
-        request?.endAudio()
-        recognitionTask?.cancel()
-        recognitionTask = nil
+        endRecognition()
         beginRequest(session: session)
         scheduleRotation()
     }
 
     private func scheduleRotation() {
         rotationTask?.cancel()
-        guard isListening, holdOpen else { return }
+        // The newer recogniser listens continuously: nothing to rotate.
+        guard isListening, holdOpen, analyzerRecognition == nil else { return }
         rotationTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.rotationSeconds)
             guard let self, !Task.isCancelled, self.isListening, self.holdOpen else { return }
@@ -483,8 +527,8 @@ final class VoiceInputEngine: ObservableObject {
 /// Hands the mic tap (audio thread) the request to feed, under a lock.
 private final class RequestBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: SFSpeechAudioBufferRecognitionRequest?
-    var current: SFSpeechAudioBufferRecognitionRequest? {
+    private var value: SpeechBufferSink?
+    var current: SpeechBufferSink? {
         get { lock.lock(); defer { lock.unlock() }; return value }
         set { lock.lock(); value = newValue; lock.unlock() }
     }

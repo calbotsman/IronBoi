@@ -29,6 +29,7 @@
 		56407351422DBC9891A5C08B /* OneBodyMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */; };
 		572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */; };
 		5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 241473A5576E7F94D3F1BA1E /* README.md */; };
+		5D0502F7A2D1A4FB76B5FB5C /* AnalyzerRecognition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */; };
 		5E959043BE8381E22181D226 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F433BDABFADDC8C6D06785F7 /* RecordView.swift */; };
 		5E98F19676BE3E591B1B881B /* TypeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6486137A4FFFD180E600A3 /* TypeBar.swift */; };
 		6059BCCBAB9ECCB125267B5A /* OrbPhysics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */; };
@@ -77,6 +78,7 @@
 		083722ABB4FE380F28D66DF6 /* WorkoutEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutEdits.swift; sourceTree = "<group>"; };
 		0D5993F87772C62C53440A56 /* ExerciseLesson.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseLesson.swift; sourceTree = "<group>"; };
 		0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
+		14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyzerRecognition.swift; sourceTree = "<group>"; };
 		1B95702D3FB16E882BF8E3F9 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
 		213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Staging.plist"; sourceTree = "<group>"; };
 		241473A5576E7F94D3F1BA1E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -199,6 +201,7 @@
 		71E5E003852F3BCDAB8248E7 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */,
 				F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */,
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
 				7701CCF07727848BE39DE49A /* AudioHub.swift */,
@@ -430,6 +433,7 @@
 			files = (
 				D3854D70B9EB19EBEC73B394 /* AfterWorkoutCards.swift in Sources */,
 				4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */,
+				5D0502F7A2D1A4FB76B5FB5C /* AnalyzerRecognition.swift in Sources */,
 				40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */,
 				8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */,
 				8C5D909199B021D18EB0BF09 /* AudioHub.swift in Sources */,
