@@ -159,7 +159,7 @@ enum WorkoutVoice {
     /// "single-arm row", "Bulgarian split squat", "side plank".
     static func isEachSide(_ name: String) -> Bool {
         name.lowercased().range(
-            of: #"\b(single|one)[- ]?(arm|leg|side)|each (side|arm|leg)|per (side|arm|leg)|unilateral|split squat|bulgarian|step[- ]?ups?|suitcase|side plank|pistol|cossack|\b(left|right) and (left|right)"#,
+            of: #"\b(single|one)[- ]?(arm|leg|side)|each (side|arm|leg)|per (side|arm|leg)|unilateral|lunges?|split squat|bulgarian|step[- ]?ups?|suitcase|side plank|pistol|cossack|\b(left|right) and (left|right)"#,
             options: .regularExpression) != nil
     }
 

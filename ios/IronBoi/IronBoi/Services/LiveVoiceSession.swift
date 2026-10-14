@@ -49,6 +49,8 @@ final class LiveVoiceSession: ObservableObject {
     /// talk over a set. When this went false (anything said just before
     /// that is forwarded as text).
     private(set) var uplinkMuted = false
+    /// Set while a count is running: the coach's audio is dropped.
+    var quietForCount = false
     private(set) var unmutedAt = Date.distantPast
 
     private let hub = AudioHub.shared
@@ -394,9 +396,10 @@ final class LiveVoiceSession: ObservableObject {
     // MARK: - Audio out
 
     private func play(_ buffer: AVAudioPCMBuffer) {
-        // You're counting a set (the mic to the coach is muted for it): the
-        // coach stays quiet until it's logged, even audio already on its way.
-        if uplinkMuted { return }
+        // You're counting a set: the coach stays quiet until it's logged,
+        // even audio already on its way. (Its mic being closed for the set
+        // isn't enough reason: the exercise intro has to play.)
+        if quietForCount { return }
         if !hub.engine.isRunning { try? hub.start() }
         state = .speaking
         uplink.coachSpeaking = true

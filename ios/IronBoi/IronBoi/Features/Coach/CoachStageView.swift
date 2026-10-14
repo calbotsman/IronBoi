@@ -1522,7 +1522,7 @@ struct CoachStageView: View {
         repCount = 0
         countBase = 0
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        show(notice: "Other side")
+        show(notice: "Next side")
         closeCountTask?.cancel()
         closeCountTask = Task {
             try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -1531,11 +1531,12 @@ struct CoachStageView: View {
         // A fresh transcript, so the other side's "one" counts as one.
         markRestartHandled()
         voiceInput.stop()
-        if live.isActive || tips == .quiet || !speaksReplies {
-            // The live coach is held quiet for the whole set: a tone says it.
+        updateLiveUplink()
+        if tips == .quiet || !speaksReplies {
             resumeListening()
         } else {
-            voice.speak("Other side.", messageId: "local-\(UUID().uuidString)")
+            // In live voice this goes to the live coach, in its own voice.
+            voice.speak("Alright, next side.", messageId: "local-\(UUID().uuidString)")
         }
     }
 
@@ -1613,6 +1614,7 @@ struct CoachStageView: View {
         guard live.isActive else { return }
         let inSet = appModel.activeWorkout != nil && currentExerciseIndex != nil && restEndsAt == nil
         live.setUplinkMuted(inSet || repCount > 0 || holdEndsAt != nil)
+        live.quietForCount = repCount > 0
     }
 
     // MARK: - Timed holds (planks, carries)
