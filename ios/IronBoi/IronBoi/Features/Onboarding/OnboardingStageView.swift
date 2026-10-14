@@ -55,12 +55,23 @@ struct OnboardingStageView: View {
     /// Picked talk or tap in this run (the stored mode alone could be from
     /// an earlier account on this phone).
     @State private var choseMode = false
+    /// The answers come in as the coach is finishing the question, not
+    /// before it has started asking.
+    @State private var cardShown = true
+    @State private var revealTask: Task<Void, Never>?
     /// Answers the coach couldn't make out, per step: two and the step's
     /// cards appear, so talking never becomes a dead end.
     @State private var misses: [Int: Int] = [:]
     /// Voice mode, the gear question: everything named so far, sent
     /// together, until "that's it".
     @State private var gearHeard: [String] = []
+    /// Voice mode, "about you": what's been heard so far, filled live.
+    @State private var heardAbout = HeardMetrics()
+    @State private var showFullAbout = false
+    /// The health card's page, and whether the coach is reading the answers
+    /// back before saving them (voice mode).
+    @State private var safetyPage = 0
+    @State private var safetyConfirming = false
     @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
     @AppStorage(CoachingStyle.toneKey) private var toneSetting = CoachingStyle.Tone.hype.rawValue
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
@@ -79,11 +90,8 @@ struct OnboardingStageView: View {
     /// answer must never be misheard; a color is picked by eye), so the mic
     /// stays closed on them.
     private var listensForAnswer: Bool {
-        guard let step else { return isWeek }
-        switch step.kind {
-        case .safety, .customize, .voice: return false
-        default: return true
-        }
+        // Hands-free once you chose to talk: every step can be said.
+        step != nil || isWeek
     }
     /// The health screen says a doctor first: no plan until they're cleared.
     private var showsClearance: Bool {
@@ -133,12 +141,30 @@ struct OnboardingStageView: View {
                     .background { measure("caption") }
                     // Voice mode: when the coach finishes asking, the mic opens.
                     .onChange(of: voice.isSpeaking) { _, speaking in
-                        if !speaking { listenIfVoiceMode() }
+                        if speaking { listenUnderCoach() }
+                        if !speaking {
+                            if !cardShown {
+                                revealTask?.cancel()
+                                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { cardShown = true }
+                            }
+                            listenIfVoiceMode()
+                        }
+                    }
+                    .onChange(of: voiceInput.transcript) { _, heard in
+                        fillMetricsLive(heard)
+                        // You talked over the coach: it stops and listens.
+                        if voice.isSpeaking, voiceMode, heard.split(separator: " ").count >= 2 {
+                            voice.stop()
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
                     }
                     .padding(.horizontal, MyoTheme.Spacing.lg)
                     .padding(.bottom, MyoTheme.Spacing.md)
                 card
                     .padding(.horizontal, MyoTheme.Spacing.md)
+                    .opacity(cardShown ? 1 : 0)
+                    .offset(y: cardShown ? 0 : 24)
+                    .allowsHitTesting(cardShown)
                     .id(stepIndex)
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -448,12 +474,16 @@ struct OnboardingStageView: View {
                            content: picked.map(\.label).joined(separator: ", "))
                 }
             case .safety:
-                SafetyCard(answers: $safety) {
+                SafetyCard(answers: $safety, page: $safetyPage) {
                     answer(safety.answer, chip: safety.chip, content: safety.chip)
                 }
             case .aboutYou:
-                AboutYouCard(about: $about) {
-                    answer(about.answer, chip: about.chip, content: about.chip)
+                if voiceMode && !showFullAbout {
+                    MetricsReadout(heard: heardAbout, metric: about.metric) { showFullAbout = true }
+                } else {
+                    AboutYouCard(about: $about) {
+                        answer(about.answer, chip: about.chip, content: about.chip)
+                    }
                 }
             case .customize:
                 ColorCard(coachHex: $coachHex) {
@@ -579,7 +609,23 @@ struct OnboardingStageView: View {
             Task { await appModel.acceptPendingProgramProposal() }
             return
         }
+        if showsClearance {
+            if trimmed.lowercased().range(of: #"\b(cleared|clear|said (it's|its) (ok|fine)|go ahead|green light)\b"#, options: .regularExpression) != nil {
+                enqueue("My doctor cleared me", structured: ["medicalClearance": "cleared"], mode: mode)
+            } else {
+                speak("When a doctor has cleared you, just say my doctor cleared me.")
+            }
+            return
+        }
         guard !trimmed.isEmpty, let step else { return }
+        if voiceMode {
+            switch step.kind {
+            case .safety: safetyByVoice(trimmed); return
+            case .customize: colorByVoice(trimmed, step: step); return
+            case .voice: voiceByVoice(trimmed, step: step); return
+            default: break
+            }
+        }
         if case .activities = step.kind {
             let picked = Self.activities(in: trimmed)
             if picked.isEmpty {
@@ -593,10 +639,17 @@ struct OnboardingStageView: View {
                 }
                 let items = ActivitiesCard.options.filter { picked.contains($0.key) }
                 if !picked.isDisjoint(with: ["run", "yoga", "sport"]) {
-                    aside = "Good to know. For now I build strength plans, with mobility and easy cardio in them. Running and yoga plans are coming. "
+                    aside = (aside ?? "") + "Good to know. For now I build strength plans, with mobility and easy cardio in them. Running and yoga plans are coming. "
                 }
-                answer(["activities": items.map(\.key)], chip: items.map(\.label).joined(separator: " · "),
-                       content: trimmed)
+                // Selected on the card first, so you see what was heard.
+                withAnimation(MyoTheme.Motion.fade) { cardShown = true }
+                let at = stepIndex
+                Task {
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                    guard stepIndex == at else { return }
+                    answer(["activities": items.map(\.key)], chip: items.map(\.label).joined(separator: " · "),
+                           content: trimmed)
+                }
             }
             return
         }
@@ -632,9 +685,211 @@ struct OnboardingStageView: View {
                 let draft = appModel.onboardingDraft
                 chips[field] = step.chip(for: draft[field], draft: draft) ?? Self.shortChip(trimmed)
                 lastChipField = field
-                advance()
+                showOnCard(draft)
             }
         }
+    }
+
+    // MARK: Hands-free: the tap-only steps, by voice
+
+    private static func yesOrNo(_ text: String) -> Bool? {
+        let t = text.lowercased()
+        let no = t.range(of: #"^(no|nope|nah|never|not really|none|nothing|negative)\b|\b(no|nope|nah|never|nothing)\b"#, options: .regularExpression) != nil
+        let yes = t.range(of: #"\b(yes|yeah|yep|yup|i do|correct|right|sure|it does|sometimes|a little)\b"#, options: .regularExpression) != nil
+        if no, !yes { return false }
+        if yes, !no { return true }
+        if no, yes { return t.range(of: #"^(no|nope|nah)\b"#, options: .regularExpression) != nil ? false : true }
+        return nil
+    }
+
+    /// The health questions out loud, one at a time; the card follows. The
+    /// answers are read back before they're saved.
+    private func safetyByVoice(_ text: String) {
+        let t = text.lowercased()
+        if safetyConfirming {
+            switch Self.yesOrNo(text) {
+            case true?:
+                safetyConfirming = false
+                answer(safety.answer, chip: safety.chip, content: safety.chip)
+            case false?:
+                safetyConfirming = false
+                safety = SafetyAnswers()
+                safetyPage = 0
+                speak("No problem, let's go again. " + SafetyCard.question(.activity))
+            case nil:
+                speak("Sorry, is that right? Yes or no.")
+            }
+            return
+        }
+        let pages = SafetyCard.pages(for: safety)
+        let page = pages[min(safetyPage, pages.count - 1)]
+        var understood = true
+        switch page {
+        case .activity:
+            if t.range(of: #"\b(sometimes|some weeks|occasionally|kind of|sort of|on and off)\b"#, options: .regularExpression) != nil {
+                safety.activeNow = "some"
+            } else if let yes = Self.yesOrNo(text) {
+                safety.activeNow = yes ? "regular" : "none"
+            } else if t.range(of: #"\b(most weeks|every week|regularly|consistently|three|four|five|3|4|5)\b"#, options: .regularExpression) != nil {
+                safety.activeNow = "regular"
+            } else { understood = false }
+        case .conditions:
+            let found = Self.conditions(in: t)
+            if !found.isEmpty {
+                safety.conditions = found
+                safety.noneOfThese = false
+            } else if Self.yesOrNo(text) == false || t.contains("none") || t.contains("all good") {
+                safety.noneOfThese = true
+                safety.conditions = []
+            } else { understood = false }
+        case .pregnancy:
+            if let yes = Self.yesOrNo(text) { safety.pregnancyContraindication = yes } else { understood = false }
+        case .symptoms:
+            if let yes = Self.yesOrNo(text) { safety.symptoms = yes } else { understood = false }
+        case .pain:
+            if Self.yesOrNo(text) == false || t.contains("nothing") {
+                safety.hurts = false
+            } else {
+                safety.hurts = true
+                safety.pain = text
+            }
+        }
+        guard understood else {
+            missed("Sorry, I didn't catch that. " + SafetyCard.question(page))
+            return
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let next = SafetyCard.pages(for: safety)
+        if safetyPage + 1 < next.count {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.86)) { safetyPage += 1 }
+            let question = SafetyCard.question(next[safetyPage])
+            speak(next[safetyPage] == .conditions
+                  ? question + " Heart, blood pressure, diabetes, kidney, asthma, pregnancy, a new baby, recent surgery, osteoporosis, glaucoma, or falls?"
+                  : question)
+        } else {
+            safetyConfirming = true
+            speak("So: \(safetySummary). Is that right?")
+        }
+    }
+
+    private var safetySummary: String {
+        let activity = ["regular": "you exercise most weeks", "some": "you exercise sometimes", "none": "you're not exercising yet"][safety.activeNow ?? ""] ?? ""
+        let names = SafetyAnswers.conditionOptions.filter { safety.conditions.contains($0.key) }.map { $0.label.lowercased() }
+        let conditions = names.isEmpty ? "none of those conditions" : names.joined(separator: ", ")
+        let symptoms = safety.symptoms == true ? "warning signs when you're active" : "no warning signs"
+        let pain = safety.hurts == true ? "something hurts" : "nothing hurts"
+        return [activity, conditions, symptoms, pain].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    private static func conditions(in t: String) -> Set<String> {
+        let map: [(String, String)] = [
+            (#"\bheart\b"#, "heart"), (#"blood pressure|hypertension"#, "high_blood_pressure"), (#"diabet"#, "diabetes"),
+            (#"kidney|renal"#, "kidney"), (#"asthma|lung|copd"#, "lung"), (#"pregnan"#, "pregnant"),
+            (#"baby|postpartum|gave birth"#, "postpartum"), (#"surgery|replacement|operation"#, "surgery"),
+            (#"osteoporosis|bone density"#, "osteoporosis"), (#"glaucoma"#, "glaucoma"), (#"fall|unsteady|balance"#, "falls"),
+        ]
+        return Set(map.filter { t.range(of: $0.0, options: .regularExpression) != nil }.map(\.1))
+    }
+
+    private static let colorHues: [String: Double] = [
+        "red": 0, "cherry": 0, "crimson": 352, "orange": 26, "tangerine": 26, "amber": 38, "gold": 45, "golden": 45,
+        "yellow": 58, "lemon": 58, "lime": 78, "green": 120, "mint": 150, "teal": 172, "turquoise": 178, "cyan": 186,
+        "aqua": 186, "sky": 200, "blue": 215, "navy": 228, "cobalt": 220, "indigo": 245, "purple": 270, "violet": 268,
+        "lavender": 268, "magenta": 315, "pink": 330, "rose": 332, "coral": 12, "salmon": 10,
+    ]
+
+    /// "Make it blue", "purple", "that's it".
+    private func colorByVoice(_ text: String, step: Step) {
+        let t = text.lowercased()
+        if t.range(of: #"\b(that's it|thats it|keep it|keep this|looks good|love it|perfect|done|yes|that one|good)\b"#, options: .regularExpression) != nil {
+            customized = true
+            finishLocal(step, chip: CoachColor.name(hue: CoachColor.position(of: coachHex).hue))
+            return
+        }
+        guard let hue = Self.colorHues.first(where: { t.range(of: #"\b\#($0.key)\b"#, options: .regularExpression) != nil })?.value else {
+            missed("Say a color, like blue, green or purple, or say that's it.")
+            return
+        }
+        let soft = t.range(of: #"\b(soft|pale|light|pastel|muted)\b"#, options: .regularExpression) != nil
+        withAnimation(MyoTheme.Motion.fade) { coachHex = CoachColor.hex(hue: hue / 360, vivid: soft ? 0.3 : 1) }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        speak("How's this? Say another color, or that's it.")
+    }
+
+    /// "Male, calm", "hype me up", "sounds good".
+    private func voiceByVoice(_ text: String, step: Step) {
+        let t = text.lowercased()
+        if t.range(of: #"\b(sounds good|that's it|thats it|perfect|keep it|love it|good|yes|done)\b"#, options: .regularExpression) != nil {
+            voiced = true
+            finishLocal(step, chip: CoachVoiceOption.label(voiceName))
+            return
+        }
+        var current = CoachVoiceOption.voice(named: voiceName)
+        var female = current.female
+        var feel = current.feel
+        var heard = false
+        if t.range(of: #"\b(female|woman|girl|her)\b"#, options: .regularExpression) != nil { female = true; heard = true }
+        if t.range(of: #"\b(male|man|guy|him|dude)\b"#, options: .regularExpression) != nil, !t.contains("female") { female = false; heard = true }
+        for candidate in CoachVoiceOption.Feel.allCases where t.contains(candidate.rawValue) { feel = candidate; heard = true }
+        if t.range(of: #"\b(hype|pump|energ)"#, options: .regularExpression) != nil {
+            toneSetting = CoachingStyle.Tone.hype.rawValue; tipsSetting = CoachingStyle.Tips.full.rawValue; heard = true
+        } else if t.range(of: #"\b(essentials|brief|short|quiet)\b"#, options: .regularExpression) != nil {
+            toneSetting = CoachingStyle.Tone.calm.rawValue; tipsSetting = CoachingStyle.Tips.brief.rawValue; heard = true
+        } else if t.range(of: #"\b(calm and clear|clear)\b"#, options: .regularExpression) != nil {
+            toneSetting = CoachingStyle.Tone.calm.rawValue; tipsSetting = CoachingStyle.Tips.full.rawValue; heard = true
+        }
+        guard heard else {
+            missed("Say female or male, and warm, upbeat, firm or calm. Or say sounds good.")
+            return
+        }
+        voiceName = CoachVoiceOption.name(female: female, feel: feel)
+        UserDefaults.standard.set(true, forKey: CoachVoiceOption.chosenKey)
+        current = CoachVoiceOption.voice(named: voiceName)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        lastSpokenStep = stepIndex
+        voice.speak(current.feel.sample + " Sounds good, or try another?", messageId: "onboarding-voice-\(UUID().uuidString)")
+        revealCard(after: "")
+    }
+
+    /// Voice mode, "about you": fill age, height, weight and sex in as
+    /// they're said, and once all four are heard, save without waiting.
+    private func fillMetricsLive(_ text: String) {
+        guard voiceMode, let step, case .aboutYou = step.kind, !text.isEmpty else { return }
+        heardAbout.merge(HeardMetrics.parse(text))
+        guard heardAbout.complete else { return }
+        if let age = heardAbout.age { about.age = age }
+        if let cm = heardAbout.heightCm { about.heightCm = cm }
+        if let kg = heardAbout.weightKg { about.weightKg = kg }
+        about.sex = heardAbout.sex
+        voiceInput.release()
+        heardAbout = HeardMetrics()
+        answer(about.answer, chip: about.chip, content: about.chip)
+    }
+
+    /// A spoken answer, shown on the card it answers (the goal ticked, the
+    /// gear and days selected) for a beat before moving on.
+    private func showOnCard(_ draft: [String: Any]) {
+        adoptIntoCards(draft)
+        withAnimation(cardShown ? MyoTheme.Motion.fade : nil) { cardShown = true }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let at = stepIndex
+        Task {
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            if stepIndex == at { advance() }
+        }
+    }
+
+    /// The cards' own state from what the server understood.
+    private func adoptIntoCards(_ draft: [String: Any]) {
+        if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
+        if let saved = draft["preferredDays"] as? [String], !saved.isEmpty { days = Set(saved) }
+        if let saved = draft["preferredTime"] as? String {
+            let parts = saved.split(separator: ":").compactMap { Int($0) }
+            if parts.count == 2, let picked = Calendar.current.date(bySettingHour: parts[0], minute: parts[1], second: 0, of: Date()) {
+                time = picked
+            }
+        }
+        about.adopt(draft)
     }
 
     /// Voice mode, the gear question: "Got kettlebells. Anything else?" until
@@ -662,6 +917,7 @@ struct OnboardingStageView: View {
                 missed("Sorry, I didn't catch that. What do you have, like dumbbells, bands, or just your body?")
                 return
             }
+            adoptIntoCards(draft)
             notice = "Got: \(label). Anything else?"
             speak("Got \(label.replacingOccurrences(of: " · ", with: ", ")). Anything else, or is that it?")
         }
@@ -804,6 +1060,7 @@ struct OnboardingStageView: View {
         customized = false
         voiced = false
         gearHeard = []
+        heardAbout = HeardMetrics()
         misses = [:]
         safety = SafetyAnswers()
         activities = []
@@ -859,18 +1116,50 @@ struct OnboardingStageView: View {
         // Voice mode, a step that's taps anyway: say why.
         voiceInput.extraPause = voiceMode ? Self.voicePause(for: step) : 1_200_000_000
         var outro = ""
-        if voiceMode, case .safety = step.kind { outro = " Just tap your answers, so nothing gets misheard." }
+        if voiceMode, case .safety = step.kind {
+            safetyPage = 0
+            safetyConfirming = false
+            outro = " First: " + SafetyCard.question(.activity)
+        }
         speak((aside ?? "") + intro + (voiceMode ? step.spokenQuestion : step.question) + outro)
         aside = nil
     }
 
     private func speak(_ text: String) {
+        revealCard(after: text)
         guard speaksReplies, !text.isEmpty, !voiceInput.isListening else {
             // Voice mode with the coach's voice off: still listen for the answer.
             listenIfVoiceMode()
             return
         }
         voice.speak(text, messageId: "onboarding-\(UUID().uuidString)")
+    }
+
+    /// Hide the answers, then bring them in about a second before the coach
+    /// finishes saying `text` (its voice takes ~1 s to start and ~0.36 s a
+    /// word). With the voice off, they're there at once.
+    private func revealCard(after text: String) {
+        revealTask?.cancel()
+        guard speaksReplies, !text.isEmpty else {
+            withAnimation(MyoTheme.Motion.fade) { cardShown = true }
+            return
+        }
+        cardShown = false
+        let words = Double(text.split(separator: " ").count)
+        let delay = max(0.8, words * 0.36)
+        revealTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { cardShown = true }
+        }
+    }
+
+    /// Voice mode with headphones (or echo cancellation): the mic is open
+    /// while the coach asks, so you can cut in. Two of your words stop it.
+    private func listenUnderCoach() {
+        guard voiceMode, listensForAnswer, AudioHub.shared.canTalkOver, awaitingParse == nil,
+              !voiceInput.isListening, !showKeyboard else { return }
+        voiceInput.listen()
     }
 
     /// Voice mode, nothing to tap on this step: open the mic for the answer.
@@ -915,8 +1204,8 @@ struct OnboardingStageView: View {
     /// where people stop to think ("kettlebells… dumbbells…").
     private static func voicePause(for step: Step) -> UInt64 {
         switch step.kind {
-        case .gear, .activities, .schedule, .aboutYou: return 2_800_000_000
-        default: return 1_800_000_000
+        case .gear, .activities, .schedule, .aboutYou: return 1_500_000_000
+        default: return 800_000_000
         }
     }
 
@@ -1065,7 +1354,7 @@ private struct Step {
         Step(field: "injuriesOrLimitations",
              question: "Four quick health questions, so I keep you safe.",
              kind: .safety),
-        Step(field: "customize", question: "Now make me yours. Pick my color.", kind: .customize),
+        Step(field: "customize", question: "Pick a color for me.", kind: .customize),
         Step(field: "voice", question: "Last thing: how should I sound, and how should I coach you?", kind: .voice),
     ]
 }
@@ -1257,6 +1546,109 @@ private struct StageFramesKey: PreferenceKey {
 }
 
 // MARK: - Gear, about you, make it yours
+
+/// Age, height, weight and sex from what was said: "I'm 45, five ten,
+/// 195 pounds, male".
+struct HeardMetrics: Equatable {
+    var age: Int?
+    var heightCm: Int?
+    var weightKg: Double?
+    var sex: String?
+
+    var complete: Bool { age != nil && heightCm != nil && weightKg != nil && sex != nil }
+
+    /// New values win; anything not said again is kept.
+    mutating func merge(_ other: HeardMetrics) {
+        age = other.age ?? age
+        heightCm = other.heightCm ?? heightCm
+        weightKg = other.weightKg ?? weightKg
+        sex = other.sex ?? sex
+    }
+
+    static func parse(_ raw: String) -> HeardMetrics {
+        var t = " " + raw.lowercased().replacingOccurrences(of: "’", with: "'") + " "
+        let words: [String: String] = ["four": "4", "five": "5", "six": "6", "seven": "7", "zero": "0", "one": "1",
+                                       "two": "2", "three": "3", "eight": "8", "nine": "9", "ten": "10", "eleven": "11"]
+        for (word, digit) in words {
+            t = t.replacingOccurrences(of: #"\b\#(word)\b"#, with: digit, options: .regularExpression)
+        }
+        var out = HeardMetrics()
+        func take(_ pattern: String) -> [String]? {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let m = regex.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) else { return nil }
+            let groups = (1..<m.numberOfRanges).map { i -> String in
+                guard let r = Range(m.range(at: i), in: t) else { return "" }
+                return String(t[r])
+            }
+            if let whole = Range(m.range, in: t) { t.replaceSubrange(whole, with: " ") }
+            return groups
+        }
+        if let g = take(#"(\d{2,3}(?:\.\d)?)\s*(pounds?|lbs?|kilos?|kilograms?|kgs?)\b"#), let n = Double(g[0]) {
+            out.weightKg = g[1].hasPrefix("k") ? n : (n * 0.453592 * 10).rounded() / 10
+        }
+        if let g = take(#"\b(\d{3})\s*(?:cm|centimet(?:er|re)s?)\b"#), let cm = Int(g[0]) {
+            out.heightCm = cm
+        } else if let g = take(#"\b([4-7])\s*(?:'|foot|feet|ft)\s*(\d{1,2})?\b"#), let ft = Int(g[0]) {
+            out.heightCm = Int((Double(ft * 12 + (Int(g[1]) ?? 0)) * 2.54).rounded())
+        } else if let g = take(#"\b([4-7])\s*[, ]\s*(\d|1[01])\b"#), let ft = Int(g[0]), let inch = Int(g[1]) {
+            out.heightCm = Int((Double(ft * 12 + inch) * 2.54).rounded())
+        }
+        if let g = take(#"\b(1[89]|[2-9]\d)\b"#), let age = Int(g[0]) { out.age = age }
+        if t.range(of: #"\b(non[- ]?binary|enby)\b"#, options: .regularExpression) != nil { out.sex = "non_binary" }
+        else if t.range(of: #"\b(female|woman|girl|lady)\b"#, options: .regularExpression) != nil { out.sex = "female" }
+        else if t.range(of: #"\b(male|man|guy|dude)\b"#, options: .regularExpression) != nil { out.sex = "male" }
+        return out
+    }
+}
+
+/// Voice mode, "about you": four slots that fill in as you speak.
+private struct MetricsReadout: View {
+    let heard: HeardMetrics
+    let metric: Bool
+    let onEdit: () -> Void
+
+    var body: some View {
+        VStack(spacing: MyoTheme.Spacing.sm) {
+            HStack(spacing: 8) {
+                slot("Age", heard.age.map(String.init))
+                slot("Height", heard.heightCm.map(height))
+                slot("Weight", heard.weightKg.map(weight))
+                slot("Sex", heard.sex.map { key in AboutYou.sexes.first { $0.key == key }?.label ?? key })
+            }
+            Button("Edit", action: onEdit)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+        }
+    }
+
+    private func slot(_ label: String, _ value: String?) -> some View {
+        VStack(spacing: 2) {
+            Text(label.uppercased())
+                .font(.system(.caption2, design: .monospaced).weight(.medium))
+                .foregroundStyle(MyoColor.Text.tertiary.color)
+            Text(value ?? "–")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(value == nil ? MyoColor.Text.disabled.color : MyoColor.Text.primary.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+        }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .myoGlass(tint: value == nil ? nil : MyoTheme.Colors.coachAmber.opacity(0.25),
+                  in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: value)
+    }
+
+    private func height(_ cm: Int) -> String {
+        if metric { return "\(cm) cm" }
+        let inches = Int((Double(cm) / 2.54).rounded())
+        return "\(inches / 12)′\(inches % 12)″"
+    }
+
+    private func weight(_ kg: Double) -> String {
+        metric ? "\(Int(kg.rounded())) kg" : "\(Int((kg / 0.453592).rounded())) lb"
+    }
+}
 
 /// The first screen: do onboarding by talking or by tapping.
 private struct ModeCard: View {
@@ -1667,14 +2059,28 @@ private struct SafetyAnswers {
 /// time, all taps, nothing misheard. Single answers move straight on.
 private struct SafetyCard: View {
     @Binding var answers: SafetyAnswers
+    /// Owned by the screen, so the coach can ask the same page out loud.
+    @Binding var page: Int
     let onDone: () -> Void
-    @State private var page = 0
 
-    private enum Page { case activity, conditions, pregnancy, symptoms, pain }
+    enum Page { case activity, conditions, pregnancy, symptoms, pain }
 
-    private var pages: [Page] {
+    static func pages(for answers: SafetyAnswers) -> [Page] {
         [.activity, .conditions] + (answers.conditions.contains("pregnant") ? [.pregnancy] : []) + [.symptoms, .pain]
     }
+
+    /// Each page's question, as shown and as the coach asks it.
+    static func question(_ page: Page) -> String {
+        switch page {
+        case .activity: return "Do you exercise now, about 30 minutes, 3 or more days a week?"
+        case .conditions: return "Do any of these apply to you?"
+        case .pregnancy: return "Has a doctor told you not to exercise in this pregnancy, or do you have placenta previa, preeclampsia, a cerclage, or a risk of early labor?"
+        case .symptoms: return "When you're active, do you ever get chest pain, unusual breathlessness, dizziness or fainting, or a racing heartbeat?"
+        case .pain: return "Does anything hurt right now?"
+        }
+    }
+
+    private var pages: [Page] { Self.pages(for: answers) }
     private var current: Page { pages[min(page, pages.count - 1)] }
 
     var body: some View {
@@ -1711,7 +2117,7 @@ private struct SafetyCard: View {
     // MARK: Pages
 
     private var activity: some View {
-        question("Do you exercise now, about 30 minutes, 3 or more days a week?") {
+        question(Self.question(.activity)) {
             ForEach(SafetyAnswers.activity, id: \.key) { option in
                 row(option.label, on: answers.activeNow == option.key) { answers.activeNow = option.key; next() }
             }
@@ -1719,7 +2125,7 @@ private struct SafetyCard: View {
     }
 
     private var conditions: some View {
-        question("Do any of these apply to you?") {
+        question(Self.question(.conditions)) {
             row("None of these", on: answers.noneOfThese) {
                 answers.noneOfThese = true
                 answers.conditions = []
@@ -1744,19 +2150,19 @@ private struct SafetyCard: View {
     }
 
     private var pregnancy: some View {
-        question("Has a doctor told you not to exercise in this pregnancy, or do you have placenta previa, preeclampsia, a cerclage, or a risk of early labor?") {
+        question(Self.question(.pregnancy)) {
             yesNo(answers.pregnancyContraindication) { answers.pregnancyContraindication = $0; next() }
         }
     }
 
     private var symptoms: some View {
-        question("When you're active, do you ever get chest pain, unusual breathlessness, dizziness or fainting, or a racing heartbeat?") {
+        question(Self.question(.symptoms)) {
             yesNo(answers.symptoms) { answers.symptoms = $0; next() }
         }
     }
 
     private var pain: some View {
-        question("Does anything hurt right now?") {
+        question(Self.question(.pain)) {
             yesNo(answers.hurts) { hurts in
                 answers.hurts = hurts
                 if !hurts { finish() }
