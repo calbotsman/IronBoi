@@ -30,7 +30,12 @@ final class LiveVoiceSession: ObservableObject {
 
     var isActive: Bool { state != .idle }
 
-    struct Ticket: Decodable { let token: String; let model: String }
+    struct Ticket: Decodable {
+        let token: String
+        let model: String
+        /// "openai" (Realtime API) or nil for Gemini Live.
+        var provider: String? = nil
+    }
     struct TurnResult: Decodable { let saved: Bool; let stop: Bool; let line: String? }
 
     /// The server, as the session needs it.
@@ -63,6 +68,8 @@ final class LiveVoiceSession: ObservableObject {
     private let agentAnalyzer = MicAnalyzer()
     private var buffersPlaying = 0
     private var model = ""
+    /// OpenAI Realtime or Gemini Live: same session, different wire format.
+    private var openAI = false
     private var resumeHandle: String?
     private var reconnecting = false
 
@@ -116,7 +123,22 @@ final class LiveVoiceSession: ObservableObject {
             let ticket = try await backend.mint(handle)
             guard mine == connection else { return false }
             model = ticket.model
+            openAI = ticket.provider == "openai"
             try hub.start(reconfigure: !tapInstalled)
+            if openAI {
+                // The session (brain, voice, tools) is locked into the
+                // client secret; connecting is all that's left.
+                guard let url = URL(string: "wss://api.openai.com/v1/realtime?model=\(ticket.model)") else { throw URLError(.badURL) }
+                var request = URLRequest(url: url)
+                request.setValue("Bearer \(ticket.token)", forHTTPHeaderField: "Authorization")
+                let task = URLSession.shared.webSocketTask(with: request)
+                task.maximumMessageSize = 8 * 1024 * 1024
+                socket = task
+                task.resume()
+                receive(on: task, connection: mine)
+                AudioHub.log("live: connecting OpenAI \(ticket.model)")
+                return true
+            }
             let token = ticket.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+/=&"))) ?? ticket.token
             guard let url = URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=\(token)") else {
                 throw URLError(.badURL)
@@ -174,7 +196,7 @@ final class LiveVoiceSession: ObservableObject {
                 switch result {
                 case .failure(let error):
                     AudioHub.log("live: socket closed \(error.localizedDescription)")
-                    if self.state != .idle, self.resumeHandle != nil { self.reconnect(reason: "closed") } else { self.stop() }
+                    if self.state != .idle, self.resumeHandle != nil || self.openAI { self.reconnect(reason: "closed") } else { self.stop() }
                 case .success(let message):
                     let data: Data?
                     switch message {
@@ -192,6 +214,10 @@ final class LiveVoiceSession: ObservableObject {
     }
 
     private func handle(_ message: [String: Any], socket task: URLSessionWebSocketTask) {
+        if openAI {
+            handleOpenAI(message, socket: task)
+            return
+        }
         if let error = message["error"] as? [String: Any] {
             AudioHub.log("live: provider error \(error["code"] ?? "?") \(String(describing: error["status"] ?? ""))")
             stop()
@@ -256,6 +282,65 @@ final class LiveVoiceSession: ObservableObject {
         }
     }
 
+    /// OpenAI Realtime's events, mapped onto the same turn, caption and
+    /// playback handling as Gemini's.
+    private func handleOpenAI(_ message: [String: Any], socket task: URLSessionWebSocketTask) {
+        switch message["type"] as? String ?? "" {
+        case "session.created":
+            AudioHub.log("live: ready (OpenAI)")
+            socketBox.socket = task
+            if state == .connecting { state = .listening }
+            installTap()
+        case "error":
+            let error = message["error"] as? [String: Any]
+            AudioHub.log("live: provider error \(error?["code"] ?? "?") \(String(describing: error?["message"] ?? ""))")
+        case "input_audio_buffer.speech_started":
+            // You started talking: the coach stops mid-word.
+            guard state == .speaking else { return }
+            hub.stopPlayback()
+            buffersPlaying = 0
+            agentMeter.reset()
+            uplink.coachSpeaking = false
+            state = .listening
+            AudioHub.log("live: interrupted")
+            recordTurnIfAny(interrupted: true)
+        case "conversation.item.input_audio_transcription.completed":
+            guard let text = message["transcript"] as? String, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            if coachTurnDone, !turnCoach.isEmpty { recordTurnIfAny(interrupted: false) }
+            if turnUser.isEmpty { turnStartedAt = Date() }
+            turnUser += (turnUser.isEmpty ? "" : " ") + text
+            heard = turnUser
+        case "response.output_audio.delta":
+            guard let b64 = message["delta"] as? String, let pcm = Data(base64Encoded: b64),
+                  let buffer = Self.buffer(fromPCM16: pcm) else { return }
+            if coachTurnDone { caption = ""; coachTurnDone = false }
+            play(buffer)
+        case "response.output_audio_transcript.delta":
+            guard let delta = message["delta"] as? String else { return }
+            if coachTurnDone { caption = ""; coachTurnDone = false }
+            caption += delta
+            turnCoach += delta
+        case "response.done":
+            coachTurnDone = true
+            if buffersPlaying == 0 { state = .listening; uplink.coachSpeaking = false }
+            let output = (message["response"] as? [String: Any])?["output"] as? [[String: Any]] ?? []
+            for item in output where item["type"] as? String == "function_call" {
+                let args = (item["arguments"] as? String).flatMap { $0.data(using: .utf8) }
+                    .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+                runTool(["name": item["name"] ?? "", "id": item["call_id"] ?? "", "args": args])
+            }
+            if !turnCoach.isEmpty { recordTurnIfAny(interrupted: false) }
+        default:
+            break
+        }
+    }
+
+    /// Sends a client event (OpenAI) over the socket.
+    private func sendEvent(_ event: [String: Any]) {
+        guard let socket, let json = try? Self.json(event) else { return }
+        socket.send(.string(json)) { _ in }
+    }
+
     // MARK: - Memory: every exchange into the shared conversation
 
     private func resetTurn() {
@@ -304,6 +389,13 @@ final class LiveVoiceSession: ObservableObject {
                 response = ["ok": false, "error": "tool_failed"]
                 AudioHub.log("live tool failed: \(name) \(error.localizedDescription)")
             }
+            if self.openAI {
+                let output = (try? Self.json(response)) ?? "{}"
+                self.sendEvent(["type": "conversation.item.create",
+                                "item": ["type": "function_call_output", "call_id": id ?? "", "output": output]])
+                self.sendEvent(["type": "response.create"])
+                return
+            }
             var functionResponse: [String: Any] = ["name": name, "response": response]
             if let id { functionResponse["id"] = id }
             guard let socket = self.socket,
@@ -351,6 +443,13 @@ final class LiveVoiceSession: ObservableObject {
     /// Something you said that the coach didn't hear (the mic was muted for
     /// a count): passed on as your words.
     func forwardUserText(_ text: String) {
+        if openAI {
+            if turnUser.isEmpty { turnStartedAt = Date() }
+            turnUser += text
+            sendClientTurn(text, respond: true)
+            AudioHub.log("live: forwarded \"\(text.suffix(50))\"")
+            return
+        }
         guard let socket, let json = try? Self.json(["realtimeInput": ["text": text]]) else { return }
         if turnUser.isEmpty { turnStartedAt = Date() }
         turnUser += text
@@ -361,6 +460,7 @@ final class LiveVoiceSession: ObservableObject {
     /// Cut the coach off now (you started counting over it).
     func hush() {
         guard state == .speaking else { return }
+        if openAI { sendEvent(["type": "response.cancel"]) }
         hub.stopPlayback()
         buffersPlaying = 0
         agentMeter.reset()
@@ -373,7 +473,10 @@ final class LiveVoiceSession: ObservableObject {
         guard muted != uplinkMuted else { return }
         uplinkMuted = muted
         uplink.muted = muted
-        if muted {
+        if muted, openAI {
+            // Drop whatever half-heard audio is buffered.
+            sendEvent(["type": "input_audio_buffer.clear"])
+        } else if muted {
             // Tell the model the stream paused, so it doesn't wait on a
             // half-heard sentence.
             if let socket, let json = try? Self.json(["realtimeInput": ["audioStreamEnd": true]]) {
@@ -386,6 +489,13 @@ final class LiveVoiceSession: ObservableObject {
     }
 
     private func sendClientTurn(_ text: String, respond: Bool) {
+        if openAI {
+            sendEvent(["type": "conversation.item.create",
+                       "item": ["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]]])
+            if respond { sendEvent(["type": "response.create"]) }
+            AudioHub.log("live: \(respond ? "say" : "note") \"\(text.suffix(70))\"")
+            return
+        }
         guard let socket, let json = try? Self.json([
             "clientContent": ["turns": [["role": "user", "parts": [["text": text]]]], "turnComplete": respond],
         ]) else { return }
@@ -443,7 +553,8 @@ final class LiveVoiceSession: ObservableObject {
         let input = hub.engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { AudioHub.log("live: no mic"); stop(); return }
-        uplink.reset(sourceRate: format.sampleRate)
+        uplink.reset(sourceRate: format.sampleRate, targetRate: openAI ? 24_000 : 16_000)
+        let openAI = self.openAI
         let uplink = self.uplink
         let box = socketBox
         let meter = youMeter
@@ -453,7 +564,9 @@ final class LiveVoiceSession: ObservableObject {
             side?(buffer)
             analyzer.process(buffer, into: meter)
             guard let chunk = uplink.append(buffer), let socket = box.socket else { return }
-            let message = "{\"realtimeInput\":{\"audio\":{\"data\":\"\(chunk.base64EncodedString())\",\"mimeType\":\"audio/pcm;rate=16000\"}}}"
+            let message = openAI
+                ? "{\"type\":\"input_audio_buffer.append\",\"audio\":\"\(chunk.base64EncodedString())\"}"
+                : "{\"realtimeInput\":{\"audio\":{\"data\":\"\(chunk.base64EncodedString())\",\"mimeType\":\"audio/pcm;rate=16000\"}}}"
             socket.send(.string(message)) { _ in }
         }
         tapInstalled = true
@@ -494,7 +607,8 @@ private final class SocketBox: @unchecked Sendable {
     }
 }
 
-/// Turns mic buffers into 16 kHz mono 16-bit chunks of ~100 ms, on the
+/// Turns mic buffers into 16 kHz (Gemini) or 24 kHz (OpenAI) mono 16-bit
+/// chunks of ~100 ms, on the
 /// audio thread. On the phone speaker without echo cancellation the mic
 /// would hear the coach and cut it off, so there it sends nothing while the
 /// coach speaks (half duplex); with headphones or echo cancellation you can
@@ -506,7 +620,8 @@ private final class MicUplink: @unchecked Sendable {
     private var _coachSpeaking = false
     private var _halfDuplex = false
     private var _muted = false
-    private static let chunkBytes = 3_200 // 100 ms at 16 kHz, 16-bit
+    /// ~100 ms of 16-bit audio at the target rate.
+    private var chunkBytes = 3_200
 
     var muted: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _muted }
@@ -522,10 +637,11 @@ private final class MicUplink: @unchecked Sendable {
         set { lock.lock(); _halfDuplex = newValue; lock.unlock() }
     }
 
-    func reset(sourceRate: Double) {
+    func reset(sourceRate: Double, targetRate: Double = 16_000) {
         lock.lock(); defer { lock.unlock() }
         pending = Data()
-        ratio = sourceRate / 16_000
+        ratio = sourceRate / targetRate
+        chunkBytes = Int(targetRate / 10) * 2
         _coachSpeaking = false
     }
 
@@ -545,7 +661,7 @@ private final class MicUplink: @unchecked Sendable {
             samples[i] = Int16(max(-1, min(1, value)) * 32767)
         }
         samples.withUnsafeBufferPointer { pending.append(Data(buffer: $0)) }
-        guard pending.count >= Self.chunkBytes else { return nil }
+        guard pending.count >= chunkBytes else { return nil }
         let chunk = pending
         pending = Data()
         return chunk

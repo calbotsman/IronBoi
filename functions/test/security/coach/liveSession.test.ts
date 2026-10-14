@@ -5,6 +5,9 @@ import {
   CoachLiveToolRequest,
   StartLiveCoachSessionRequest,
   liveToolDeclarations,
+  liveProvider,
+  mintOpenAIClientSecret,
+  openAIRealtimeSession,
   liveAllowedForSignInProvider,
   liveCoachPrompt,
   liveSetup,
@@ -95,5 +98,38 @@ describe("live swaps in a workout", () => {
     expect(sent.success).toBe(false);
     expect(liveToolDeclarations().some((tool) => tool.name === "show_exercise")).toBe(true);
     expect(CoachLiveToolRequest.safeParse({ name: "show_exercise", args: {}, turnId: "t1" }).success).toBe(false);
+  });
+});
+
+describe("live voice on OpenAI Realtime", () => {
+  it("is used only when the operator says so", () => {
+    expect(liveProvider({})).toBe("gemini");
+    expect(liveProvider({ IRONBOI_LIVE_PROVIDER: "openai" })).toBe("openai");
+  });
+
+  it("locks the brain, a mapped voice and every live tool into the session", () => {
+    const session = openAIRealtimeSession({ model: "gpt-realtime", voice: "Orus", instruction: "You are the coach." });
+    expect(session.instructions).toBe("You are the coach.");
+    expect(session.audio.output.voice).toBe("ash");
+    expect(session.audio.input.format).toEqual({ type: "audio/pcm", rate: 24000 });
+    expect(session.tools.map((tool) => tool.name)).toEqual(liveToolDeclarations().map((tool) => tool.name));
+    expect(session.tools.every((tool) => tool.type === "function" && tool.parameters)).toBe(true);
+    expect(openAIRealtimeSession({ model: "m", voice: "Unknown", instruction: "x" }).audio.output.voice).toBe("marin");
+  });
+
+  it("mints a short-lived client secret and surfaces failures", async () => {
+    const ok = async () => ({ ok: true, status: 200, json: async () => ({ value: "ek_123", expires_at: 1_800_000_000 }) });
+    const minted = await mintOpenAIClientSecret({
+      apiKey: "sk-test",
+      session: openAIRealtimeSession({ model: "gpt-realtime", voice: "Kore", instruction: "x" }),
+      fetchImpl: ok as unknown as typeof fetch,
+    });
+    expect(minted.token).toBe("ek_123");
+    const bad = async () => ({ ok: false, status: 401, json: async () => ({ error: { code: "invalid_api_key" } }) });
+    await expect(mintOpenAIClientSecret({
+      apiKey: "sk-bad",
+      session: openAIRealtimeSession({ model: "gpt-realtime", voice: "Kore", instruction: "x" }),
+      fetchImpl: bad as unknown as typeof fetch,
+    })).rejects.toThrow("invalid_api_key");
   });
 });
