@@ -5,7 +5,7 @@ For a fresh session picking up from the 2026-10-13/14 work. Josh wants short, pl
 ## Where things are
 
 - **Code:** everything through PR #36 is merged to `main` (merge commit `de8681c`). Later work is on the branch **`claude/build-58`** (pushed, **no PR yet**): build 58, the talk-or-tap onboarding start, build 59. Open a PR from it to `main` when Josh is happy.
-- **Josh's phone:** build **59**, installed directly from the Mac (not TestFlight). It's the newest code.
+- **Josh's phone:** build **61**, installed directly from the Mac (not TestFlight). It's the newest code.
 - **TestFlight:** the newest real build is **58** (merged `main`). Builds 47, 52, 53 and 57 are stray uploads from Xcode on the old `main`, with the old onboarding; ignore them. `~/IronBoi` is now pulled up to date with `main`.
 - **Backend:** staging (`ironboi-staging`) runs the latest functions. 630 security tests pass.
 - **Josh's staging account:** freshly reset at 12:58 on 10-14, ready for a new onboarding run. His real pre-testing data is in `~/IronBoi-backups/josh-staging-2026-10-13-0645.json`; `restore-josh.py` restores it.
@@ -41,6 +41,18 @@ For a fresh session picking up from the 2026-10-13/14 work. Josh wants short, pl
   - It's honest that yoga, running and sport plans aren't built yet.
   - A "yoga day" request gives real mobility and core work.
   - It reads misheard phrases in context.
+
+## Later on 10-14 (builds 60–61, from Josh's real voice run and live-voice workout)
+
+- **Spoken questions** are worded naturally (`Step.spokenQuestion`).
+- **Voice mode** waits longer on lists. Gear is a "Got X. Anything else?" loop.
+- **Gear named early** (e.g. at the activities question) is kept, through a new optional `field` on `sendOnboardingAnswer`, server and app.
+- **Cards stay visible** in voice mode, and the mic stays on at "about you".
+- **A fresh onboarding** clears the customized/voiced flags.
+- **Live voice in a workout:**
+  - The coach's mic is closed during a set and open during rest; "MYO, …" mid-set is forwarded.
+  - App lines are batched into one ordered turn.
+- **A walking-lunge move.**
 
 ## Open items (in order)
 
