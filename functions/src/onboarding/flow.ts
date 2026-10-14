@@ -34,6 +34,9 @@ export const OnboardingAnswerRequest = z.object({
   timestamp: z.string().datetime(),
   inputMode: CoachInputMode.default("text"),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
+  // Which answer this text is for, when it isn't the current question:
+  // gear mentioned while answering something else, kept for the gear step.
+  field: z.enum(["goals", "trainingExperience", "equipment", "preferredDays", "ageYears", "injuriesOrLimitations"]).optional(),
 });
 
 export const AcceptProgramProposalRequest = z.object({
@@ -98,7 +101,7 @@ export async function processOnboardingAnswer(
   const current = profileSnap.data() ?? {};
   const draft = applyAnswer(
     readDraft(current.onboardingDraft),
-    current.onboardingStep,
+    request.field ?? current.onboardingStep,
     request.content,
     request.structuredAnswer,
   );

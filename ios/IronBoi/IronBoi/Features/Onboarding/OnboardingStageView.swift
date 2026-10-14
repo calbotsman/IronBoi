@@ -55,6 +55,9 @@ struct OnboardingStageView: View {
     /// Answers the coach couldn't make out, per step: two and the step's
     /// cards appear, so talking never becomes a dead end.
     @State private var misses: [Int: Int] = [:]
+    /// Voice mode, the gear question: everything named so far, sent
+    /// together, until "that's it".
+    @State private var gearHeard: [String] = []
     @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
     @AppStorage(CoachingStyle.toneKey) private var toneSetting = CoachingStyle.Tone.hype.rawValue
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
@@ -67,14 +70,16 @@ struct OnboardingStageView: View {
     /// The first screen: talk or tap?
     private var choosingMode: Bool { mode.isEmpty && chips.isEmpty }
     private var voiceMode: Bool { mode == "voice" && !choosingMode }
-    /// In voice mode most steps have no card at all; these always do (a
-    /// health answer must never be misheard; a color is picked by eye), and
-    /// any step does once the coach has missed an answer twice.
-    private var showsCard: Bool {
-        guard voiceMode, !isWeek, !showsClearance, let step else { return true }
+    /// Talking doesn't take the cards away: they're always there for when
+    /// you can't talk right now. Voice mode only means the coach asks out
+    /// loud and the mic opens on its own. These steps are tap-only (a health
+    /// answer must never be misheard; a color is picked by eye), so the mic
+    /// stays closed on them.
+    private var listensForAnswer: Bool {
+        guard let step else { return isWeek }
         switch step.kind {
-        case .safety, .customize, .voice: return true
-        default: return misses[stepIndex, default: 0] >= 2
+        case .safety, .customize, .voice: return false
+        default: return true
         }
     }
     /// The health screen says a doctor first: no plan until they're cleared.
@@ -197,8 +202,16 @@ struct OnboardingStageView: View {
             }
             voiceInput.onFailure = { voiceInput.release() }
             restoreFromServer()
-            // A brand-new onboarding starts on "talk or tap?".
-            if chips.isEmpty { mode = "" }
+            // A brand-new onboarding starts on "talk or tap?", and asks every
+            // question again (an earlier run's "customized" mustn't skip the
+            // color and voice steps for a new account).
+            if chips.isEmpty {
+                mode = ""
+                customized = false
+                voiced = false
+                gearHeard = []
+                misses = [:]
+            }
             askCurrentQuestion()
         }
         .onDisappear {
@@ -361,7 +374,7 @@ struct OnboardingStageView: View {
     private var captionText: String {
         if voiceInput.isListening {
             // Voice mode keeps the question up until your words replace it.
-            if voiceInput.transcript.isEmpty { return voiceMode ? (step?.question ?? " ") : " " }
+            if voiceInput.transcript.isEmpty { return voiceMode ? (step?.spokenQuestion ?? " ") : " " }
             return voiceInput.transcript
         }
         if let notice { return notice }
@@ -370,7 +383,7 @@ struct OnboardingStageView: View {
         if isWeek {
             return appModel.pendingProgramProposal == nil ? "Putting your week together…" : "Here's your week."
         }
-        return step?.question ?? ""
+        return (voiceMode ? step?.spokenQuestion : step?.question) ?? ""
     }
 
     // MARK: - The card under the coach
@@ -385,10 +398,6 @@ struct OnboardingStageView: View {
                 lastSpokenStep = nil
                 askCurrentQuestion()
             }
-        } else if !showsCard {
-            // Voice mode: nothing to tap, just the coach and your words,
-            // with the body standing in the middle of the screen.
-            Color.clear.frame(height: 170)
         } else if showsClearance {
             ClearanceCard(reasons: appModel.onboardingDraft["screenReasons"] as? [String] ?? []) {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -573,6 +582,11 @@ struct OnboardingStageView: View {
                 missed("Sorry, I didn't catch that. Lifting, running, yoga, mobility, a sport?")
             } else {
                 activities = picked
+                // Gear named here isn't wasted: it's kept for the gear question.
+                if Self.mentionsGear(trimmed) {
+                    enqueue(trimmed, structured: nil, mode: mode, field: "equipment")
+                    aside = (aside ?? "") + "I've got your gear too. "
+                }
                 let items = ActivitiesCard.options.filter { picked.contains($0.key) }
                 if !picked.isDisjoint(with: ["run", "yoga", "sport"]) {
                     aside = "Good to know. For now I build strength plans, with mobility and easy cardio in them. Running and yoga plans are coming. "
@@ -580,6 +594,10 @@ struct OnboardingStageView: View {
                 answer(["activities": items.map(\.key)], chip: items.map(\.label).joined(separator: " · "),
                        content: trimmed)
             }
+            return
+        }
+        if voiceMode, case .gear = step.kind {
+            gearConversation(trimmed, mode: mode, step: step)
             return
         }
         if step.fields.isEmpty {
@@ -615,11 +633,41 @@ struct OnboardingStageView: View {
         }
     }
 
+    /// Voice mode, the gear question: "Got kettlebells. Anything else?" until
+    /// they say that's it, so a pause to think doesn't end the list.
+    private func gearConversation(_ text: String, mode: CoachInputMode, step: Step) {
+        let done = text.lowercased().range(
+            of: #"^(no|nope|nah|that's it|that is it|that's all|that's everything|nothing else|done|i'm done|thats it|that's about it)\b"#,
+            options: .regularExpression) != nil
+        if done, !gearHeard.isEmpty {
+            gearHeard = []
+            let draft = appModel.onboardingDraft
+            chips[step.field] = step.chip(for: draft[step.field], draft: draft) ?? "Your gear"
+            lastChipField = step.field
+            advance()
+            return
+        }
+        gearHeard.append(text)
+        voice.stop()
+        awaitingParse = step.field
+        enqueue(gearHeard.joined(separator: ", "), structured: nil, mode: mode, field: step.field) {
+            awaitingParse = nil
+            let draft = appModel.onboardingDraft
+            guard let label = step.chip(for: draft[step.field], draft: draft) else {
+                gearHeard.removeLast()
+                missed("Sorry, I didn't catch that. What do you have, like dumbbells, bands, or just your body?")
+                return
+            }
+            notice = "Got: \(label). Anything else?"
+            speak("Got \(label.replacingOccurrences(of: " · ", with: ", ")). Anything else, or is that it?")
+        }
+    }
+
     /// An answer the coach couldn't use: say so, and after the second miss
     /// on a step in voice mode, put its cards up.
     private func missed(_ line: String) {
         misses[stepIndex, default: 0] += 1
-        let text = voiceMode && misses[stepIndex, default: 0] >= 2 ? "Let's do this one by tapping." : line
+        let text = voiceMode && misses[stepIndex, default: 0] >= 2 ? "You can tap it below, or say it another way." : line
         notice = text
         lastSpokenStep = nil
         speak(text)
@@ -639,26 +687,33 @@ struct OnboardingStageView: View {
         }
     }
 
+    /// Training kit in what was said: "kettlebells, dumbbells, a barbell".
+    private static func mentionsGear(_ text: String) -> Bool {
+        text.lowercased().range(of: #"\b(dumbbells?|kettle ?bells?|barbells?|bench|rack|bands?|clubs?|med(icine)? ball|weighted ball|sandbag|pull[- ]?up bar|cable|machines?|plates?)\b"#,
+                                options: .regularExpression) != nil
+    }
+
     /// "I lift, and I run a bit" → lift, run.
     private static func activities(in text: String) -> Set<String> {
         let t = text.lowercased()
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         var out: Set<String> = []
-        if says(#"\b(lift|lifting|weights?|gym|strength|bodybuilding|powerlifting)\b"#) { out.insert("lift") }
+        if says(#"\b(lift|lifting|weights?|gym|strength|bodybuilding|powerlifting)\b"#) || mentionsGear(text) { out.insert("lift") }
         if says(#"\b(run|running|jog|jogging|runner|5k|10k|marathon)\b"#) { out.insert("run") }
         if says(#"\byoga\b"#) { out.insert("yoga") }
         if says(#"\b(mobility|stretch|stretching|flexibility|pilates)\b"#) { out.insert("mobility") }
-        if says(#"\b(sport|sports|tennis|soccer|football|basketball|golf|climbing|cycling|swimming|hockey|pickleball)\b"#) { out.insert("sport") }
+        if says(#"\b(sport|sports|tennis|soccer|football|basketball|golf|climbing|cycling|swimming|hockey|pickleball|boxing|punching bag|martial arts|mma|kickboxing|jiu jitsu)\b"#) { out.insert("sport") }
         if out.isEmpty, says(#"\b(not sure|don't know|dont know|no idea|anything|whatever)\b"#) { out.insert("not_sure") }
         return out
     }
 
-    private func enqueue(_ content: String, structured: [String: Any]?, mode: CoachInputMode, then: (@MainActor () -> Void)? = nil) {
+    private func enqueue(_ content: String, structured: [String: Any]?, mode: CoachInputMode, field: String? = nil,
+                         then: (@MainActor () -> Void)? = nil) {
         inFlight += 1
         let previous = sendQueue
         sendQueue = Task { @MainActor in
             await previous?.value
-            await appModel.sendOnboardingAnswer(content, inputMode: mode, structuredAnswer: structured)
+            await appModel.sendOnboardingAnswer(content, inputMode: mode, structuredAnswer: structured, field: field)
             inFlight -= 1
             then?()
         }
@@ -765,9 +820,10 @@ struct OnboardingStageView: View {
             ? "Great. A few quick questions and I'll build your first week. "
             : ""
         // Voice mode, a step that's taps anyway: say why.
+        voiceInput.extraPause = voiceMode ? Self.voicePause(for: step) : 1_200_000_000
         var outro = ""
         if voiceMode, case .safety = step.kind { outro = " Just tap your answers, so nothing gets misheard." }
-        speak((aside ?? "") + intro + step.question + outro)
+        speak((aside ?? "") + intro + (voiceMode ? step.spokenQuestion : step.question) + outro)
         aside = nil
     }
 
@@ -782,7 +838,7 @@ struct OnboardingStageView: View {
 
     /// Voice mode, nothing to tap on this step: open the mic for the answer.
     private func listenIfVoiceMode() {
-        guard voiceMode, !showsCard || isWeek, awaitingParse == nil, !voiceInput.isListening,
+        guard voiceMode, listensForAnswer, !showsClearance, awaitingParse == nil, !voiceInput.isListening,
               !voice.isSpeaking, !showKeyboard else { return }
         if isWeek, appModel.pendingProgramProposal == nil { return }
         voiceInput.listen()
@@ -816,6 +872,15 @@ struct OnboardingStageView: View {
     private static func clock(_ date: Date) -> String {
         let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
         return String(format: "%02d:%02d", parts.hour ?? 18, parts.minute ?? 0)
+    }
+
+    /// Voice mode waits longer before your turn is over, longest on lists,
+    /// where people stop to think ("kettlebells… dumbbells…").
+    private static func voicePause(for step: Step) -> UInt64 {
+        switch step.kind {
+        case .gear, .activities, .schedule, .aboutYou: return 2_800_000_000
+        default: return 1_800_000_000
+        }
     }
 
     private static func shortChip(_ text: String) -> String {
@@ -860,6 +925,17 @@ private struct Step {
     let field: String
     let question: String
     let kind: Kind
+
+    /// How the coach asks it out loud in voice mode: no "pick" or "tap".
+    var spokenQuestion: String {
+        switch field {
+        case "activities": return "What kind of training do you like, or want to try? Lifting, running, yoga, a sport, or not sure?"
+        case "equipment": return "What do you have to train with? Name everything, even small stuff like bands."
+        case "preferredDays": return "Which days can you train, and at what time?"
+        case "ageYears": return "Tell me a bit about you: your age, and your height and weight if you're happy to."
+        default: return question
+        }
+    }
 
     /// Its name in the answers list.
     var short: String {
@@ -1152,7 +1228,7 @@ private struct ModeCard: View {
 
     var body: some View {
         VStack(spacing: MyoTheme.Spacing.sm) {
-            choice("Let's talk", detail: "I ask, you answer out loud", icon: "mic.fill", action: onVoice)
+            choice("Let's talk", detail: "I ask out loud, you answer. Tapping still works", icon: "mic.fill", action: onVoice)
             choice("I'll tap", detail: "Quick taps, and you can talk any time", icon: "hand.tap.fill", action: onTap)
         }
     }

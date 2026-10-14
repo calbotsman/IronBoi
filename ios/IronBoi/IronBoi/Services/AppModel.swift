@@ -514,7 +514,8 @@ final class AppModel: NSObject, ObservableObject {
     func sendOnboardingAnswer(
         _ content: String,
         inputMode: CoachInputMode,
-        structuredAnswer: [String: Any]? = nil
+        structuredAnswer: [String: Any]? = nil,
+        field: String? = nil
     ) async {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || structuredAnswer?.isEmpty == false else { return }
@@ -525,13 +526,16 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let now = Self.isoString(from: Date())
-            try await callCallable("sendOnboardingAnswer", data: [
+            var data: [String: Any] = [
                 "messageId": "ios_onboarding_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
                 "timestamp": now,
                 "inputMode": inputMode.rawValue,
                 "structuredAnswer": structuredAnswer ?? [:],
-            ])
+            ]
+            // Which answer the words are for, when it isn't the current question.
+            if let field { data["field"] = field }
+            try await callCallable("sendOnboardingAnswer", data: data)
         } catch {
             errorMessage = error.localizedDescription
         }
