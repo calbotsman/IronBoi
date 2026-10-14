@@ -17,10 +17,16 @@ import {
   profilePath,
   programProposalPath,
   trainingProgramPath,
+  userRoot,
   workoutPlanPath,
 } from "../paths.js";
 import { buildTrainingProgramFromDays } from "../workouts/program.js";
 import { attachDefaultProgression } from "../workouts/progressionDefaults.js";
+import { canonicalEquipment, fitPlanToUser } from "../workouts/planFit.js";
+import { trainingDaysPerWeek, welcomeMessage } from "../journey/recap.js";
+import { writeGeneralCoachMessage } from "../journey/messages.js";
+import { safeLogger } from "../logging/safeLogger.js";
+import { ALL_SCREEN_NOTES, MODERATE_NOTE, readHealthScreen, screenOutcome } from "./healthScreen.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -41,41 +47,44 @@ type PlannedWorkoutDayType = z.infer<typeof PlannedWorkoutDay>;
 type UserHealthProfileType = z.infer<typeof UserHealthProfile>;
 
 const ONBOARDING_SESSION_ID = "onboarding";
+const ACTIVITIES = new Set(["lift", "run", "yoga", "mobility", "sport", "not_sure"]);
+// Six things up front (docs/product/habit-journey-plan.md §1); everything
+// else — height, weight, diet, exact age, the coaching lens — the coach learns
+// by talking, or has a sensible default. The app asks these on the coach
+// screen as cards; the server only needs the answers in this order.
 const REQUIRED_FIELDS = [
   "goals",
-  "ageYears",
-  "sexOrGender",
-  "heightCm",
-  "weightKg",
   "trainingExperience",
   "equipment",
-  "daysPerWeek",
-  "sessionLengthMin",
-  "trainingFocus",
+  "preferredDays",
+  // The app's "About you" card sends age, sex or gender, height and weight
+  // together. Only age is required here, so builds that predate the card
+  // (which send age alone) still finish onboarding.
+  "ageYears",
   "injuriesOrLimitations",
-  "dietaryConstraints",
-  // coachingLens is intentionally LAST: it's a first-run hook (everyone meets
-  // protocols), but ordering it after the core fields keeps the "Last one…"
-  // question honest and stops an in-flight draft that already cleared the core
-  // fields from being bounced backward when this field was added.
-  "coachingLens",
 ] as const;
 
 const QUESTIONS: Record<string, string> = {
-  goals: "What is your main goal right now: build muscle, lose fat, get stronger, improve general fitness, mobility, endurance, build habits, or return to training?",
-  ageYears: "How old are you?",
-  sexOrGender: "Which sex or gender should I use for general fitness estimates?",
-  heightCm: "What is your height?",
-  weightKg: "What is your current weight?",
-  trainingExperience: "What is your training experience: new, beginner, intermediate, or advanced?",
-  equipment: "What equipment do you have access to?",
-  daysPerWeek: "How many days per week do you realistically want to train?",
-  sessionLengthMin: "How long do you want each workout to be?",
-  trainingFocus: "I can recommend the structure from your goal, experience, schedule, and equipment. Do you want to use MYO's recommended focus, or steer it toward a muscle split, full-body training, strength + conditioning, mobility/recovery, or endurance conditioning?",
-  coachingLens: "Last one: how would you like me to explain things? I can keep my own balanced voice, or coach through a protocol — recovery & nervous system (Huberman), hypertrophy science (Schoenfeld), female physiology (Sims), or longevity & measurement (Blueprint). You can change this anytime.",
-  injuriesOrLimitations: "Any injuries, pain, limitations, or movements you want me to avoid?",
-  dietaryConstraints: "Any nutrition constraints or preferences I should account for?",
+  goals: "What do you want from training right now?",
+  trainingExperience: "How much have you trained before?",
+  equipment: "Where will you train, and with what?",
+  ageYears: "A bit about you: how old are you?",
+  sexOrGender: "And your sex or gender?",
+  heightCm: "How tall are you?",
+  weightKg: "And roughly what do you weigh?",
+  preferredDays: "Which days work, and what time?",
+  injuriesOrLimitations: "Last one: does anything hurt, or has a doctor told you to limit exercise?",
+  medicalClearance:
+    "Before we start, please check with a doctor. When they've cleared you to exercise, tell me and I'll build your first week.",
 };
+
+/**
+ * Said yes to "has a doctor told you to limit exercise / chest pain, dizziness
+ * or fainting when active?" (a PAR-Q+ style screen). The coach is not a
+ * doctor: the plan starts at the gentlest level and the welcome says to get
+ * cleared first. Kept as a limitation so the coach sees it on every turn.
+ */
+export const CLEARANCE_NOTE = "Doctor-advised limit or symptoms when active: get medical clearance before training";
 
 export async function processOnboardingAnswer(
   db: Firestore,
@@ -95,6 +104,13 @@ export async function processOnboardingAnswer(
   );
   const missingFields = missingRequiredFields(draft);
   const nextStep = missingFields[0] ?? "proposal_ready";
+  if (Array.isArray(draft.activities) && request.structuredAnswer?.activities !== undefined) {
+    safeLogger.info("Onboarding activities", {
+      event: "onboarding_activities",
+      userId,
+      outcome: (draft.activities as string[]).join(","),
+    });
+  }
 
   await db.doc(coachSessionPath(userId, ONBOARDING_SESSION_ID)).set(
     {
@@ -130,7 +146,7 @@ export async function processOnboardingAnswer(
         onboardingStatus: "collecting",
         onboardingStep: nextStep,
         onboardingMissingFields: missingFields,
-        onboardingDraft: draft,
+        onboardingDraft: withoutUndefined(draft),
         updatedAt: request.timestamp,
         serverUpdatedAt: FieldValue.serverTimestamp(),
       },
@@ -148,6 +164,16 @@ export async function processOnboardingAnswer(
   }
 
   const proposal = buildProgramProposal(userId, request.timestamp, draft, defaultPlan);
+  // Changing an answer after the plan is drafted drafts a new one; the old
+  // one is retired so the app (which shows "the" pending proposal) can't
+  // show — or accept — a stale plan.
+  const stale = await db
+    .collection(`${userRoot(userId)}/programProposals`)
+    .where("source", "==", "onboarding")
+    .where("decision", "==", "pending")
+    .get();
+  await Promise.all(stale.docs.map((doc) =>
+    doc.ref.set({ decision: "edited", serverDecidedAt: FieldValue.serverTimestamp() }, { merge: true })));
   await Promise.all([
     profileRef.set(
       {
@@ -155,7 +181,7 @@ export async function processOnboardingAnswer(
         onboardingStatus: "proposal_ready",
         onboardingStep: "review_plan",
         onboardingMissingFields: [],
-        onboardingDraft: draft,
+        onboardingDraft: withoutUndefined(draft),
         activeProgramProposalId: proposal.proposalId,
         updatedAt: request.timestamp,
         serverUpdatedAt: FieldValue.serverTimestamp(),
@@ -163,7 +189,9 @@ export async function processOnboardingAnswer(
       { merge: true },
     ),
     db.doc(programProposalPath(userId, proposal.proposalId)).set({
-      ...proposal,
+      // Height, weight and the rest aren't asked up front any more, so the
+      // proposal carries undefined fields Firestore would reject.
+      ...withoutUndefined(proposal),
       serverCreatedAt: FieldValue.serverTimestamp(),
     }),
     writeCoachMessage(
@@ -193,6 +221,7 @@ export async function acceptProgramProposal(
   const trainingProgramRef = db.doc(trainingProgramPath(userId));
   const serverDecidedAt = new Date().toISOString();
 
+  const draftTime = (await profileRef.get()).get("onboardingDraft.preferredTime");
   await db.runTransaction(async (transaction) => {
     const proposalSnap = await transaction.get(proposalRef);
     if (!proposalSnap.exists) {
@@ -209,7 +238,13 @@ export async function acceptProgramProposal(
 
     transaction.set(
       profileRef,
-      acceptedProfileUpdate(proposal.profile, request.proposalId, serverDecidedAt),
+      acceptedProfileUpdate(
+        proposal.profile,
+        request.proposalId,
+        serverDecidedAt,
+        // The training time picked in onboarding (the draft keeps it).
+        typeof draftTime === "string" ? draftTime : undefined,
+      ),
       { merge: true },
     );
 
@@ -253,7 +288,39 @@ export async function acceptProgramProposal(
     );
   });
 
+  await welcomeToCoach(db, userId, request.proposalId, serverDecidedAt);
+
   return { ok: true, proposalId: request.proposalId, decidedAt: serverDecidedAt };
+}
+
+/**
+ * The first thing the coach says once the plan is accepted — by name if we
+ * know it, and pointing straight at today's first session. Best-effort: the
+ * plan is already accepted, so a failure here costs the greeting, not the plan.
+ */
+async function welcomeToCoach(db: Firestore, userId: string, proposalId: string, now: string) {
+  try {
+    const [profileSnap, planSnap, logsSnap] = await Promise.all([
+      db.doc(profilePath(userId)).get(),
+      db.doc(workoutPlanPath(userId, "current")).get(),
+      db.collection(`${userRoot(userId)}/workoutLogs`).limit(1).get(),
+    ]);
+    const name = profileSnap.get("preferredName");
+    const limits = profileSnap.get("injuriesOrLimitations");
+    const content = welcomeMessage({
+      name: typeof name === "string" && name.length > 0 ? name : undefined,
+      daysPerWeek: trainingDaysPerWeek(planSnap.get("days")),
+      returning: !logsSnap.empty,
+      clearanceAdvised: startsGently(limits),
+    });
+    await writeGeneralCoachMessage(db, userId, `welcome_${proposalId}`, content, now);
+  } catch (error) {
+    safeLogger.warn("Welcome message failed", {
+      event: "welcome_message_failed",
+      userId,
+      errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+    });
+  }
 }
 
 function parseProgramProposalDocument(data: FirebaseFirestore.DocumentData | undefined) {
@@ -275,8 +342,10 @@ function acceptedProfileUpdate(
   profile: UserHealthProfileType,
   proposalId: string,
   serverDecidedAt: string,
+  preferredTime?: string,
 ) {
   return compactUndefined({
+    preferredTime,
     userId: profile.userId,
     ageYears: profile.ageYears,
     sexOrGender: profile.sexOrGender,
@@ -296,6 +365,8 @@ function acceptedProfileUpdate(
     onboardingStep: "complete",
     onboardingMissingFields: [],
     activeProgramProposalId: proposalId,
+    // When the habit clock starts (journey/metrics.ts measures from here).
+    onboardingCompletedAt: serverDecidedAt,
     updatedAt: serverDecidedAt,
     serverUpdatedAt: FieldValue.serverTimestamp(),
   });
@@ -328,6 +399,11 @@ function applyAnswer(
 
   if (step && content.trim()) {
     next[step] = normalizeStepValue(step, content.trim());
+    // "Mondays and Thursdays at 6" answers both halves of the schedule card.
+    if (step === "preferredDays" && next.preferredTime === undefined) {
+      const time = parseTime(content);
+      if (time) next.preferredTime = time;
+    }
   }
 
   return normalizeDraft(next);
@@ -336,8 +412,13 @@ function applyAnswer(
 function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
   const next = { ...draft };
   if (typeof next.goals === "string") next.goals = parseGoals(next.goals);
-  if (typeof next.equipment === "string") next.equipment = splitList(next.equipment);
-  if (Array.isArray(next.equipment)) next.equipment = cleanList(next.equipment);
+  if (typeof next.equipment === "string") next.equipment = [next.equipment];
+  // "I have kettle bells, dumbbells and a barbell for benching" → the gear
+  // itself, so the plan and the coach read the same clean list.
+  if (Array.isArray(next.equipment)) {
+    const gear = canonicalEquipment(cleanList(next.equipment));
+    next.equipment = gear.length > 0 ? gear : undefined;
+  }
   if (typeof next.dietaryConstraints === "string") {
     next.dietaryConstraints = splitList(next.dietaryConstraints);
   }
@@ -348,18 +429,68 @@ function normalizeDraft(draft: OnboardingDraft): OnboardingDraft {
     next.injuriesOrLimitations = splitList(next.injuriesOrLimitations);
   }
   if (Array.isArray(next.injuriesOrLimitations)) {
-    next.injuriesOrLimitations = cleanList(next.injuriesOrLimitations);
+    // The doctor / chest pain / dizziness screen, however it was answered,
+    // becomes one plain note the coach sees on every turn.
+    const items = cleanList(next.injuriesOrLimitations)
+      .map((item) => (item === CLEARANCE_NOTE || needsClearance(item) ? CLEARANCE_NOTE : item));
+    const cleared = [...new Set(items)];
+    next.injuriesOrLimitations = cleared.length > 1 ? cleared.filter((item) => item !== "none") : cleared;
+  }
+  // The health screen: its notes join the limitations (replacing any it
+  // added before, so a changed answer takes its note with it), and a screen
+  // that needs a doctor's clearance holds the plan back until it's given.
+  if (next.healthScreen !== undefined) {
+    const screen = readHealthScreen(next.healthScreen);
+    if (!screen) {
+      next.healthScreen = undefined;
+    } else {
+      if (next.medicalClearance === "cleared") screen.clearedByDoctor = true;
+      next.healthScreen = screen;
+      const outcome = screenOutcome(screen);
+      const own = Array.isArray(next.injuriesOrLimitations)
+        ? (next.injuriesOrLimitations as string[]).filter((item) => !ALL_SCREEN_NOTES.has(item))
+        : [];
+      const merged = [...new Set([...own, ...outcome.notes])];
+      next.injuriesOrLimitations = merged.length > 1 ? merged.filter((item) => item !== "none") : merged;
+      next.screenStatus = outcome.status;
+      next.screenReasons = outcome.reasons;
+    }
+  }
+  // "What do you like to do?" Not required, and not used to build the plan
+  // yet: it's demand data for what MYO coaches next (docs/product/
+  // flexible-training-plan.md §8).
+  if (next.activities !== undefined) {
+    const picked = Array.isArray(next.activities)
+      ? next.activities.filter((item): item is string => typeof item === "string" && ACTIVITIES.has(item))
+      : [];
+    next.activities = picked.length > 0 ? [...new Set(picked)] : undefined;
   }
   if (typeof next.sexOrGender === "string") next.sexOrGender = normalizeSexOrGender(next.sexOrGender);
   if (typeof next.trainingExperience === "string") {
+    // Unrecognised ("do a push-up") stays unanswered so it's asked again,
+    // rather than quietly becoming "new".
     next.trainingExperience = normalizeTrainingExperience(next.trainingExperience);
   }
   if (typeof next.trainingFocus === "string") {
     next.trainingFocus = normalizeTrainingFocus(next.trainingFocus);
   }
-  for (const field of ["ageYears", "daysPerWeek", "sessionLengthMin"]) {
+  for (const field of ["daysPerWeek", "sessionLengthMin"]) {
     if (typeof next[field] === "string") next[field] = parseNumber(next[field]);
   }
+  if (typeof next.ageYears === "string") next.ageYears = parseAge(next.ageYears);
+  if (typeof next.ageYears === "number" && !(Number.isInteger(next.ageYears) && next.ageYears >= 18 && next.ageYears <= 100)) {
+    next.ageYears = undefined;
+  }
+  for (const field of ["heightCm", "weightKg"] as const) {
+    if (typeof next[field] === "number" && !(Number(next[field]) > 0)) next[field] = undefined;
+  }
+  if (typeof next.preferredDays === "string") next.preferredDays = parseDays(next.preferredDays);
+  if (Array.isArray(next.preferredDays)) {
+    const days = parseDays(next.preferredDays.join(" "));
+    next.preferredDays = days;
+    if (days.length > 0) next.daysPerWeek = days.length;
+  }
+  if (typeof next.preferredTime === "string") next.preferredTime = parseTime(next.preferredTime) ?? undefined;
   if (typeof next.heightCm === "string") next.heightCm = parseHeightCm(next.heightCm);
   if (typeof next.weightKg === "string") next.weightKg = parseWeightKg(next.weightKg);
   return next;
@@ -382,9 +513,17 @@ function normalizeStepValue(step: string, content: string) {
     case "coachingLens":
       return normalizeCoachingLens(content);
     case "ageYears":
+      return parseAge(content);
+    case "preferredDays":
+      return parseDays(content);
     case "daysPerWeek":
     case "sessionLengthMin":
       return parseNumber(content);
+    case "medicalClearance":
+      // "My doctor cleared me" (a tap sends structured "cleared"; said or typed lands here).
+      return /\b(clear(ed)?|yes|ok(ay)?|approved|go ahead|fine)\b/i.test(content) && !/\b(not|no|haven't|hasn't)\b/i.test(content)
+        ? "cleared"
+        : undefined;
     case "heightCm":
       return parseHeightCm(content);
     case "weightKg":
@@ -394,11 +533,19 @@ function normalizeStepValue(step: string, content: string) {
   }
 }
 
-function missingRequiredFields(draft: OnboardingDraft) {
-  return REQUIRED_FIELDS.filter((field) => {
+function missingRequiredFields(draft: OnboardingDraft): string[] {
+  const missing: string[] = REQUIRED_FIELDS.filter((field) => {
     const value = draft[field];
     return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0);
   });
+  // Screened as needing a doctor first: no plan until they say they're cleared.
+  if (draft.screenStatus === "clearance_needed") missing.push("medicalClearance");
+  return missing;
+}
+
+/** A doctor's limit, symptoms, or a condition from the screen: start at the gentlest loads. */
+function startsGently(limits: unknown): boolean {
+  return Array.isArray(limits) && (limits.includes(CLEARANCE_NOTE) || limits.includes(MODERATE_NOTE));
 }
 
 function buildProgramProposal(
@@ -407,10 +554,14 @@ function buildProgramProposal(
   draft: OnboardingDraft,
   defaultPlan: Record<string, PlannedWorkoutDayType>,
 ) {
+  const preferredDays = Array.isArray(draft.preferredDays) ? (draft.preferredDays as string[]) : [];
+  const preferredTime = typeof draft.preferredTime === "string" ? draft.preferredTime : undefined;
+  const clearanceAdvised = startsGently(draft.injuriesOrLimitations);
   const profile = UserHealthProfile.parse({
     userId,
     ageYears: draft.ageYears,
-    sexOrGender: draft.sexOrGender,
+    // Not asked up front any more: only broad estimates used it.
+    sexOrGender: draft.sexOrGender ?? "prefer_not_to_say",
     heightCm: draft.heightCm,
     weightKg: draft.weightKg,
     goals: draft.goals,
@@ -419,15 +570,21 @@ function buildProgramProposal(
     injuriesOrLimitations: draft.injuriesOrLimitations ?? [],
     equipment: draft.equipment ?? [],
     schedule: {
-      daysPerWeek: draft.daysPerWeek,
-      preferredDays: [],
-      sessionLengthMin: draft.sessionLengthMin,
+      daysPerWeek: preferredDays.length || draft.daysPerWeek || 3,
+      preferredDays,
+      sessionLengthMin: draft.sessionLengthMin ?? 45,
     },
     preferences: {
       coachingTone: "balanced",
-      preferredWorkoutTime: "flexible",
+      preferredWorkoutTime: workoutTimeOfDay(preferredTime),
       dislikedExercises: [],
-      trainingFocus: normalizeTrainingFocus(draft.trainingFocus),
+      // Not asked any more: the coach picks the structure from the answers.
+      // Not asked: "MYO's recommendation" follows the days you train (full
+      // body up to 3 a week, a split from 4), and keeps following it when
+      // the days change later. A focus they picked themselves is kept.
+      trainingFocus: draft.trainingFocus !== undefined
+        ? normalizeTrainingFocus(draft.trainingFocus)
+        : "myo_recommended",
       coachingLens: normalizeCoachingLens(draft.coachingLens),
     },
     dietaryConstraints: draft.dietaryConstraints ?? [],
@@ -438,7 +595,20 @@ function buildProgramProposal(
     updatedAt: now,
   });
 
-  const workoutPlan = buildWorkoutPlanFromProfile(userId, profile, defaultPlan, now);
+  // The focus answer lives under preferences; the builder reads it from the
+  // top level. Passing the profile straight through dropped it, so every plan
+  // fell back to the days-per-week rule whatever the user picked.
+  const workoutPlan = buildWorkoutPlanFromProfile(
+    userId,
+    {
+      ...profile,
+      trainingFocus: profile.preferences.trainingFocus,
+      // A doctor's limit: the gentlest starting loads, whatever they said.
+      trainingExperience: clearanceAdvised ? "new" : profile.trainingExperience,
+    },
+    defaultPlan,
+    now,
+  );
 
   return ProgramProposal.parse({
     userId,
@@ -500,6 +670,9 @@ export function buildWorkoutPlanFromProfile(
   profile: {
     schedule: { daysPerWeek?: number; preferredDays?: string[] };
     trainingFocus?: z.infer<typeof TrainingFocus>;
+    // Fit the plan to what they have and how long they've trained.
+    equipment?: string[];
+    trainingExperience?: z.infer<typeof UserHealthProfile>["trainingExperience"];
   },
   defaultPlan: Record<string, PlannedWorkoutDayType>,
   now: string,
@@ -513,6 +686,7 @@ export function buildWorkoutPlanFromProfile(
       profile.schedule.daysPerWeek ?? 3,
       profile.schedule.preferredDays,
       profile.trainingFocus,
+      { equipment: profile.equipment, experience: profile.trainingExperience },
     ),
     updatedAt: now,
   });
@@ -547,6 +721,7 @@ export function selectPlanDays(
   daysPerWeek: number,
   preferredDays?: string[],
   focus?: z.infer<typeof TrainingFocus>,
+  fit?: Parameters<typeof fitPlanToUser>[1],
 ) {
   const clamped = Math.max(1, Math.min(7, daysPerWeek));
   const trainingDays = pickTrainingDays(clamped, preferredDays);
@@ -569,9 +744,12 @@ export function selectPlanDays(
       return [day, session ?? restDay];
     }),
   ) as Record<string, PlannedWorkoutDayType>;
+  // Fitted to their equipment and experience BEFORE progression attaches, so
+  // a swapped-in lift gets its own rule, not the one it replaced.
+  const fitted = fit ? fitPlanToUser(selected, fit) : selected;
   // Every loaded exercise the catalog knows gets a progression rule, so the
   // plan actually moves week to week (see workouts/progressionDefaults.ts).
-  return attachDefaultProgression(selected).days;
+  return attachDefaultProgression(fitted).days;
 }
 
 function isLegsDay(day: PlannedWorkoutDayType) {
@@ -853,19 +1031,35 @@ function parseGoals(value: string): z.infer<typeof GoalType>[] {
 
 function normalizeSexOrGender(value: string) {
   const lower = value.toLowerCase();
-  if (/female|woman|girl/.test(lower)) return "female";
-  if (/male|man|boy/.test(lower)) return "male";
-  if (/non/.test(lower)) return "non_binary";
-  if (/prefer/.test(lower)) return "prefer_not_to_say";
-  return "self_described";
+  if (/^(female|male|non_binary|prefer_not_to_say|self_described)$/.test(lower)) return lower;
+  if (/non[- ]?binary|enby|\bnb\b/.test(lower)) return "non_binary";
+  if (/prefer not|rather not|skip/.test(lower)) return "prefer_not_to_say";
+  if (/female|woman|girl|\bshe\b/.test(lower)) return "female";
+  if (/\bmale\b|\bman\b|\bguy\b|\bboy\b|\bhe\b/.test(lower)) return "male";
+  return undefined;
 }
 
-function normalizeTrainingExperience(value: string) {
-  const lower = value.toLowerCase();
-  if (/advanced|expert/.test(lower)) return "advanced";
-  if (/intermediate/.test(lower)) return "intermediate";
-  if (/beginner|some/.test(lower)) return "beginner";
-  return "new";
+/**
+ * How much they've trained, from however they said it. Order matters:
+ * "never" and "not / rarely / inconsistently" win over the words they
+ * qualify, so "not consistently" is a beginner, not someone who trains.
+ */
+export function normalizeTrainingExperience(value: string) {
+  const lower = value.toLowerCase().replace(/[’‘]/g, "'");
+  if (/^(new|beginner|intermediate|advanced)$/.test(lower)) return lower;
+  if (/never|first time|brand new|complete beginner|no experience|not at all|zero|\bnone\b|\bnothing\b|\bnew\b/.test(lower)) {
+    return "new";
+  }
+  if (/advanced|expert|serious|competit|athlete|decade|\b([5-9]|[1-9]\d)\+? years|lifting for (many|a lot of) years|years and years/.test(lower)) {
+    return "advanced";
+  }
+  if (/\b(not|rarely|hardly|barely|inconsistent\w*)\b|a little|a bit|\bsome\b|few months|not much|bit of|beginner|casual|now and then|sometimes|occasional/.test(lower)) {
+    return "beginner";
+  }
+  if (/intermediate|on and off|off and on|trained before|years|a while|used to|consisten|regular|often|every week|most weeks|times a week|a lot|quite a bit|plenty|\bgym\b|\b(yes|yeah|yep)\b/.test(lower)) {
+    return "intermediate";
+  }
+  return undefined;
 }
 
 function normalizeCoachingLens(value: unknown): z.infer<typeof CoachingLens> {
@@ -887,4 +1081,87 @@ function normalizeTrainingFocus(value: unknown): z.infer<typeof TrainingFocus> {
   if (/mobility|recover|yoga|stretch/.test(lower)) return "mobility_recovery";
   if (/endurance|cardio|peloton|stamina/.test(lower)) return "endurance_conditioning";
   return "myo_recommended";
+}
+
+/** "34", "thirty"-free: a number; or a band chip ("18–39") → its middle. */
+function parseAge(value: string): number | undefined {
+  const band = value.match(/(\d{2})\s*[–-]\s*(\d{2})/);
+  if (band) return Math.round((Number(band[1]) + Number(band[2])) / 2);
+  const plus = value.match(/(\d{2})\s*\+/);
+  if (plus) return Number(plus[1]) + 5;
+  const n = parseNumber(value);
+  // MYO is for adults: under 18 isn't an answer it can take yet.
+  return n !== undefined && Number.isInteger(n) && n >= 18 && n <= 120 ? n : undefined;
+}
+
+const DAY_WORDS: Array<[RegExp, (typeof WEEK_ORDER)[number]]> = [
+  [/\bmon(day)?s?\b/, "Mon"],
+  [/\btue(s|sday)?s?\b/, "Tue"],
+  [/\bwed(nesday)?s?\b/, "Wed"],
+  [/\bthu(r|rs|rsday)?s?\b/, "Thu"],
+  [/\bfri(day)?s?\b/, "Fri"],
+  [/\bsat(urday)?s?\b/, "Sat"],
+  [/\bsun(day)?s?\b/, "Sun"],
+];
+
+/** "Mon, Wed, Fri", "weekdays", "3 days" → training days in week order. */
+export function parseDays(value: string): string[] {
+  const lower = value.toLowerCase();
+  if (/\b(every ?day|daily)\b/.test(lower)) return [...WEEK_ORDER];
+  const days = new Set<string>();
+  if (/\bweekdays?\b/.test(lower)) ["Mon", "Tue", "Wed", "Thu", "Fri"].forEach((d) => days.add(d));
+  if (/\bweekends?\b/.test(lower)) ["Sat", "Sun"].forEach((d) => days.add(d));
+  for (const [pattern, day] of DAY_WORDS) if (pattern.test(lower)) days.add(day);
+  if (days.size === 0) {
+    const count = lower.match(/\b([1-7])\s*(x|times|days?)\b/);
+    if (count) return CANONICAL_TRAINING_DAYS[Number(count[1])] ?? [];
+  }
+  return WEEK_ORDER.filter((d) => days.has(d));
+}
+
+/** "6pm", "6:30", "after work", "mornings" → "HH:MM", or undefined. */
+export function parseTime(value: string): string | undefined {
+  const lower = value.toLowerCase();
+  const clock = lower.match(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?(?!\s*(x|times|days?))\b/);
+  // A bare digit that's really a day count ("3 days") isn't a time.
+  if (clock && (clock[2] || clock[3] || /\bat\s+\d/.test(lower))) {
+    let hour = Number(clock[1]);
+    const minute = Number(clock[2] ?? 0);
+    const meridiem = clock[3]?.replace(/\./g, "");
+    if (meridiem === "pm" && hour < 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+    // "at 6" with no am/pm: people mean evening for 1–6, morning for 7–11.
+    if (!meridiem && hour >= 1 && hour <= 6) hour += 12;
+    if (hour <= 23 && minute <= 59) return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+  if (/\bmorning|before work|early\b/.test(lower)) return "07:00";
+  if (/\blunch|noon|midday\b/.test(lower)) return "12:00";
+  if (/\bafternoon\b/.test(lower)) return "15:00";
+  if (/\bafter work|evening\b/.test(lower)) return "18:00";
+  if (/\bnight\b/.test(lower)) return "20:00";
+  return undefined;
+}
+
+function workoutTimeOfDay(time: string | undefined): "morning" | "afternoon" | "evening" | "flexible" {
+  if (!time) return "flexible";
+  const hour = Number(time.slice(0, 2));
+  return hour < 11 ? "morning" : hour < 16 ? "afternoon" : "evening";
+}
+
+/** A yes to the doctor / chest pain / dizziness / fainting screen. */
+export function needsClearance(value: string): boolean {
+  return /\b(doctor|physician|cardiolog|chest pain|dizz|faint|pass(ed)? out|heart|diabet|kidney|renal|stroke|copd)/i.test(value);
+}
+
+/** A copy with every undefined value dropped, at any depth (Firestore rejects them). */
+function withoutUndefined<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((item) => withoutUndefined(item)) as T;
+  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, withoutUndefined(item)]),
+    ) as T;
+  }
+  return value;
 }

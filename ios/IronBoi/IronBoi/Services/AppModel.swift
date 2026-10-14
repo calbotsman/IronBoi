@@ -24,9 +24,18 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var profileLoaded = false
     @Published private(set) var onboardingStep: String = "goals"
     @Published private(set) var onboardingMissingFields: [String] = []
+    /// The answers so far (server-normalized), so onboarding can resume with
+    /// its "your plan" stack filled in.
+    @Published private(set) var onboardingDraft: [String: Any] = [:]
     @Published private(set) var pendingProgramProposal: ProgramProposalSummary?
     @Published private(set) var pendingPlanAdjustmentProposal: PlanAdjustmentProposalSummary?
-    @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary?
+    @Published private(set) var currentWorkoutPlan: WorkoutPlanSummary? {
+        // Reminders follow the plan's training days.
+        didSet {
+            guard !inPreview, let days = currentWorkoutPlan?.days else { return }
+            TrainingReminders.shared.update(trainingDays: days.filter { !$0.exercises.isEmpty }.map(\.dayKey))
+        }
+    }
     @Published private(set) var activeWorkout: ActiveWorkoutSession? {
         didSet {
             saveLocalWorkout()
@@ -104,6 +113,17 @@ final class AppModel: NSObject, ObservableObject {
     /// After finishing: today's changes, waiting on "keep them?".
     @Published var pendingSessionChanges: [String] = []
     @Published private(set) var workoutLogs: [WorkoutLogSummary] = []
+    /// The first snapshot of workoutLogs has arrived — until then an empty
+    /// list means "not loaded", not "never trained".
+    @Published private(set) var workoutLogsLoaded = false
+    /// What the coach says as the workout that just finished ends; the coach
+    /// screen takes it once (consumeRecap) when the workout closes.
+    @Published private(set) var lastRecap: WorkoutRecap?
+    /// The workout waiting on "How did that feel?".
+    @Published private(set) var pendingEffortSessionId: String?
+    /// When the workout that just finished started — the reminder card
+    /// suggests that time.
+    private(set) var lastWorkoutStartedAt: Date?
     @Published private(set) var progressSummary: ProgressSummaryModel?
     /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
     /// otherwise — the memory screen groups proposed / active / ended.
@@ -354,7 +374,7 @@ final class AppModel: NSObject, ObservableObject {
         LiveVoiceSession.Backend(
             mint: { [weak self] handle in
                 guard let self else { throw CancellationError() }
-                var data: [String: Any] = ["clientDate": Self.currentDateISO()]
+                var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
                 if let handle { data["resumeHandle"] = handle }
                 return try await self.callCallable("startLiveCoachSession", data: data)
             },
@@ -370,6 +390,10 @@ final class AppModel: NSObject, ObservableObject {
             },
             runTool: { [weak self] name, args, turnId, raw in
                 guard let self else { throw CancellationError() }
+                // Swapping a lift mid-workout happens here, on the phone that
+                // holds the session — no review card, no weight to ask for.
+                if name == "swap_workout_exercise" { return await self.liveSwap(args) }
+                if name == "show_exercise" { return self.liveShow(args) }
                 guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
                 let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
                     "name": name,
@@ -385,7 +409,9 @@ final class AppModel: NSObject, ObservableObject {
 
     func synthesizeSpeech(_ text: String) async throws -> Data {
         struct Speech: Decodable { let audio: String }
-        let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: ["text": text])
+        let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: [
+            "text": text, "voice": CoachVoiceOption.current,
+        ])
         guard let data = Data(base64Encoded: speech.audio) else { throw CocoaError(.coderReadCorrupt) }
         return data
     }
@@ -651,6 +677,32 @@ final class AppModel: NSObject, ObservableObject {
     /// what to do next.
     @Published private(set) var planChangesAccepted = 0
 
+    /// The no-backend preview (debug builds only); always false in Release.
+    private var inPreview: Bool {
+        #if DEBUG
+        return isPreviewSession
+        #else
+        return false
+        #endif
+    }
+
+    /// Signed up, plan accepted, no workout finished yet: the first session
+    /// is a short starter, and it's on offer even on a rest day.
+    var isNewToTraining: Bool {
+        workoutLogsLoaded && workoutLogs.isEmpty && activeWorkoutIsFirstSessionCandidate
+    }
+
+    /// A workout already underway with sets logged isn't "new" any more.
+    private var activeWorkoutIsFirstSessionCandidate: Bool {
+        activeWorkout == nil || !activeWorkoutHasProgress
+    }
+
+    /// The recap for the workout that just ended, once.
+    func consumeRecap() -> WorkoutRecap? {
+        defer { lastRecap = nil }
+        return lastRecap
+    }
+
     func startTodaysWorkout() async {
         await startWorkout(dayKey: Self.currentDayKey())
     }
@@ -693,6 +745,9 @@ final class AppModel: NSObject, ObservableObject {
                     // Local calendar date — the backend uses it to resolve a
                     // "just today" dailyOverride for the day being started.
                     "clientDate": Self.currentDateISO(),
+                    // The first-ever session is a short starter (the server
+                    // checks it really is the first).
+                    "starter": isNewToTraining,
                 ]
             )
             activeWorkout = response.activeWorkout
@@ -730,6 +785,58 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkout = workout
         sessionChanges.append("Added \(name), \(sets)×\(reps)\(weight > 0 ? " at \(Self.poundsText(weight)) lb" : "")")
         return index
+    }
+
+    /// The live coach asked the body to demonstrate a lift.
+    struct ShowRequest: Equatable {
+        let id = UUID()
+        let name: String
+    }
+    @Published var showExerciseRequest: ShowRequest?
+
+    func liveShow(_ args: [String: Any]) -> [String: Any] {
+        let current = currentExerciseIndex.flatMap { activeWorkout?.exercises[$0].name }
+        guard let name = (args["exerciseName"] as? String).flatMap({ $0.isEmpty ? nil : $0 }) ?? current else {
+            return ["ok": false, "error": "which_exercise"]
+        }
+        guard ExerciseMotion.match(name) != nil else {
+            return ["ok": false, "error": "no_demo_for_this_one", "hint": "Describe it in words instead."]
+        }
+        showExerciseRequest = ShowRequest(name: name)
+        return ["ok": true, "showing": name]
+    }
+
+    /// The live coach's swap: `replacementName` in for `exerciseName` (or the
+    /// lift you're on), at the weight the swap list suggests for you.
+    func liveSwap(_ args: [String: Any]) async -> [String: Any] {
+        guard let workout = activeWorkout else { return ["ok": false, "error": "no_active_workout"] }
+        guard let replacement = (args["replacementName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !replacement.isEmpty else { return ["ok": false, "error": "replacementName_required"] }
+        func key(_ s: String) -> String { s.lowercased().filter { $0.isLetter } }
+        let named = (args["exerciseName"] as? String).map(key)
+        let index = named.flatMap { want in
+            workout.exercises.firstIndex { key($0.name) == want }
+                ?? workout.exercises.firstIndex { key($0.name).contains(want) || want.contains(key($0.name)) }
+        } ?? currentExerciseIndex
+        guard let index, workout.exercises.indices.contains(index) else {
+            return ["ok": false, "error": "exercise_not_in_workout"]
+        }
+        let from = workout.exercises[index].name
+        var weight = 0.0
+        var name = replacement
+        if case .loaded(let options) = await fetchSwapOptions(
+            exerciseName: from, dayKey: workout.dayKey, sessionId: workout.sessionId, availableEquipment: nil),
+           let match = options.first(where: { key($0.name) == key(replacement) })
+            ?? options.first(where: { key($0.name).contains(key(replacement)) || key(replacement).contains(key($0.name)) }) {
+            weight = match.suggestedWeightLb
+            name = match.name
+        }
+        guard let swapped = swapWorkoutExercise(index, to: name, weight: weight) else {
+            return ["ok": false, "error": "swap_failed"]
+        }
+        if swapped != index || currentExerciseIndex == index { focusedExerciseIndex = swapped }
+        return ["ok": true, "swapped": from, "to": name, "weightLb": weight,
+                "note": weight > 0 ? "Starting weight set." : "No starting weight known: they pick one."]
     }
 
     /// Replaces a lift with another, keeping its sets and reps. If sets were
@@ -991,8 +1098,12 @@ final class AppModel: NSObject, ObservableObject {
         let performed = activeWorkout.exercises.filter {
             !skippedExercises.contains($0.exerciseIndex) || $0.completedSets.contains(where: \.completed)
         }
+        lastWorkoutStartedAt = Self.parseISO(activeWorkout.startedAt)
         #if DEBUG
         if isPreviewSession {
+            let sets = performed.reduce(0) { $0 + $1.completedSetCount }
+            lastRecap = WorkoutRecap(lines: ["\(performed.count) moves, \(sets) sets."], firstWorkout: workoutLogs.isEmpty)
+            pendingEffortSessionId = activeWorkout.sessionId
             self.activeWorkout = nil
             pendingSessionChanges = changes
             return
@@ -1004,9 +1115,15 @@ final class AppModel: NSObject, ObservableObject {
             let response: FinishWorkoutResponse = try await callCallable("finishWorkoutSessionCallable", data: [
                     "sessionId": activeWorkout.sessionId,
                     "completedAt": completedAt,
+                    "clientDate": Self.currentDateISO(),
                     "exercises": try Self.jsonObject(from: performed),
                 ]
             )
+            // Set before the workout closes: the coach screen reads it the
+            // moment activeWorkout goes nil.
+            lastRecap = response.recap
+            pendingEffortSessionId = activeWorkout.sessionId
+            TrainingReminders.shared.markTrainedToday()
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
             pendingSessionChanges = changes
             // Surface the rebaseline card. Nothing has been written yet —
@@ -1018,6 +1135,28 @@ final class AppModel: NSObject, ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// "How did that feel?" — saved on the finished workout's log. The card
+    /// goes away either way; the answer is a nice-to-have, not a gate.
+    func rateWorkout(_ effort: WorkoutEffort) async {
+        guard let sessionId = pendingEffortSessionId else { return }
+        pendingEffortSessionId = nil
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        do {
+            try await callCallable("rateWorkoutSessionCallable", data: [
+                "sessionId": sessionId,
+                "effort": effort.rawValue,
+            ])
+        } catch {
+            AudioHub.log("effort not saved: \(error.localizedDescription)")
+        }
+    }
+
+    func skipEffortQuestion() {
+        pendingEffortSessionId = nil
     }
 
     // MARK: - Exercise swaps
@@ -1246,6 +1385,7 @@ final class AppModel: NSObject, ObservableObject {
         profileLoaded = false
         onboardingStep = "goals"
         onboardingMissingFields = []
+        onboardingDraft = [:]
 
         guard let userId else { return }
 
@@ -1269,6 +1409,12 @@ final class AppModel: NSObject, ObservableObject {
                     self?.profileLoaded = true
                     self?.onboardingStep = data["onboardingStep"] as? String ?? "goals"
                     self?.onboardingMissingFields = data["onboardingMissingFields"] as? [String] ?? []
+                    self?.onboardingDraft = data["onboardingDraft"] as? [String: Any] ?? [:]
+                    // A training time set elsewhere (onboarding, or told to the
+                    // coach) moves the phone's reminders too.
+                    if let time = data["preferredTime"] as? String {
+                        TrainingReminders.shared.adoptServerTime(time)
+                    }
                     // Full profile struct — Preferences view reads from this
                     // and pre-fills its form fields.
                     self?.profile = UserProfile.from(firestoreData: data)
@@ -1305,6 +1451,21 @@ final class AppModel: NSObject, ObservableObject {
     /// or preferredDays — the chat-based onboarding generates the plan
     /// the first time, this lets the user request a fresh one without
     /// re-running onboarding.
+    /// Change what onboarding asked (goal, experience, equipment, days,
+    /// time). The server saves it and rebuilds the plan when it should; the
+    /// listeners bring the new profile and plan back.
+    func updateTrainingSetup(_ change: [String: Any]) async -> TrainingSetupResult? {
+        #if DEBUG
+        if isPreviewSession { return nil }
+        #endif
+        do {
+            return try await callCallable("updateTrainingSetupCallable", data: change)
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func regenerateWorkoutPlan() async {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
@@ -1436,6 +1597,8 @@ final class AppModel: NSObject, ObservableObject {
     func recomputeCurrentWorkoutPlanForToday() {
         guard let latestWorkoutPlanData else { return }
         currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: latestWorkoutPlanData)
+        // Back in the app: roll the two-week reminder window forward.
+        if !inPreview { Task { await TrainingReminders.shared.reschedule() } }
     }
 
     private func listenForActiveWorkout(userId: String?) {
@@ -1488,6 +1651,7 @@ final class AppModel: NSObject, ObservableObject {
     private func listenForWorkoutLogs(userId: String?) {
         workoutLogListener?.remove()
         workoutLogs = []
+        workoutLogsLoaded = false
 
         guard let userId else { return }
 
@@ -1505,6 +1669,7 @@ final class AppModel: NSObject, ObservableObject {
                     }
                     self?.workoutLogs = (snapshot?.documents ?? [])
                         .compactMap { Self.makeWorkoutLogSummary(from: $0.data()) }
+                    self?.workoutLogsLoaded = true
                 }
             }
     }

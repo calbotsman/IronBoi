@@ -80,6 +80,6 @@ struct SessionChangesCard: View {
         .padding(MyoTheme.Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .myoCard()
-        .shadow(color: MyoTheme.Colors.ink.opacity(0.10), radius: 28, y: 10)
+        .shadow(color: MyoTheme.Colors.shadow.opacity(0.10), radius: 28, y: 10)
     }
 }

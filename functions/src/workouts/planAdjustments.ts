@@ -2198,7 +2198,19 @@ function rationaleForCategory(category: AdjustmentCategory) {
 // replaceDayFocusPatch below. Deliberately generic and conservative — a
 // keyword classifier can't know what specific substitution a real coach
 // would pick, so this only ever offers a safe, always-available circuit.
+// Asked for yoga, mobility or stretching, it's actually mobility and core
+// work (not squats and jumping jacks), and the coach says MYO doesn't build
+// yoga flows yet (coach/prompt.ts). Timed holds are seconds in `reps`.
 const GENERIC_MOBILITY_CONDITIONING_EXERCISES: PlannedExerciseType[] = [
+  { name: "Stretching Circuit", sets: 1, reps: 1, weight: 0 },
+  { name: "Bird Dog", sets: 3, reps: 8, weight: 0 },
+  { name: "Dead Bug", sets: 3, reps: 8, weight: 0 },
+  { name: "Side Plank", sets: 2, reps: 30, weight: 0 },
+  { name: "Foam Rolling", sets: 1, reps: 1, weight: 0 },
+];
+
+// Travel: a full bodyweight session that needs no equipment.
+const TRAVEL_BODYWEIGHT_EXERCISES: PlannedExerciseType[] = [
   { name: "Bodyweight Squat", sets: 3, reps: 15, weight: 0 },
   { name: "Push-Up", sets: 3, reps: 12, weight: 0 },
   { name: "Walking Lunge", sets: 3, reps: 12, weight: 0 },
@@ -2222,18 +2234,28 @@ function shortenWorkoutPatch(targetDay: PlannedWorkoutDayType): ProposedPlanPatc
   };
 }
 
-function replaceDayFocusPatch(targetDay: PlannedWorkoutDayType | undefined, title: string): ProposedPlanPatch {
+function replaceDayFocusPatch(
+  targetDay: PlannedWorkoutDayType | undefined,
+  title: string,
+  focus: "mobility" | "travel" = "mobility",
+): ProposedPlanPatch {
+  const mobility = focus === "mobility";
   return {
     type: "replace_day_focus",
     title,
-    changes: [
-      "Replace today's exercises with a bodyweight mobility/conditioning circuit.",
-      "Keeps the day's training stimulus without needing the original equipment or setting.",
-    ],
+    changes: mobility
+      ? [
+        "Replace today's exercises with mobility and core work: stretching, bird dogs, dead bugs, side planks and foam rolling.",
+        "A lighter day that still trains your core and keeps you moving.",
+      ]
+      : [
+        "Replace today's exercises with a bodyweight circuit.",
+        "Keeps the day's training stimulus without needing the original equipment or setting.",
+      ],
     replacementDay: {
-      name: targetDay ? `${targetDay.name} · Adapted` : "Mobility & Conditioning",
+      name: targetDay ? `${targetDay.name} · ${mobility ? "Mobility" : "Adapted"}` : mobility ? "Mobility & Core" : "Bodyweight",
       muscles: targetDay?.muscles ?? [],
-      exercises: GENERIC_MOBILITY_CONDITIONING_EXERCISES,
+      exercises: mobility ? GENERIC_MOBILITY_CONDITIONING_EXERCISES : TRAVEL_BODYWEIGHT_EXERCISES,
     },
     removeExercises: [],
     addExercises: [],
@@ -2281,11 +2303,11 @@ function patchForCategory(
   }
 
   if (category === "style_preference") {
-    return replaceDayFocusPatch(targetDay, "Swap the style while preserving intent");
+    return replaceDayFocusPatch(targetDay, "A mobility and core day");
   }
 
   if (category === "travel") {
-    return replaceDayFocusPatch(targetDay, "Travel-compatible workout");
+    return replaceDayFocusPatch(targetDay, "Travel-compatible workout", "travel");
   }
 
   const reviewOnlyTitles: Partial<Record<AdjustmentCategory, string>> = {

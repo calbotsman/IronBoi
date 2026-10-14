@@ -14,6 +14,7 @@ import { CoachMemoryFact } from "../contracts/coach-agent.js";
 import { recordAuditEventBestEffort } from "../audit/log.js";
 import { memoryFactPath, profilePath, userRoot } from "../paths.js";
 import { CATALOG_EQUIPMENT, suggestSwaps, type Equipment } from "../workouts/exerciseCatalog.js";
+import { catalogEquipment } from "../workouts/planFit.js";
 import {
   acceptLatestPlanAdjustmentFromChat,
   createClearOverridesProposalFromTool,
@@ -22,6 +23,7 @@ import {
   rejectLatestPlanAdjustmentFromChat,
 } from "../workouts/planAdjustments.js";
 import { safeLogger } from "../logging/safeLogger.js";
+import { TrainingSetupChange, updateTrainingSetup } from "../workouts/trainingSetup.js";
 import type { ToolRegistry } from "../tools/executor.js";
 import type { CoachToolDeclaration } from "./modelProvider.js";
 
@@ -214,6 +216,45 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       type: "object",
       properties: { name: { type: "string", maxLength: 40, description: "Just the name, as they said it." } },
       required: ["name"],
+    },
+  },
+  {
+    name: "update_training_setup",
+    description:
+      "Change the person's standing setup — the things onboarding asked — when they tell you in this message that it has changed for good: their goal, experience, equipment, which days or how many days a week, session length, or when they like to train. Saves it and rebuilds their plan from it (adjustments already ahead, like an injury week, are kept). NOT for one-off or this-week changes (a short day, travel, a sore knee) — those are adapt_plan. Only fields they actually stated; omit the rest. Then say in one line what changed and which days they train now.",
+    parameters: {
+      type: "object",
+      properties: {
+        goals: {
+          type: "array",
+          items: { type: "string", enum: ["strength", "muscle_gain", "fat_loss", "general_fitness", "mobility", "endurance", "habit_building", "return_to_training"] },
+          description: "Their goal now, if they changed it.",
+        },
+        trainingExperience: { type: "string", enum: ["new", "beginner", "intermediate", "advanced"] },
+        equipment: {
+          type: "array",
+          items: { type: "string" },
+          description: "ONLY when they describe everything they have now ('I just have a full gym now'). Replaces the whole list.",
+        },
+        addEquipment: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gear they have that isn't on their profile yet ('I've got dumbbells too', 'I bought kettlebells'). Use this, not equipment, for anything they add.",
+        },
+        removeEquipment: {
+          type: "array",
+          items: { type: "string" },
+          description: "Gear they no longer have ('I sold my barbell').",
+        },
+        preferredDays: {
+          type: "array",
+          items: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] },
+          description: "Only if they named the days.",
+        },
+        daysPerWeek: { type: "integer", minimum: 1, maximum: 7, description: "If they gave a count but not which days." },
+        sessionLengthMin: { type: "integer", minimum: 15, maximum: 120 },
+        preferredTime: { type: "string", description: "24h HH:MM, if they said when they train ('6am' → 06:00)." },
+      },
     },
   },
   {
@@ -625,10 +666,15 @@ export function buildCoachToolRegistry(
         logToolValidationFailure(userId, "set_preferred_name", parsed.success ? [] : parsed.error.issues);
         return { ok: false, error: "invalid_name", hint: "Just the name, letters only, and never MYO." };
       }
-      // Only a name the user said this turn: the model may not invent one.
+      // Only a name the user plainly gave this turn ("I'm Josh", "call me
+      // J"). A bare word isn't enough: counting "one" came through as "Juan".
       const said = (context.rawUserText ?? "").toLowerCase();
-      if (!said.includes(name.toLowerCase())) {
-        return { ok: false, error: "name_not_in_message", hint: "Only save a name the user said in this message. Otherwise ask what they'd like to be called." };
+      const escaped = name.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const naming = new RegExp(
+        `\\b(my name is|my name's|name's|call me|i'm|i am|it's|this is|i go by|you can call me)\\s+${escaped}\\b`,
+      );
+      if (!naming.test(said)) {
+        return { ok: false, error: "name_not_in_message", hint: "Only save a name the user clearly gave this message ('I'm Josh', 'call me J'). Otherwise ask what they'd like to be called." };
       }
       await db.doc(profilePath(userId)).set(
         { preferredName: name, updatedAt: new Date().toISOString() },
@@ -641,6 +687,25 @@ export function buildCoachToolRegistry(
         payload: {},
       });
       return { ok: true, name };
+    },
+    update_training_setup: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      // Only from something the person said, never on the coach's own idea.
+      if (!(context.rawUserText ?? "").trim()) {
+        return { ok: false, error: "no_user_message", hint: "Only change their setup when they ask in this message." };
+      }
+      const parsed = TrainingSetupChange.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "update_training_setup", parsed.error.issues);
+        return { ok: false, error: "invalid_training_setup", hint: "Send only the fields they stated, with the allowed values." };
+      }
+      const result = await updateTrainingSetup(db, userId, parsed.data, "coach");
+      safeLogger.info("Coach updated training setup", {
+        event: "coach_training_setup_updated",
+        userId,
+        outcome: result.rebuiltPlan ? "rebuilt" : "saved",
+      });
+      return result;
     },
     forget_user_fact: async (rawArgs) => {
       const { userId, ...args } = rawArgs;
@@ -710,7 +775,7 @@ export function buildCoachToolRegistry(
       }
       return rejectLatestPlanAdjustmentFromChat(db, userId);
     },
-    find_exercise_swaps: (rawArgs) => {
+    find_exercise_swaps: async (rawArgs) => {
       const { userId, ...args } = rawArgs;
       const parsed = FindExerciseSwapsArgs.safeParse(args);
       if (!parsed.success) {
@@ -730,9 +795,20 @@ export function buildCoachToolRegistry(
               (CATALOG_EQUIPMENT as readonly string[]).includes(item),
             );
 
+      // What they told us they have counts too: the model saying "just
+      // kettlebells" can't hide the dumbbells on their profile.
+      const saved = catalogEquipment((await db.doc(profilePath(userId)).get()).get("equipment"));
+      // An explicit empty list is a real answer ("I've got nothing with me
+      // today"): bodyweight only, profile or not.
+      const combined = available !== null && available.length === 0
+        ? available
+        : available === null || saved === null
+          ? (available === null ? saved : null)
+          : [...new Set([...available, ...saved])];
+
       const options = suggestSwaps({
         exerciseName: parsed.data.exerciseName,
-        availableEquipment: available,
+        availableEquipment: combined,
         limit: 6,
       });
 
@@ -744,7 +820,7 @@ export function buildCoachToolRegistry(
           ok: true,
           options: [],
           hint: `No catalog match for "${parsed.data.exerciseName}"${
-            available && available.length === 0 ? " with no equipment" : ""
+            combined && combined.length === 0 ? " with no equipment" : ""
           }. Do not invent a substitute — say you don't have a good swap for that movement, or ask what equipment they have.`,
         };
       }

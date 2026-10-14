@@ -78,7 +78,7 @@ Data linked to the user, used for App Functionality only, not used for tracking:
 - **User Content → Other User Content** (coach chat, remembered facts)
 - **Usage Data → Product Interaction** (message counts for daily caps)
 
-Not collected: location, contacts, photos, HealthKit (none yet), audio. Speech recognition is Apple's (on-device when the phone supports it, otherwise Apple's servers); audio never reaches our backend and we never store it. The text of spoken replies goes to Google Cloud Text-to-Speech — declare Google as a processor alongside OpenRouter, same as the policy §11.
+Not collected: location, contacts, photos, HealthKit (none yet), audio. **Before public submission, re-check "audio":** live voice (beta, off by default) streams mic audio from the phone to Google's Gemini Live API in real time. If Google retains it beyond the live session under the API terms in use, declare Audio Data (App Functionality) and Google as its processor. Speech recognition is Apple's (on-device when the phone supports it, otherwise Apple's servers); audio never reaches our backend and we never store it. The text of spoken replies goes to Google Cloud Text-to-Speech — declare Google as a processor alongside OpenRouter, same as the policy §11.
 
 ## Screenshots (6.9" required — 1320×2868 or 1290×2796)
 

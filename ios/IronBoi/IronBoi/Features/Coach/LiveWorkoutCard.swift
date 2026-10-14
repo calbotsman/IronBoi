@@ -33,7 +33,7 @@ struct LiveWorkoutCard: View {
         }
         .frame(maxWidth: .infinity)
         .myoCard()
-        .shadow(color: MyoTheme.Colors.ink.opacity(0.08), radius: 20, y: 8)
+        .shadow(color: MyoTheme.Colors.shadow.opacity(0.08), radius: 20, y: 8)
     }
 
     // MARK: - Minimized
@@ -215,7 +215,7 @@ struct LiveWorkoutCard: View {
                         .foregroundStyle(exercise.exerciseDone ? MyoColor.Text.tertiary.color : MyoColor.Text.primary.color)
                         .strikethrough(exercise.exerciseDone, color: MyoColor.Text.tertiary.color)
                         .lineLimit(2)
-                    Text("\(exercise.targetSets) × \(exercise.targetReps)")
+                    Text("\(exercise.targetSets) × \(exercise.targetReps)\(ExerciseKnowledge.isTimed(exercise.name) ? " s" : "")")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                 }
@@ -307,7 +307,8 @@ struct LiveWorkoutCard: View {
         let next = min(exercise.completedSetCount + 1, exercise.targetSets)
         let weight = appModel.workingWeight(for: exercise)
         let load = weight > 0 ? " · \(Self.pounds(weight)) lb" : ""
-        return "Set \(next) of \(exercise.targetSets) · \(exercise.targetReps) reps\(load)"
+        let target = ExerciseKnowledge.isTimed(exercise.name) ? "\(exercise.targetReps) s hold" : "\(exercise.targetReps) reps"
+        return "Set \(next) of \(exercise.targetSets) · \(target)\(load)"
     }
 
     static func pounds(_ weight: Double) -> String {

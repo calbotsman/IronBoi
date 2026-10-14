@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SynthesizeSpeechRequest, coachVoice, synthesizeSpeech, ttsAllowedForSignInProvider } from "../../../src/voice/speech.js";
+import { COACH_VOICES, SynthesizeSpeechRequest, coachVoice, synthesizeSpeech, ttsAllowedForSignInProvider } from "../../../src/voice/speech.js";
 import { VOICE_MODE_RULES, coachStyleRules } from "../../../src/coach/orchestrate.js";
 
 describe("synthesizeSpeech", () => {
@@ -17,11 +17,24 @@ describe("synthesizeSpeech", () => {
     delete process.env.GOOGLE_TTS_ACCESS_TOKEN;
   });
 
-  it("rejects over-long text and ignores a client-chosen voice", () => {
+  it("rejects over-long text and drops a voice that isn't on the list", () => {
     expect(SynthesizeSpeechRequest.safeParse({ text: "x".repeat(601) }).success).toBe(false);
-    const parsed = SynthesizeSpeechRequest.safeParse({ text: "hi", voice: "Zephyr" });
-    expect(parsed.success).toBe(true);
-    expect(parsed.data).toEqual({ text: "hi" });
+    for (const voice of ["Zephyr", "../etc", 42, ""]) {
+      const parsed = SynthesizeSpeechRequest.safeParse({ text: "hi", voice });
+      expect(parsed.success).toBe(true);
+      expect(parsed.data?.voice).toBeUndefined();
+    }
+  });
+
+  it("speaks in the person's pick when it's on the list", async () => {
+    process.env.GOOGLE_TTS_ACCESS_TOKEN = "test-token";
+    expect(COACH_VOICES).toHaveLength(8);
+    const parsed = SynthesizeSpeechRequest.parse({ text: "Let's go.", voice: "Puck" });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ audioContent: "UklGRg==" }) });
+    await synthesizeSpeech(parsed, fetchMock as unknown as typeof fetch);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).voice.name).toBe("en-US-Chirp3-HD-Puck");
+    delete process.env.GOOGLE_TTS_ACCESS_TOKEN;
   });
 
   it("uses the operator-configured voice, and falls back on a bad one", () => {

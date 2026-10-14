@@ -8,6 +8,7 @@ import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
 import { VOICE_MODE_RULES } from "./orchestrate.js";
+import { CoachVoiceChoice } from "../voice/speech.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
 import { executeTool } from "../tools/executor.js";
 import { findLatestPendingProposal, publishDraftProposals, severeMarkerHit } from "../workouts/planAdjustments.js";
@@ -26,6 +27,8 @@ export const StartLiveCoachSessionRequest = z.object({
   // Reconnecting after the ~10-minute connection limit: the handle from
   // the last sessionResumptionUpdate, so the conversation carries on.
   resumeHandle: z.string().min(1).max(4096).optional(),
+  // The person's pick from COACH_VOICES, so live sounds like spoken replies.
+  voice: CoachVoiceChoice,
 }).strict();
 
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";
@@ -149,16 +152,54 @@ export const LIVE_TOOL_NAMES = [
   "clear_plan_overrides",
   "remember_user_fact",
   "set_preferred_name",
+  "update_training_setup",
   "forget_user_fact",
   "find_exercise_swaps",
 ] as const;
 export type LiveToolName = (typeof LIVE_TOOL_NAMES)[number];
 
+/**
+ * Tools the live coach can call that the PHONE runs, not this server: they
+ * change the workout in progress, which only the phone holds. Not in
+ * LIVE_TOOL_NAMES, so coachLiveToolCallable refuses them if one ever
+ * arrives here.
+ */
+export const PHONE_TOOL_DECLARATIONS = [
+  {
+    name: "swap_workout_exercise",
+    description:
+      "During a workout: swap an exercise in today's session right now. No review card, and never ask for a weight — the app sets a starting weight. Call find_exercise_swaps first and offer two or three; as soon as they pick one (or name their own), call this with it.",
+    parameters: {
+      type: "object",
+      properties: {
+        exerciseName: {
+          type: "string",
+          description: "The exercise being replaced, as it is in today's workout. Omit for the one they're on.",
+        },
+        replacementName: { type: "string", description: "What they'll do instead, ideally an option from find_exercise_swaps." },
+      },
+      required: ["replacementName"],
+    },
+  },
+  {
+    name: "show_exercise",
+    description:
+      "Have your body on their screen demonstrate an exercise: a few slow reps. Call it whenever they ask you to show them, or when seeing it would help. Omit exerciseName for the one they're on.",
+    parameters: {
+      type: "object",
+      properties: {
+        exerciseName: { type: "string", description: "The exercise to show, as named in the workout or plan." },
+      },
+    },
+  },
+];
+
 export function liveToolDeclarations() {
-  return COACH_TOOL_DECLARATIONS.filter((tool) => (LIVE_TOOL_NAMES as readonly string[]).includes(tool.name)).map((tool) => {
+  const server = COACH_TOOL_DECLARATIONS.filter((tool) => (LIVE_TOOL_NAMES as readonly string[]).includes(tool.name)).map((tool) => {
     const properties = tool.parameters?.properties ?? {};
     return Object.keys(properties).length > 0 ? tool : { name: tool.name, description: tool.description };
   });
+  return [...server, ...PHONE_TOOL_DECLARATIONS];
 }
 
 const LIVE_RULES = [
@@ -166,10 +207,14 @@ const LIVE_RULES = [
   "- You are talking out loud, live. They can interrupt you; if they do, stop and listen. Keep replies to one to three spoken sentences unless they ask for more.",
   "- In live voice there is no <current_user_message> tag: the current message is whatever they're saying to you right now.",
   "- If they're counting reps, stay quiet. Never count for them.",
+  "- Speech gets misheard, especially in a gym. If a phrase doesn't make sense (\"leave a bench\" while they're on a row), take the closest sensible meaning given the exercise they're on and what was just said (\"lean on a bench\"), and answer that, naming your guess in passing. Only ask them to say it again if you truly can't tell.",
+  "- Keep the thread: a follow-up (\"can I…\", \"what about…\", \"show me\") is about the exercise or topic you were just talking about.",
+  "- When they ask you to show them, call show_exercise and talk them through it while it plays.",
   "- You remember everything in <conversation>, <memory_facts> and <coach_notes>. Never ask them for something they already told you there; use it.",
   "- When a tool changes the plan, say what changed in one sentence. A proposal is only applied when they say yes AFTER hearing it.",
   "- Lines in the conversation that start with [app] are notes from the app about what's on screen or what they just did, not the user speaking. Don't read them out.",
-  "- In a workout the app handles counting, \"set done\", weight changes and swaps itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- In a workout the app handles counting, \"set done\" and weight changes itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- Swapping an exercise in a workout: call find_exercise_swaps, offer two or three, and the moment they pick one call swap_workout_exercise. Don't use adapt_plan for it and never ask for a weight. Then say what they're doing now in one sentence.",
 ].join("\n");
 
 /** The whole coach brain as one locked system instruction for a live session. */

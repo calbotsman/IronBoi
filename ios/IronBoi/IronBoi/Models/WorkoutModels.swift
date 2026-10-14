@@ -133,6 +133,33 @@ struct FinishWorkoutResponse: Decodable {
     // prescribed. Proposals only — the server writes nothing until
     // applyExerciseBaselines is called from the finish card.
     let baselineSuggestions: [BaselineSuggestion]?
+    /// What the coach says as the workout ends — built by the server from
+    /// the logged sets. Missing when it couldn't be built (older backend).
+    let recap: WorkoutRecap?
+}
+
+/// The end of a workout, in three short lines: what you did, one thing
+/// noticed, what's next. Every number comes from the log.
+struct WorkoutRecap: Decodable, Equatable {
+    let lines: [String]
+    let firstWorkout: Bool
+}
+
+/// "How did that feel?" after a workout.
+enum WorkoutEffort: String, CaseIterable, Identifiable {
+    case easy
+    case aboutRight = "about_right"
+    case tooMuch = "too_much"
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .easy: return "Easy"
+        case .aboutRight: return "About right"
+        case .tooMuch: return "Too much"
+        }
+    }
 }
 
 // MARK: - Exercise swaps

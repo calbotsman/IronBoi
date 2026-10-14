@@ -747,6 +747,9 @@ export const AuditEventType = z.enum([
   "exercise_swapped",
   "exercise_baseline_rebaselined",
   "profile_name_set",
+  // Goal, experience, equipment or schedule changed after onboarding (from
+  // the You screen or by telling the coach); the plan may be rebuilt.
+  "training_setup_changed",
 ]);
 
 export const AuditActor = z.enum(["user", "coach", "system"]);

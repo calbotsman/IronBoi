@@ -17,7 +17,15 @@ enum ExerciseLesson {
     }
 
     /// The full walk-through. Positions: 0 is where a rep starts, 1 where it
-    /// turns (the bottom of a squat, the top of a curl).
+    /// turns (the bottom of a squat, the top of a curl). A move written as
+    /// data carries its own.
+    static func beats(for motion: ExerciseMotion) -> [Beat] {
+        if let spec = motion.spec {
+            return spec.lesson.map { Beat(line: $0.line, body: $0.at.map { .hold($0) } ?? .reps) }
+        }
+        return beats(for: motion.lift)
+    }
+
     static func beats(for lift: Lift) -> [Beat] {
         switch lift {
         case .squat:
@@ -99,10 +107,16 @@ enum ExerciseLesson {
             return [
                 Beat(line: "Plank. Elbows under shoulders, squeeze everything, and breathe.", body: .hold(0)),
             ]
+        case .authored:
+            return [Beat(line: "Like this.", body: .reps)]
         }
     }
 
     /// One short reminder for between sets.
+    static func cue(for motion: ExerciseMotion) -> String {
+        motion.spec?.cues.randomElement() ?? cue(for: motion.lift)
+    }
+
     static func cue(for lift: Lift) -> String {
         let cues: [String]
         switch lift {
@@ -119,6 +133,7 @@ enum ExerciseLesson {
         case .skullCrusher: cues = ["Upper arms still.", "Slow to the forehead."]
         case .pushups: cues = ["Straight line.", "Elbows tucked.", "Push the floor away."]
         case .plank: cues = ["Breathe.", "Squeeze everything."]
+        case .authored: cues = ["Nice and controlled."]
         }
         return cues.randomElement()!
     }

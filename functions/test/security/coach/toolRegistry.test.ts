@@ -442,5 +442,11 @@ describe("coach tool registry", () => {
     const coachName = (await executeTool(said, "set_preferred_name", { name: "MYO" }, { authenticatedUserId: USER_ID })) as Record<string, unknown>;
     expect(coachName).toMatchObject({ ok: false, error: "invalid_name" });
     expect((await db.doc(profilePath(USER_ID)).get()).get("preferredName")).toBe("Josh");
+
+    // Counting "one" came through as "Juan": a bare word is never a name.
+    const counting = buildCoachToolRegistry(db, { latestPendingProposalId: null, rawUserText: "Juan" });
+    const bare = (await executeTool(counting, "set_preferred_name", { name: "Juan" }, { authenticatedUserId: USER_ID })) as Record<string, unknown>;
+    expect(bare).toMatchObject({ ok: false, error: "name_not_in_message" });
+    expect((await db.doc(profilePath(USER_ID)).get()).get("preferredName")).toBe("Josh");
   });
 });
