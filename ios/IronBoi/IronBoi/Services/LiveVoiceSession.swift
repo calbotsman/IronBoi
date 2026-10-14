@@ -319,10 +319,32 @@ final class LiveVoiceSession: ObservableObject {
     }
 
     /// A line the app wants said now (a set confirmed, the next exercise):
-    /// the coach says it briefly, in its own words.
+    /// the coach says it briefly, in its own words. Lines arriving together
+    /// ("set two done, rest", then "next up, lunges") go as one turn, in
+    /// order, once the coach has finished what it's saying, so they never
+    /// cross or come out reversed.
     func say(_ text: String) {
-        sendClientTurn("[app] Say this to them now, briefly, in your own words: \(text)", respond: true)
+        sayBuffer.append(text)
+        sayTask?.cancel()
+        sayTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard let self, !Task.isCancelled else { return }
+            for _ in 0..<40 where self.state == .speaking || !self.coachTurnDone {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            guard !Task.isCancelled else { return }
+            let lines = self.sayBuffer
+            self.sayBuffer = []
+            guard !lines.isEmpty else { return }
+            let text = lines.count == 1
+                ? lines[0]
+                : lines.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: " ")
+            self.sendClientTurn("[app] Say this to them now, briefly, in your own words"
+                + (lines.count > 1 ? ", in this order" : "") + ": \(text)", respond: true)
+        }
     }
+    private var sayBuffer: [String] = []
+    private var sayTask: Task<Void, Never>?
 
     /// Something you said that the coach didn't hear (the mic was muted for
     /// a count): passed on as your words.

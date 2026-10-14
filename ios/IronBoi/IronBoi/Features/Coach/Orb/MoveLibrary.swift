@@ -28,6 +28,22 @@ enum MoveLibrary {
 
     static let all: [MoveSpec] = [
         MoveSpec(
+            id: "walking-lunge",
+            names: ["walking lunge", "walking lunges", "alternating lunge", "alternating lunges", "travelling lunge", "traveling lunge"],
+            view: .side, seconds: 3.6, tempo: .wave,
+            keys: [
+                // Down on one leg, up through standing, down on the other.
+                Key(hip: [-0.01, -0.15], tilt: 2, arms: sideHang, feet: [[-0.24, -0.36], [0.21, -0.385]]),
+                Key(hip: [0.0, 0.005], tilt: 2, arms: sideHang, feet: sideFeet),
+                Key(hip: [0.01, -0.15], tilt: 2, arms: sideHang, feet: [[0.21, -0.385], [-0.24, -0.36]]),
+            ],
+            lesson: [
+                Lesson(line: "Walking lunges. A long step, then drop the back knee toward the floor.", at: 0),
+                Lesson(line: "Stand up through the front heel and step through.", at: 0.5),
+                Lesson(line: "Then the other leg. Like this."),
+            ],
+            cues: ["Long steps.", "Chest tall.", "Drive through the front heel."]),
+        MoveSpec(
             id: "upright-row", names: ["upright row", "upright rows"], view: .front, gear: "barbell", seconds: 2.8,
             keys: [
                 Key(hip: [0, 0.005], hands: [[-0.10, -0.10]], bend: [-1, 0], feet: frontFeet),

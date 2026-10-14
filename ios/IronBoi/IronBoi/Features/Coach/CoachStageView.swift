@@ -1242,6 +1242,7 @@ struct CoachStageView: View {
             }
             if inWorkout {
                 voice.redirect = { [live] text in live.say(text) }
+                updateLiveUplink()
                 conversationActive = true
                 silentRestarts = []
                 voiceInput.toggle()
@@ -1484,7 +1485,7 @@ struct CoachStageView: View {
             // Every number, not just the first: the coach may have started
             // a late reply mid-count.
             live.hush()
-            live.setUplinkMuted(true)
+            updateLiveUplink()
         }
         repCount = count
         voiceInput.holdOpen = true
@@ -1557,7 +1558,7 @@ struct CoachStageView: View {
         countBase = 0
         countedSet = nil
         voiceInput.holdOpen = false
-        if live.isActive { live.setUplinkMuted(false) }
+        updateLiveUplink()
         // A stray "one, two" that never became a set: drop what was heard so
         // it isn't sent to Coach as a message when the pause check fires.
         func discardHeard() {
@@ -1602,6 +1603,16 @@ struct CoachStageView: View {
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
+    }
+
+    /// Live voice in a workout: the coach's mic is open while you rest and
+    /// closed during a set, so a count ("two" heard as "to") is never taken
+    /// as a question. "MYO, …" mid-set still reaches it (the phone passes
+    /// it on). Outside a workout it's always open.
+    private func updateLiveUplink() {
+        guard live.isActive else { return }
+        let inSet = appModel.activeWorkout != nil && currentExerciseIndex != nil && restEndsAt == nil
+        live.setUplinkMuted(inSet || repCount > 0 || holdEndsAt != nil)
     }
 
     // MARK: - Timed holds (planks, carries)
@@ -1710,6 +1721,7 @@ struct CoachStageView: View {
         restTask?.cancel()
         let ends = Date().addingTimeInterval(TimeInterval(seconds))
         restEndsAt = ends
+        updateLiveUplink()
         restTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
             guard !Task.isCancelled, restEndsAt == ends else { return }
@@ -1725,6 +1737,7 @@ struct CoachStageView: View {
         restTask?.cancel()
         restTask = nil
         restEndsAt = nil
+        updateLiveUplink()
     }
 
     /// "Skip rest" / "go" / "ready" ends it; "thirty more" / "add a minute"
@@ -1986,6 +1999,7 @@ struct CoachStageView: View {
         endLesson()
         cancelRest()
         cancelHold()
+        if live.isActive { live.setUplinkMuted(false) }
         swapChoice = nil
         let recap = appModel.consumeRecap()
         let opener = Self.finishLine(hype: tone == .hype, first: recap?.firstWorkout == true)
