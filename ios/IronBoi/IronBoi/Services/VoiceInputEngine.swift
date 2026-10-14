@@ -143,7 +143,9 @@ final class VoiceInputEngine: ObservableObject {
     }
 
     init() {
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *) { AnalyzerRecognition.prepare() }
+        #endif
         // Audio was rebuilt under us (AirPods in or out, a call): the tap's
         // format is stale, so take it off; the next listen puts a new one on.
         resetObserver = NotificationCenter.default.addObserver(
@@ -173,9 +175,11 @@ final class VoiceInputEngine: ObservableObject {
         recognitionTask?.cancel()
         recognitionTask = nil
         request = nil
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *), let recognition = analyzerRecognition as? AnalyzerRecognition {
             recognition.cancel()
         }
+        #endif
         analyzerRecognition = nil
         requestBox.current = nil
     }
@@ -274,6 +278,7 @@ final class VoiceInputEngine: ObservableObject {
     private func beginRequest(session mine: Int) {
         requestGeneration += 1
         let generation = requestGeneration
+        #if compiler(>=6.2)
         if #available(iOS 26.0, *), AnalyzerRecognition.ready {
             transcript = ""
             settledUtterances = ""
@@ -282,6 +287,7 @@ final class VoiceInputEngine: ObservableObject {
             beginAnalyzer(session: mine, generation: generation)
             return
         }
+        #endif
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
@@ -345,6 +351,7 @@ final class VoiceInputEngine: ObservableObject {
         }
     }
 
+    #if compiler(>=6.2)
     /// A listen on the newer recogniser: one continuous stream, so it needs
     /// no utterance stitching and no rotation mid-count.
     @available(iOS 26.0, *)
@@ -367,6 +374,7 @@ final class VoiceInputEngine: ObservableObject {
         analyzerRecognition = recognition
         requestBox.current = recognition
     }
+    #endif
 
     /// Is this result a new utterance, or a revision of the one in
     /// progress? A revision keeps the same start time and most of its

@@ -8,6 +8,9 @@ protocol SpeechBufferSink: AnyObject {
 
 extension SFSpeechAudioBufferRecognitionRequest: SpeechBufferSink {}
 
+// compiler(>=6.2) ⇔ the Xcode 26 SDK, where SpeechAnalyzer exists; CI's
+// older Xcode compiles without it (and listens with SFSpeech only).
+#if compiler(>=6.2)
 /// One listen on Apple's newer recogniser (iOS 26: SpeechAnalyzer with
 /// SpeechTranscriber). It's more accurate on short words like a count,
 /// reports sooner, and runs as one continuous listen, so it needs no
@@ -144,3 +147,4 @@ final class AnalyzerRecognition: SpeechBufferSink, @unchecked Sendable {
         }
     }
 }
+#endif
