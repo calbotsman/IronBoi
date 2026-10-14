@@ -52,6 +52,9 @@ struct OnboardingStageView: View {
     /// How they chose to do onboarding: "voice" (the coach asks, they talk,
     /// almost no UI) or "tap" (the cards). Empty until they pick.
     @AppStorage("onboarding.mode") private var mode = ""
+    /// Picked talk or tap in this run (the stored mode alone could be from
+    /// an earlier account on this phone).
+    @State private var choseMode = false
     /// Answers the coach couldn't make out, per step: two and the step's
     /// cards appear, so talking never becomes a dead end.
     @State private var misses: [Int: Int] = [:]
@@ -68,7 +71,7 @@ struct OnboardingStageView: View {
 
     private var isWeek: Bool { stepIndex >= Step.all.count }
     /// The first screen: talk or tap?
-    private var choosingMode: Bool { mode.isEmpty && chips.isEmpty }
+    private var choosingMode: Bool { !choseMode && chips.isEmpty }
     private var voiceMode: Bool { mode == "voice" && !choosingMode }
     /// Talking doesn't take the cards away: they're always there for when
     /// you can't talk right now. Voice mode only means the coach asks out
@@ -206,7 +209,7 @@ struct OnboardingStageView: View {
             // question again (an earlier run's "customized" mustn't skip the
             // color and voice steps for a new account).
             if chips.isEmpty {
-                mode = ""
+                resetToNewUser()
                 customized = false
                 voiced = false
                 gearHeard = []
@@ -394,6 +397,7 @@ struct OnboardingStageView: View {
             ModeCard {
                 chooseVoice()
             } onTap: {
+                choseMode = true
                 mode = "tap"
                 lastSpokenStep = nil
                 askCurrentQuestion()
@@ -676,6 +680,7 @@ struct OnboardingStageView: View {
     /// Voice mode: the mic is wanted, so ask for it now (with a reason the
     /// coach just said). Without it, tapping it is.
     private func chooseVoice() {
+        choseMode = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         voice.stop()
         Task {
@@ -777,7 +782,39 @@ struct OnboardingStageView: View {
         syncStep()
     }
 
+    /// A first run starts from MYO's defaults, not an earlier account's
+    /// choices on this phone: amber, the warm voice, hype, full tips, cream.
+    private func resetToNewUser() {
+        coachHex = CoachColor.defaultHex
+        voiceName = CoachVoiceOption.defaultName
+        UserDefaults.standard.set(false, forKey: CoachVoiceOption.chosenKey)
+        toneSetting = CoachingStyle.Tone.hype.rawValue
+        tipsSetting = CoachingStyle.Tips.full.rawValue
+        PaperStore.shared.paper = Paper.all[0]
+    }
+
+    /// The account was reset while this screen was open: start over here
+    /// too, from "talk or tap?".
+    private func startOverIfReset() {
+        guard appModel.onboardingDraft.isEmpty, appModel.onboardingStatus == .notStarted, !chips.isEmpty else { return }
+        chips = [:]
+        stepIndex = 0
+        choseMode = false
+        resetToNewUser()
+        customized = false
+        voiced = false
+        gearHeard = []
+        misses = [:]
+        safety = SafetyAnswers()
+        activities = []
+        lastSpokenStep = nil
+        voiceInput.release()
+        voice.stop()
+        askCurrentQuestion()
+    }
+
     private func serverMoved() {
+        startOverIfReset()
         guard inFlight == 0, awaitingParse == nil, !editing else { return }
         restoreFromServer()
     }
