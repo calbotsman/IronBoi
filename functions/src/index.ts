@@ -156,6 +156,7 @@ import {
   buildWorkoutPlanFromProfile,
   processOnboardingAnswer,
 } from "./onboarding/flow.js";
+import { modelUnderstander } from "./onboarding/understand.js";
 
 const require = createRequire(import.meta.url);
 
@@ -955,11 +956,19 @@ export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
 // Same OnboardingAnswerRequest schema, processOnboardingAnswer core and
 // response shape as the retired sendOnboardingAnswerHttp. The parity audit
 // found no callable existed for this endpoint.
-export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
-  const userId = requireUserId(request.auth);
-  const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
-  return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
-});
+export const sendOnboardingAnswer = onCall(
+  { ...CALLABLE_OPTS, secrets: [geminiApiKey, openRouterApiKey] },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
+    // Free answers are read by the coach's model for everything they say.
+    const understand = modelUnderstander(selectCoachModelProvider({
+      geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
+    }));
+    return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN, understand);
+  },
+);
 
 // Same schema, core and response shape as the retired
 // acceptProgramProposalHttp. The parity audit found no callable existed for

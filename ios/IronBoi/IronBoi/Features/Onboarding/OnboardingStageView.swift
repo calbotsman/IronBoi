@@ -576,14 +576,14 @@ struct OnboardingStageView: View {
     // MARK: - Answering
 
     /// A tap: into your plan and on to the next question at once; sent behind.
-    private func answer(_ structured: [String: Any], chip: String, content: String) {
+    private func answer(_ structured: [String: Any], chip: String, content: String, field: String? = nil) {
         guard let step else { return }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         voice.stop()
         notice = nil
         chips[step.field] = chip
         lastChipField = step.field
-        if !structured.isEmpty { enqueue(content, structured: structured, mode: .tap) }
+        if !structured.isEmpty { enqueue(content, structured: structured, mode: .tap, field: field) }
         advance()
     }
 
@@ -627,8 +627,26 @@ struct OnboardingStageView: View {
             }
         }
         if case .activities = step.kind {
-            let picked = Self.activities(in: trimmed)
-            if picked.isEmpty {
+            // Added to what's already tapped: tap Lifting, then say "and I run
+            // about 12 miles a week" and both count.
+            let picked = activities.union(Self.activities(in: trimmed))
+            if picked.isEmpty, trimmed.split(separator: " ").count >= 4 {
+                // Nothing the app knows, but plenty said: the server reads it.
+                awaitingParse = step.field
+                enqueue(trimmed, structured: nil, mode: mode, field: "activities") {
+                    awaitingParse = nil
+                    let draft = appModel.onboardingDraft
+                    guard let saved = draft["activities"] as? [String], !saved.isEmpty,
+                          let label = step.chip(for: saved, draft: draft) else {
+                        missed("Sorry, I didn't catch that. Lifting, running, yoga, mobility, a sport?")
+                        return
+                    }
+                    activities = Set(saved)
+                    chips[step.field] = label
+                    lastChipField = step.field
+                    showOnCard(draft)
+                }
+            } else if picked.isEmpty {
                 missed("Sorry, I didn't catch that. Lifting, running, yoga, mobility, a sport?")
             } else {
                 activities = picked
@@ -647,8 +665,10 @@ struct OnboardingStageView: View {
                 Task {
                     try? await Task.sleep(nanoseconds: 900_000_000)
                     guard stepIndex == at else { return }
+                    // The words go too, so what else was said (12 miles a
+                    // week, keep it light) reaches the coach.
                     answer(["activities": items.map(\.key)], chip: items.map(\.label).joined(separator: " · "),
-                           content: trimmed)
+                           content: trimmed, field: "activities")
                 }
             }
             return
@@ -983,9 +1003,36 @@ struct OnboardingStageView: View {
     /// The next question you haven't answered, or your week.
     private func advance() {
         editing = false
+        chipWhatWasAlreadySaid()
         let next = Step.all.indices.first { $0 > stepIndex && chips[Step.all[$0].field] == nil }
             ?? Step.all.indices.first { chips[Step.all[$0].field] == nil }
         stepIndex = next ?? Step.all.count
+    }
+
+    /// Questions answered in passing ("I train at home with dumbbells,
+    /// Mondays and Thursdays" while asked about goals) aren't asked again:
+    /// they go in your plan, and the coach says so. Health and "about you"
+    /// are always asked; "make it yours" lives on the phone.
+    private func chipWhatWasAlreadySaid() {
+        let draft = appModel.onboardingDraft
+        var picked: [String] = []
+        for (index, step) in Step.all.enumerated() where index > stepIndex && chips[step.field] == nil {
+            switch step.kind {
+            case .safety, .aboutYou, .customize, .voice: continue
+            default: break
+            }
+            guard !step.fields.contains(where: { appModel.onboardingMissingFields.contains($0) }),
+                  let label = step.chip(for: draft[step.field], draft: draft) else { continue }
+            chips[step.field] = label
+            picked.append(step.short.lowercased())
+        }
+        guard !picked.isEmpty else { return }
+        adoptIntoCards(draft)
+        if let saved = draft["activities"] as? [String] { activities = Set(saved) }
+        if voiceMode {
+            let names = picked.count == 1 ? picked[0] : picked.dropLast().joined(separator: ", ") + " and " + picked.last!
+            aside = (aside ?? "") + "Got your \(names) from that. "
+        }
     }
 
     /// Tap an answer in your plan: back to that question.
