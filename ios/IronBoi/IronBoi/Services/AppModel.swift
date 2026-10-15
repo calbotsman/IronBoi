@@ -407,6 +407,16 @@ final class AppModel: NSObject, ObservableObject {
         )
     }
 
+    /// Wakes the voice server before the coach's first line, so that line
+    /// isn't 4 s late (a cold start). An empty request: it's turned away
+    /// before any speech is made, so it costs nothing.
+    private var voiceWarmedAt: Date?
+    func warmVoice() {
+        guard hasSession, voiceWarmedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true else { return }
+        voiceWarmedAt = Date()
+        Task { try? await callCallable("synthesizeSpeechCallable", data: ["text": "", "voice": CoachVoiceOption.current]) }
+    }
+
     func synthesizeSpeech(_ text: String) async throws -> Data {
         struct Speech: Decodable { let audio: String }
         let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: [
@@ -1036,6 +1046,22 @@ final class AppModel: NSObject, ObservableObject {
         let clamped = min(max(weight, 0), 2000)
         workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
             guard !set.completed else { return set }
+            var next = set
+            next.weight = clamped
+            return next
+        }
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// "I did it with 50": the sets already done were at this weight, and the
+    /// ones left are too.
+    func setDoneSetsWeight(exerciseIndex: Int, weight: Double) {
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex)
+        else { return }
+        let clamped = min(max(weight, 0), 2000)
+        workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
             var next = set
             next.weight = clamped
             return next

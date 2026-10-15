@@ -223,6 +223,7 @@ struct OnboardingStageView: View {
         }
         .onAppear {
             voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+            appModel.warmVoice()
             // Answers here are lists and descriptions: don't cut them off.
             voiceInput.extraPause = 1_200_000_000
             voiceInput.onPause = { text in
@@ -1174,6 +1175,13 @@ struct OnboardingStageView: View {
 
     private func speak(_ text: String) {
         revealCard(after: text)
+        // The mic left open from the last question (headphones keep it on
+        // under the coach) doesn't silence the next one: unless you're
+        // mid-sentence, that listen ends and the coach asks. It used to skip
+        // every question after the first (Josh, 2026-10-15).
+        if voiceInput.isListening, voiceInput.transcript.split(separator: " ").count < 2 {
+            voiceInput.stop()
+        }
         guard speaksReplies, !text.isEmpty, !voiceInput.isListening else {
             // Voice mode with the coach's voice off: still listen for the answer.
             listenIfVoiceMode()

@@ -251,6 +251,7 @@ struct CoachStageView: View {
                 handleUtterance(text)
             }
             voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+            appModel.warmVoice()
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
             sayWelcomeIfNew()
@@ -1274,6 +1275,26 @@ struct CoachStageView: View {
         currentExerciseIndex.flatMap { appModel.activeWorkout?.exercises[$0] }
     }
 
+    /// The exercise "it" means in "I did it with 50": the current one if
+    /// you've done a set of it, else the last one you did sets of.
+    private var lastWorkedExerciseIndex: Int? {
+        guard let exercises = appModel.activeWorkout?.exercises else { return nil }
+        if let index = currentExerciseIndex, exercises[index].completedSets.contains(where: \.completed) { return index }
+        let before = currentExerciseIndex ?? exercises.count
+        return exercises.indices.last { $0 < before && exercises[$0].completedSets.contains(where: \.completed) }
+            ?? currentExerciseIndex
+    }
+
+    private func correctDoneWeight(_ index: Int, to pounds: Double) {
+        guard let exercise = appModel.activeWorkout?.exercises[index] else { return }
+        appModel.setDoneSetsWeight(exerciseIndex: index, weight: pounds)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        let done = exercise.completedSets.filter(\.completed).count
+        confirm(done > 0
+            ? "Got it. \(Self.short(exercise.name)) logged at \(LiveWorkoutCard.pounds(max(0, pounds))) pounds."
+            : "\(Self.short(exercise.name)) at \(LiveWorkoutCard.pounds(max(0, pounds))) pounds.")
+    }
+
     /// The exercise being counted: the one whose set this count closed, or
     /// the current one.
     private var countingExercise: ActiveWorkoutExercise? {
@@ -1393,12 +1414,22 @@ struct CoachStageView: View {
                 // You didn't count — "set done", "two sets done".
                 // Sets still open (not targetSets − done: those can disagree
                 // after sets are ticked out of order and the count changed).
+                // "It was 2 sets at 10 with 50 pounds": the weight too.
+                let weight: Double? = {
+                    guard case .to(let pounds)? = WorkoutVoice.weightChange(in: text) else { return nil }
+                    return pounds
+                }()
                 let left = exercise.completedSets.filter { !$0.completed }.count
                 let count = max(0, min(logged.sets ?? left, left))
                 guard count > 0 else {
-                    confirm("\(Self.short(exercise.name)) is already done.")
+                    if let weight, let done = lastWorkedExerciseIndex {
+                        correctDoneWeight(done, to: weight)
+                    } else {
+                        confirm("\(Self.short(exercise.name)) is already done.")
+                    }
                     return
                 }
+                if let weight { appModel.setWorkoutExerciseWeight(exerciseIndex: index, weight: weight) }
                 var last: Int?
                 for _ in 0..<count {
                     last = appModel.completeNextSet(exerciseIndex: index, reps: logged.reps ?? exercise.targetReps)
@@ -1406,6 +1437,12 @@ struct CoachStageView: View {
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 let head = count == 1 ? "Set \(last ?? 1) done." : "\(count) sets logged."
                 confirm(setDoneLine(head, exerciseIndex: index))
+                return
+            } else if short, case .to(let pounds)? = WorkoutVoice.weightChange(in: text), WorkoutVoice.isPastTense(text),
+                      let done = lastWorkedExerciseIndex {
+                // "I did it with a 50 pound kettlebell": the sets you've done
+                // were at 50, so the log and the card say 50.
+                correctDoneWeight(done, to: pounds)
                 return
             } else if short, let change = WorkoutVoice.weightChange(in: text), let index = currentExerciseIndex,
                       let exercise = currentExercise {
@@ -1438,7 +1475,9 @@ struct CoachStageView: View {
             // Only long run-ons (music, people nearby) are dropped now;
             // anything you say to it gets through, "MYO" or not.
             // No hint for these: they're music or other people, not you.
-            if currentExerciseIndex != nil, !(addressed || justAsked), !short {
+            if currentExerciseIndex != nil, !addressed,
+               !short || !WorkoutVoice.worthSendingMidWorkout(text, justAsked: justAsked) {
+                if short { AudioHub.log("dropped mid-workout: \(text.prefix(60))") }
                 markRestartHandled()
                 resumeListening()
                 return
@@ -1594,8 +1633,7 @@ struct CoachStageView: View {
         } else {
             head = "Set \(setNumber) done."
         }
-        var line = setDoneLine(head, exerciseIndex: countedIndex)
-        line += restLine(afterSetOn: countedIndex)
+        var line = setDoneLine(head, exerciseIndex: countedIndex, rest: restLine(afterSetOn: countedIndex))
         if let interrupted = interruptedSpeech, !interrupted.isEmpty {
             line += " Want the rest of what I was saying?"
             resumeOffered = true
@@ -1687,8 +1725,7 @@ struct CoachStageView: View {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         AudioHub.shared.play(cue: .target)
         let head = held < target ? "Set \(set): \(held) seconds." : "Set \(set) done."
-        var line = setDoneLine(head, exerciseIndex: index)
-        line += restLine(afterSetOn: index)
+        var line = setDoneLine(head, exerciseIndex: index, rest: restLine(afterSetOn: index))
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
@@ -1842,13 +1879,19 @@ struct CoachStageView: View {
 
     /// After a set: the fact, a word in your tone, and — with tips on and
     /// sets left on this lift — one cue for the next.
-    private func setDoneLine(_ head: String, exerciseIndex: Int?) -> String {
+    /// "Set 1 done. Nice. Rest sixty seconds. On the next set, squeeze your
+    /// shoulder blades." Rest comes before the tip, and the tip says it's
+    /// for the next set: "squeeze your shoulder blades, rest" sounded like
+    /// an instruction for now (Josh, 2026-10-15).
+    private func setDoneLine(_ head: String, exerciseIndex: Int?, rest: String = "") -> String {
         var line = head
         if tips != .quiet { line += " " + CoachingStyle.praise(tone) }
+        line += rest
         if tips == .full, let index = exerciseIndex, let exercise = appModel.activeWorkout?.exercises[index],
            exercise.completedSetCount < exercise.targetSets,
            let motion = ExerciseMotion.match(exercise.name) {
-            line += " Next one: " + ExerciseLesson.cue(for: motion).lowercased()
+            let cue = ExerciseLesson.cue(for: motion).trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+            line += " On the next set, " + cue.prefix(1).lowercased() + cue.dropFirst() + "."
         }
         return line
     }
