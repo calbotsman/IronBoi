@@ -236,6 +236,13 @@ export const UserHealthProfile = z.object({
   trainingExperience: TrainingExperience,
   injuriesOrLimitations: z.array(z.string()).default([]),
   equipment: z.array(z.string()).default([]),
+  /** How they run now (workouts/running.ts RunningSetup); runs in every plan built for them. */
+  running: z.object({
+    days: z.array(z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])).optional(),
+    runsPerWeek: z.number().int().min(1).max(7).optional(),
+    milesPerRun: z.number().min(0.25).max(30).optional(),
+    minutesPerRun: z.number().int().min(5).max(240).optional(),
+  }).strict().optional(),
   schedule: z.object({
     daysPerWeek: z.number().int().min(1).max(7).optional(),
     preferredDays: z.array(z.string()).default([]),
@@ -422,10 +429,20 @@ export const ExerciseBaseline = z.object({
   updatedAt: ISODateTime,
 }).strict();
 
+// A run in the plan (workouts/running.ts). Distance or time, or both.
+export const PlannedRun = z.object({
+  kind: z.enum(["easy", "steady", "long", "intervals", "walk_run"]),
+  distanceMi: z.number().positive().max(50).optional(),
+  durationMin: z.number().int().positive().max(300).optional(),
+  note: z.string().max(140).optional(),
+}).strict();
+
 export const PlannedWorkoutDay = z.object({
   name: z.string().min(1),
   muscles: z.array(z.string()).default([]),
   exercises: z.array(PlannedExercise).default([]),
+  // Optional, so plans written before runs existed still parse.
+  runs: z.array(PlannedRun).max(3).optional(),
 }).strict();
 
 export const ActiveWorkoutSet = z.object({

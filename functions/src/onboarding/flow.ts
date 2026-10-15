@@ -28,6 +28,7 @@ import { writeGeneralCoachMessage } from "../journey/messages.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import { ALL_SCREEN_NOTES, MODERATE_NOTE, readHealthScreen, screenOutcome } from "./healthScreen.js";
 import { type UnderstandAnswer, type Understood, worthUnderstanding } from "./understand.js";
+import { RunningSetup, applyRunning } from "../workouts/running.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -373,6 +374,7 @@ function acceptedProfileUpdate(
     trainingExperience: profile.trainingExperience,
     injuriesOrLimitations: profile.injuriesOrLimitations,
     equipment: profile.equipment,
+    running: profile.running,
     schedule: profile.schedule,
     preferences: profile.preferences,
     dietaryConstraints: profile.dietaryConstraints,
@@ -466,6 +468,7 @@ export function mergeUnderstood(
     const merged = [...new Set([...own, ...value])];
     next[field] = merged.length > 1 ? merged.filter((item) => item !== "not_sure") : merged;
   }
+  if (understood.running && next.running === undefined) next.running = understood.running;
   if (understood.notes) {
     const own = Array.isArray(next.aboutNotes) ? (next.aboutNotes as string[]) : [];
     next.aboutNotes = [...new Set([...own, ...understood.notes])].slice(-10);
@@ -633,6 +636,7 @@ function buildProgramProposal(
     trainingExperience: draft.trainingExperience,
     injuriesOrLimitations: draft.injuriesOrLimitations ?? [],
     equipment: draft.equipment ?? [],
+    running: RunningSetup.safeParse(draft.running).success ? draft.running : undefined,
     schedule: {
       daysPerWeek: preferredDays.length || draft.daysPerWeek || 3,
       preferredDays,
@@ -667,6 +671,7 @@ function buildProgramProposal(
     {
       ...profile,
       trainingFocus: profile.preferences.trainingFocus,
+      running: profile.running,
       // A doctor's limit: the gentlest starting loads, whatever they said.
       trainingExperience: clearanceAdvised ? "new" : profile.trainingExperience,
     },
@@ -745,20 +750,26 @@ export function buildWorkoutPlanFromProfile(
     // Fit the plan to what they have and how long they've trained.
     equipment?: string[];
     trainingExperience?: z.infer<typeof UserHealthProfile>["trainingExperience"];
+    // Their runs go in the week, with the lifting fitted around them.
+    running?: unknown;
   },
   defaultPlan: Record<string, PlannedWorkoutDayType>,
   now: string,
 ) {
+  const running = RunningSetup.safeParse(profile.running);
   return WorkoutPlan.parse({
     userId,
     planId: "current",
     source: "coach_generated",
-    days: selectPlanDays(
-      defaultPlan,
-      profile.schedule.daysPerWeek ?? 3,
-      profile.schedule.preferredDays,
-      profile.trainingFocus,
-      { equipment: profile.equipment, experience: profile.trainingExperience },
+    days: applyRunning(
+      selectPlanDays(
+        defaultPlan,
+        profile.schedule.daysPerWeek ?? 3,
+        profile.schedule.preferredDays,
+        profile.trainingFocus,
+        { equipment: profile.equipment, experience: profile.trainingExperience },
+      ),
+      running.success ? running.data : undefined,
     ),
     updatedAt: now,
   });

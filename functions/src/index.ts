@@ -286,6 +286,7 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
         ? (profileData.schedule.preferredDays as string[])
         : [],
     },
+    running: profileData.running,
   };
 
   const now = new Date().toISOString();

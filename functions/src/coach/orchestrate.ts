@@ -29,6 +29,7 @@ import {
 import { executeTool } from "../tools/executor.js";
 import type { CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
 import { liveWorkoutRules } from "./liveWorkout.js";
+import { HONESTY_RETRY_NOTE, claimsPlanChange } from "./honesty.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
@@ -318,6 +319,9 @@ export async function orchestrateCoachTurn({
           sourceMessageId: messageId,
         })
       : undefined;
+    // Tools that did something this turn: a reply claiming a plan change
+    // with none of these is sent back (coach/honesty.ts).
+    const succeededTools = new Set<string>();
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
       ? async (toolName, toolArgs) => {
           try {
@@ -325,6 +329,7 @@ export async function orchestrateCoachTurn({
               authenticatedUserId: userId,
             });
             const record = toolResult as Record<string, unknown>;
+            if (record.ok !== false) succeededTools.add(toolName);
             if (toolName === "accept_plan_adjustment" && record.ok === true) {
               appliedPlanChange = true;
             }
@@ -381,6 +386,31 @@ export async function orchestrateCoachTurn({
           );
         },
       });
+      if (toolLoopEnabled && succeededTools.size === 0 && claimsPlanChange(result.content)) {
+        safeLogger.warn("Coach claimed a plan change no tool made", {
+          event: "coach_unbacked_plan_claim",
+          userId,
+          sessionId,
+          messageId,
+          turnId,
+        });
+        const first = result;
+        const retry = await provider.generateCoachReply({
+          system: `${system}\n\n${HONESTY_RETRY_NOTE}`,
+          userContent: `${userMessage}\n\n<your_draft_reply>${first.content}</your_draft_reply>`,
+          tools: COACH_TOOL_DECLARATIONS,
+          executeTool: executeCoachTool,
+          signal: modelAbort.signal,
+        });
+        result = {
+          ...retry,
+          usage: {
+            inputTokens: first.usage.inputTokens + retry.usage.inputTokens,
+            outputTokens: first.usage.outputTokens + retry.usage.outputTokens,
+          },
+          toolCalls: [...first.toolCalls, ...retry.toolCalls],
+        };
+      }
     } finally {
       clearTimeout(modelTimeoutHandle);
     }

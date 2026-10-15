@@ -656,6 +656,11 @@ final class AppModel: NSObject, ObservableObject {
         currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() && !$0.exercises.isEmpty }
     }
 
+    /// Today's run, if the plan has one (lifting day or not).
+    var todayRun: PlannedRun? {
+        currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() }?.runs.first
+    }
+
     /// There's a plan, and nothing in it today.
     var isRestDay: Bool {
         currentWorkoutPlan != nil && todayPlanDay == nil
@@ -2125,7 +2130,16 @@ final class AppModel: NSObject, ObservableObject {
                 name: name,
                 muscles: rawDay["muscles"] as? [String] ?? [],
                 exercises: rawExercises.compactMap(makePlannedExercise),
-                isAdjusted: adjustedDayKeys.contains(dayKey)
+                isAdjusted: adjustedDayKeys.contains(dayKey),
+                runs: (rawDay["runs"] as? [[String: Any]] ?? []).compactMap { raw in
+                    guard let kind = raw["kind"] as? String else { return nil }
+                    return PlannedRun(
+                        kind: kind,
+                        distanceMi: makeDouble(from: raw["distanceMi"]),
+                        durationMin: (raw["durationMin"] as? NSNumber)?.intValue,
+                        note: raw["note"] as? String
+                    )
+                }
             )
         }
     }

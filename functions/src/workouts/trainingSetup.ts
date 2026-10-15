@@ -8,6 +8,7 @@ import { profilePath, workoutPlanPath } from "../paths.js";
 import { recordAuditEventBestEffort } from "../audit/log.js";
 import { writeRegeneratedPlanAndProgram } from "./program.js";
 import { canonicalEquipment } from "./planFit.js";
+import { RunningSetup, runningSummary } from "./running.js";
 
 // The six things onboarding asks, changed later — from the You screen or by
 // saying it to the coach ("4 days a week now, I've got kettlebells, building
@@ -37,6 +38,10 @@ export const TrainingSetupChange = z
     sessionLengthMin: z.number().int().min(15).max(120).optional(),
     /** "HH:MM", 24h — the training-day reminder time on the phone. */
     preferredTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    /** They run: the runs go in the plan and the lifting is fitted around them. Replaces how they ran before. */
+    running: RunningSetup.optional(),
+    /** They've stopped running: the runs come out of the plan. */
+    stopRunning: z.literal(true).optional(),
   })
   .strict()
   .refine((change) => Object.values(change).some((value) => value !== undefined), {
@@ -48,6 +53,7 @@ export type TrainingSetupChange = z.infer<typeof TrainingSetupChange>;
 // time are saved but don't need a new plan.
 const PLAN_FIELDS = [
   "goals", "trainingExperience", "equipment", "addEquipment", "removeEquipment", "preferredDays", "daysPerWeek",
+  "running", "stopRunning",
 ] as const;
 
 export async function updateTrainingSetup(
@@ -98,6 +104,12 @@ export async function updateTrainingSetup(
     if (equipment.length === 0) equipment = ["bodyweight"];
   }
   if (equipment) patch.equipment = equipment;
+  let running: unknown = current.running;
+  if (change.running) running = patch.running = change.running;
+  if (change.stopRunning) {
+    running = undefined;
+    patch.running = FieldValue.delete();
+  }
   if (change.preferredTime) {
     patch.preferredTime = change.preferredTime;
     const hour = Number(change.preferredTime.slice(0, 2));
@@ -120,6 +132,7 @@ export async function updateTrainingSetup(
         trainingFocus: focus.success ? focus.data : undefined,
         equipment: equipment ?? (Array.isArray(current.equipment) ? current.equipment : undefined),
         trainingExperience: experience.success ? experience.data : undefined,
+        running,
       },
       seed.DEFAULT_PLAN,
       now,
@@ -145,7 +158,8 @@ export async function updateTrainingSetup(
     payload: { changed, rebuilt: rebuild, daysPerWeek: trainingDays.length },
   });
 
-  return { ok: true as const, changed, rebuiltPlan: rebuild, trainingDays, keptAdjustments };
+  const runs = runningSummary((await db.doc(workoutPlanPath(userId)).get()).get("days") ?? {});
+  return { ok: true as const, changed, rebuiltPlan: rebuild, trainingDays, keptAdjustments, ...(runs ? { runs } : {}) };
 }
 
 function currentTrainingDays(days: unknown): string[] {

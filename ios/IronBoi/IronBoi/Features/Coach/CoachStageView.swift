@@ -991,6 +991,7 @@ struct CoachStageView: View {
     /// The first session is on offer any day; after that, rest days ask.
     private var startTitle: String {
         if appModel.isNewToTraining { return "Start your first session" }
+        if appModel.isRestDay, let run = appModel.todayRun { return "\(run.label) today · lift anyway?" }
         return appModel.isRestDay ? "Rest day · train anyway?" : "Start my workout"
     }
 
@@ -1004,7 +1005,8 @@ struct CoachStageView: View {
                 if appModel.isWorkoutBusy {
                     ProgressView().tint(MyoTheme.Colors.ink)
                 } else {
-                    Image(systemName: appModel.isRestDay && !appModel.isNewToTraining ? "moon.zzz.fill" : "play.fill")
+                    Image(systemName: appModel.isRestDay && !appModel.isNewToTraining
+                          ? (appModel.todayRun != nil ? "figure.run" : "moon.zzz.fill") : "play.fill")
                         .font(.footnote.weight(.bold))
                 }
                 Text(startTitle).font(.body.weight(.semibold))
