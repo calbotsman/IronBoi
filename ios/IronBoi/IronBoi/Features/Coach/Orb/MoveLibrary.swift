@@ -216,6 +216,27 @@ enum MoveLibrary {
             ],
             cues: ["Light on your feet.", "Keep breathing.", "Steady rhythm."]),
         MoveSpec(
+            // On all fours, opposite arm and leg reach long, then the other
+            // side. Hips over knees, shoulders over hands.
+            id: "bird-dog", names: ["bird dog", "bird dogs", "birddog", "birddogs", "quadruped reach"],
+            view: .side, takesGear: false, seconds: 3.2, tempo: .wave,
+            keys: [
+                Key(hip: [-0.12, -0.195], tilt: 90, nod: -5, arms: [[-90, -90], [-90, -90]],
+                    feet: [[-0.31, -0.385], [-0.29, -0.385]]),
+                Key(hip: [-0.12, -0.195], tilt: 90, nod: -5, arms: [[2, 2], [-90, -90]],
+                    feet: [[-0.31, -0.385], [-0.50, -0.19]]),
+                Key(hip: [-0.12, -0.195], tilt: 90, nod: -5, arms: [[-90, -90], [-90, -90]],
+                    feet: [[-0.31, -0.385], [-0.29, -0.385]]),
+                Key(hip: [-0.12, -0.195], tilt: 90, nod: -5, arms: [[-90, -90], [2, 2]],
+                    feet: [[-0.50, -0.19], [-0.29, -0.385]]),
+            ],
+            lesson: [
+                Lesson(line: "Bird dogs. On all fours, hands under shoulders, knees under hips.", at: 0),
+                Lesson(line: "Reach one arm forward and the opposite leg back, long and level.", at: 1),
+                Lesson(line: "Back to the middle, then switch sides. Slow, like this."),
+            ],
+            cues: ["Back flat, like a tabletop.", "Reach long, not high.", "Slow and steady."]),
+        MoveSpec(
             id: "mountain-climber", names: ["mountain climber", "mountain climbers"], view: .side, takesGear: false,
             seconds: 0.9, tempo: .wave,
             keys: [
