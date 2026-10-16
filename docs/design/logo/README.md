@@ -5,9 +5,10 @@ words merge into the coach. It's rendered with the app's own blob math
 (`render_merge.py` is a port of `ios/.../Orb/OneBody.metal`), not drawn.
 
 - `myo-icon-1024.png`: app icon (the "sinking" stage), also in `AppIcon.appiconset`
-- `myo-wordmark.png`: MYO in ink with an amber blob as the period, also the `MYOWordmark` image asset
+- `myo-wordmark.png`: lowercase myo drawn as one metaball field, all amber, shaded like the One Body orb (pale centre, soft edge, glow, grain), also the `MYOWordmark` image asset. Made by `wordmark_blob.py`
 - `myo-lockup.png`: mark, wordmark and line ("Your new personal trainer.")
 - `merge-*.png`: the four merge stages explored
-- `wordmark-letters.svg`: the letterforms (Recraft V4 via FAL, recoloured to ink)
+- `wordmark-letters.svg`, `wordmark.py`: the old caps wordmark (Recraft V4 letters), replaced 2026-10-15
+- `myo-lockup.png`: still shows the old caps wordmark
 
-Regenerate: `python render_merge.py` (needs numpy + pillow).
+Regenerate: `python render_merge.py` and `python wordmark_blob.py` (need numpy + pillow).
