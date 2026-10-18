@@ -1948,10 +1948,7 @@ struct CoachStageView: View {
                 startGuided(.cooldown, moves: offer)
             } else {
                 confirm(tone == .hype ? "Good work today. See you next time!" : "Good work today.")
-                Task {
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    if guided == nil, appModel.activeWorkout == nil { endConversation() }
-                }
+                endConversationAfterSpeaking()
             }
             return true
         }
@@ -2052,10 +2049,17 @@ struct CoachStageView: View {
         case .cooldown:
             AudioHub.shared.play(cue: .target)
             confirm(skipped ? "Okay. Good work today." : (tone == .hype ? "That's the cooldown. You'll thank yourself tomorrow!" : "That's the cooldown. Good work today."))
-            Task {
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
-                if guided == nil, cooldownOffer == nil, appModel.activeWorkout == nil { endConversation() }
-            }
+            endConversationAfterSpeaking()
+        }
+    }
+
+    /// The workout and its cooldown are over: let the last line finish,
+    /// then the mic goes off (unless something new started meanwhile).
+    private func endConversationAfterSpeaking() {
+        Task {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            for _ in 0..<60 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 250_000_000) }
+            if guided == nil, cooldownOffer == nil, appModel.activeWorkout == nil, conversationActive { endConversation() }
         }
     }
 

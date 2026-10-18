@@ -149,8 +149,8 @@ enum WorkoutCoaching {
         let moves = stretches(after: exerciseName)
         if sayStretches, !moves.isEmpty {
             let names = moves.map { $0.name.lowercased() }
-            let list = names.count == 2 ? "\(names[0]) and \(names[1])" : names[0]
-            line += " Do a \(list) after, so it's less sore tomorrow."
+            let list = names.count == 2 ? "a \(names[0]) and a \(names[1])" : "a \(names[0])"
+            line += " Do \(list) after, so it's less sore tomorrow."
         }
         return line
     }
@@ -285,6 +285,8 @@ enum WorkoutCoaching {
         }
 
         private(set) var said: Set<String> = []
+        /// Lifts already asked "how did that feel?" this workout.
+        private var askedAbout: Set<String> = []
         private var setsSinceSpoke = 0
         /// Kinds you said to stop.
         var muted: Set<Kind> = []
@@ -296,6 +298,8 @@ enum WorkoutCoaching {
             let text: String
             /// It's a question you can answer ("easy", "hard").
             var asks: Bool { kind == .question || kind == .shortfall }
+            /// The cue it came from, so it's never picked again.
+            var source: String? = nil
         }
 
         /// After set `set` of `targetSets` on a lift, with `reps` of `target`.
@@ -308,14 +312,14 @@ enum WorkoutCoaching {
             if !timed, reps < target - 1, !muted.contains(.shortfall) {
                 options.append(Line(kind: .shortfall, text: "\(reps) of \(target). Want me to take a little weight off for the next one?"))
             }
-            if !lastSet, set == 1, !muted.contains(.question) {
+            if !lastSet, set == 1, !muted.contains(.question), !askedAbout.contains(name) {
                 options.append(Line(kind: .question, text: ["How did that feel? Easy, good, or hard?",
                                                             "How was that one? Too light, about right, or tough?"].randomElement()!))
             }
             if !lastSet, tipsFull, !muted.contains(.cue) {
                 let cues = ExerciseKnowledge.lookup(name).cues + (ExerciseMotion.match(name).map { [ExerciseLesson.cue(for: $0)] } ?? [])
                 if let cue = cues.first(where: { !said.contains($0) }) {
-                    options.append(Line(kind: .cue, text: "Next one: " + Self.lowerFirst(cue).trimmingCharacters(in: .punctuationCharacters) + "."))
+                    options.append(Line(kind: .cue, text: "Next one: " + Self.lowerFirst(cue).trimmingCharacters(in: .punctuationCharacters) + ".", source: cue))
                 }
             }
             if !muted.contains(.praise) {
@@ -335,9 +339,8 @@ enum WorkoutCoaching {
                 ?? (lastSet || Bool.random() ? options.first { $0.kind == .praise } : nil)
             if let pick {
                 said.insert(pick.text)
-                if pick.kind == .cue, let cue = pick.text.components(separatedBy: "Next one: ").last {
-                    said.insert(cue)
-                }
+                if let source = pick.source { said.insert(source) }
+                if pick.kind == .question { askedAbout.insert(name) }
                 setsSinceSpoke = 0
             }
             return pick
