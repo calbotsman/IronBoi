@@ -29,6 +29,9 @@ export const StartLiveCoachSessionRequest = z.object({
   resumeHandle: z.string().min(1).max(4096).optional(),
   // The person's pick from COACH_VOICES, so live sounds like spoken replies.
   voice: CoachVoiceChoice,
+  // Which live voice model: Gemini Live (default) or OpenAI Realtime, for
+  // an A/B. OpenAI only where IRONBOI_LIVE_OPENAI_ENABLED is on.
+  provider: z.enum(["gemini", "openai"]).optional(),
 }).strict();
 
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";

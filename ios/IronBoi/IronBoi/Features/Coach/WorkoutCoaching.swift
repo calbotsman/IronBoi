@@ -413,3 +413,50 @@ extension String {
     /// "two minutes" → "Two minutes".
     var capitalizingFirst: String { prefix(1).uppercased() + dropFirst() }
 }
+
+extension CoachVoiceOption {
+    /// What you asked for when you asked Coach to sound different.
+    enum VoiceRequest: Equatable {
+        case to(String)
+        /// An accent or language there's no voice for yet.
+        case unavailable(String)
+    }
+
+    /// "Can you change your voice to a woman's?", "sound calmer", "use a
+    /// male voice", "different voice" → the voice to switch to.
+    static func request(in text: String, current: String) -> VoiceRequest? {
+        let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        guard t.split(separator: " ").count <= 16,
+              says(#"\b(voice|sound|sounding|talk like|speak like)\b"#),
+              says(#"\b(change|switch|swap|use|try|different|another|can you|could you|make|want|prefer|rather|sound (more|less|like)|new)\b"#)
+        else { return nil }
+        if let accent = ["british", "english accent", "australian", "aussie", "irish", "scottish", "indian", "spanish", "french", "german"]
+            .first(where: { t.contains($0) }) {
+            return .unavailable(accent)
+        }
+        let now = voice(named: current)
+        var female = now.female
+        var feel = now.feel
+        var changed = false
+        if says(#"\b(woman|women|woman's|female|girl|lady|her)\b"#) { female = true; changed = true }
+        if says(#"\b(man|men|man's|male|guy|dude|him|bloke)\b"#) { female = false; changed = true }
+        if says(#"\b(warm|warmer|friendly|friendlier|kind|kinder|nice)\b"#) { feel = .warm; changed = true }
+        if says(#"\b(upbeat|energetic|excited|hype|hyped|pumped|enthusiastic|peppier|peppy)\b"#) { feel = .upbeat; changed = true }
+        if says(#"\b(firm|firmer|strict|stricter|serious|stern|tough|tougher|deeper|drill)\b"#) {
+            feel = .firm
+            if says(#"\bdeeper\b"#), !says(#"\b(woman|female|girl|lady)\b"#) { female = false }
+            changed = true
+        }
+        if says(#"\b(calm|calmer|soft|softer|gentle|gentler|relaxed|chill|quieter|soothing)\b"#) { feel = .calm; changed = true }
+        if !changed {
+            // "A different voice": the next one, same kind.
+            guard says(#"\b(different|another|new|other|change|switch)\b"#) else { return nil }
+            let same = all.filter { $0.female == now.female }
+            let i = same.firstIndex { $0.name == now.name } ?? 0
+            return .to(same[(i + 1) % same.count].name)
+        }
+        let name = name(female: female, feel: feel)
+        return .to(name)
+    }
+}

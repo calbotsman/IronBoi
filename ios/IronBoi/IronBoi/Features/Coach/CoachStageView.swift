@@ -1395,6 +1395,7 @@ struct CoachStageView: View {
         let addressed = typedTurn || Self.addressesCoach(heard)
         let text = Self.addressesCoach(heard) ? Self.strippingAddress(heard) : heard
         if applyStyleChange(in: text) { return }
+        if applyVoiceChange(in: text) { return }
         // "Want the rest of what I was saying?" — yes reads it, no drops it.
         if resumeOffered, questionIsFresh, let yes = Self.yesOrNo(text) {
             resumeOffered = false
@@ -2902,6 +2903,31 @@ struct CoachStageView: View {
             voice.speak(ack, messageId: "local-\(UUID().uuidString)")
         } else {
             resumeListening()
+        }
+        return true
+    }
+
+    /// "Change your voice to a woman's", "sound calmer": Coach switches
+    /// voice on the spot, says so in the new one, and remembers it.
+    private func applyVoiceChange(in text: String) -> Bool {
+        guard let request = CoachVoiceOption.request(in: text, current: CoachVoiceOption.current) else { return false }
+        voice.stop()
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        switch request {
+        case .unavailable(let accent):
+            confirm("I don't have a \(accent) voice yet. I can sound warmer, calmer, firmer or more upbeat, as a man or a woman.")
+        case .to(let name):
+            UserDefaults.standard.set(name, forKey: CoachVoiceOption.storageKey)
+            UserDefaults.standard.set(true, forKey: CoachVoiceOption.chosenKey)
+            appModel.rememberFromUser(factId: "coach-voice", category: "preference",
+                                      content: "Wants the coach to use the \(CoachVoiceOption.voice(named: name).feel.rawValue) \(CoachVoiceOption.voice(named: name).female ? "female" : "male") voice (asked for it by voice).")
+            if live.isActive {
+                // Live voice is fixed per session: reconnect in the new one.
+                live.stop()
+                startLive()
+            } else {
+                confirm(["How's this?", "Okay, this is me now. Better?", "Is this better?"].randomElement()!)
+            }
         }
         return true
     }

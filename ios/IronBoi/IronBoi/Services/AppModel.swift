@@ -375,6 +375,8 @@ final class AppModel: NSObject, ObservableObject {
             mint: { [weak self] handle in
                 guard let self else { throw CancellationError() }
                 var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
+                // Only sent for OpenAI: a server without the A/B rejects the field.
+                if LiveVoiceSession.provider == .openai { data["provider"] = "openai" }
                 if let handle { data["resumeHandle"] = handle }
                 return try await self.callCallable("startLiveCoachSession", data: data)
             },

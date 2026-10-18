@@ -39,6 +39,19 @@ final class CoachVoice: NSObject, ObservableObject {
         synthesizer.delegate = self
     }
 
+    /// When Coach last drew a breath; not again within a few seconds, or
+    /// it starts to sound like panting.
+    private var lastBreathAt = Date.distantPast
+
+    private func breathes(before chunk: String, index: Int) -> Bool {
+        let words = chunk.split(separator: " ").count
+        guard words >= 6, Date().timeIntervalSince(lastBreathAt) > 6 else { return false }
+        // First sentence of something real: usually. Later ones: sometimes.
+        guard index == 0 ? Double.random(in: 0...1) < 0.75 : (words >= 12 && Double.random(in: 0...1) < 0.35) else { return false }
+        lastBreathAt = Date()
+        return true
+    }
+
     func speak(_ text: String, messageId: String) {
         let spoken = Self.speakable(text)
         guard !spoken.isEmpty else { return }
@@ -108,6 +121,16 @@ final class CoachVoice: NSObject, ObservableObject {
                 // Download the next chunk while this one plays.
                 next = index + 1 < chunks.count ? Task { try await fetchAudio(chunks[index + 1]) } : nil
                 guard gen == self.generation else { return }
+                // Breathe like a person: in before a real sentence (not a
+                // one-word "Go."), and now and then between longer ones,
+                // with gaps that aren't all the same length.
+                if self.breathes(before: chunk, index: index), let breath = AudioHub.breath() {
+                    await self.hub.play(breath)
+                    guard gen == self.generation else { return }
+                } else if index > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64.random(in: 60_000_000...220_000_000))
+                    guard gen == self.generation else { return }
+                }
                 self.caption = chunk
                 self.lineIndex = index
                 if index == 0 { AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))") }

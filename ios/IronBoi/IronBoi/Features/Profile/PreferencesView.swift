@@ -7,6 +7,8 @@ struct PreferencesView: View {
     /// Live voice: talk to the coach over Gemini Live. On by default (it's
     /// the fast voice); off falls back to the regular coach.
     @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = true
+    /// Gemini Live or OpenAI Realtime — the voice A/B.
+    @AppStorage(LiveVoiceSession.providerKey) private var liveVoiceProvider = LiveVoiceSession.Provider.gemini.rawValue
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
     /// Training-day nudges — on the phone, not part of the saved profile.
@@ -398,7 +400,18 @@ struct PreferencesView: View {
                 Toggle("Live voice", isOn: $liveVoiceBeta).labelsHidden()
             }
             // Turning it on is the consent, so say what it does first.
-            Text("Talk in real time. While it's on (the default), your voice goes straight from your phone to Google's Gemini to answer you; we don't keep the audio.")
+            if liveVoiceBeta {
+                MyoValueRow(label: "Voice engine") {
+                    Picker("Voice engine", selection: $liveVoiceProvider) {
+                        ForEach(LiveVoiceSession.Provider.allCases, id: \.rawValue) { provider in
+                            Text(provider.label).tag(provider.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 180)
+                }
+            }
+            Text("Talk in real time. While it's on (the default), your voice goes straight from your phone to the voice engine you pick (Google's Gemini or OpenAI) to answer you; we don't keep the audio.")
                 .font(.caption)
                 .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)

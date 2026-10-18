@@ -262,6 +262,32 @@ final class AudioHub {
         if !cuePlayer.isPlaying { cuePlayer.play() }
     }
 
+    /// A soft inhale: breathy noise, band-limited to where breath lives
+    /// (~400–2,500 Hz), swelling in and falling away over about a third of
+    /// a second. Quiet — felt more than heard — and a little different each
+    /// time, so it never sounds like a sample on loop.
+    static func breath(seconds: Double = .random(in: 0.28...0.42), gain: Float = .random(in: 0.035...0.055)) -> AVAudioPCMBuffer? {
+        let rate = voiceFormat.sampleRate
+        let n = Int(seconds * rate)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: voiceFormat, frameCapacity: AVAudioFrameCount(n)),
+              let out = buffer.floatChannelData?[0] else { return nil }
+        // One-pole low-pass at ~2.5 kHz minus one at ~400 Hz: a band-pass.
+        let hi = Float(1 - exp(-2 * .pi * 2_500 / rate)), lo = Float(1 - exp(-2 * .pi * 400 / rate))
+        var a: Float = 0, b: Float = 0
+        let peak = Double.random(in: 0.55...0.7)
+        for k in 0..<n {
+            let x = Float.random(in: -1...1)
+            a += hi * (x - a)
+            b += lo * (x - b)
+            let p = Double(k) / Double(n)
+            // Rises slowly (an inhale), then drops off as the words start.
+            let env = p < peak ? sin(.pi / 2 * p / peak) : cos(.pi / 2 * (p - peak) / (1 - peak))
+            out[k] = (a - b) * Float(env * env) * gain * 4
+        }
+        buffer.frameLength = AVAudioFrameCount(n)
+        return buffer
+    }
+
     /// Sine notes in a row, each with a quick attack and an exponential
     /// tail, in Coach's own format so they share the mixer.
     private static func tone(_ notes: [(hz: Double, seconds: Double)], gain: Float) -> AVAudioPCMBuffer? {

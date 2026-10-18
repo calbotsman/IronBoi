@@ -79,6 +79,12 @@ import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
 import { checkDailyTtsCap, recordTtsUsage } from "./usage/cap.js";
 import {
+  OPENAI_REALTIME_MODEL_DEFAULT,
+  liveOpenAIEnabled,
+  mintOpenAIRealtimeSecret,
+  openAISessionConfig,
+} from "./coach/liveOpenAI.js";
+import {
   CoachLiveToolRequest,
   LIVE_MINTS_PER_DAY_DEFAULT,
   LIVE_MODEL_DEFAULT,
@@ -162,6 +168,7 @@ const coach = require("./coach/ironboi-coach.v0.json") as CoachConfig;
 const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const openRouterApiKey = defineSecret("OPENROUTER_API_KEY");
+const openAIApiKey = defineSecret("OPENAI_API_KEY");
 
 // A malformed payload must surface as invalid-argument (not opaque
 // INTERNAL) and leave an operator log breadcrumb (issue paths, never
@@ -546,7 +553,7 @@ export const finishWorkoutSessionCallable = onCall(
 // single-use Gemini Live token with the coach's prompt locked in; the phone
 // connects straight to Gemini with it. Off unless IRONBOI_LIVE_VOICE_ENABLED.
 export const startLiveCoachSession = onCall(
-  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey] },
+  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey] },
   async (request) => {
     const userId = requireUserId(request.auth);
     if (!liveVoiceEnabled()) throw new HttpsError("failed-precondition", "live_voice_disabled");
@@ -561,25 +568,43 @@ export const startLiveCoachSession = onCall(
       safeLogger.warn("Live voice daily cap reached", { event: "live_voice_cap_reached", userId });
       throw new HttpsError("resource-exhausted", "live_voice_daily_cap");
     }
-    const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new HttpsError("failed-precondition", "live_voice_not_configured");
-    const model = process.env.IRONBOI_LIVE_MODEL || LIVE_MODEL_DEFAULT;
     const voice = parsed.voice ?? (process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT);
     // The whole brain — profile, plan, recent workouts, memory facts, coach
     // notes, the shared conversation — locked into the session.
-    const instruction = await buildLiveSystemInstruction({
-      db,
-      coach,
-      userId,
-      today: parsed.clientDate ?? new Date().toISOString().slice(0, 10),
-    });
+    const today = parsed.clientDate ?? new Date().toISOString().slice(0, 10);
+    if (parsed.provider === "openai") {
+      if (!liveOpenAIEnabled()) throw new HttpsError("failed-precondition", "live_openai_disabled");
+      const openAIKey = openAIApiKey.value() || process.env.OPENAI_API_KEY;
+      if (!openAIKey) throw new HttpsError("failed-precondition", "live_openai_not_configured");
+      const model = process.env.IRONBOI_LIVE_OPENAI_MODEL || OPENAI_REALTIME_MODEL_DEFAULT;
+      const instruction = await buildLiveSystemInstruction({ db, coach, userId, today });
+      try {
+        const { token, expiresAt } = await mintOpenAIRealtimeSecret({
+          apiKey: openAIKey,
+          session: openAISessionConfig({ model, voice, instruction }),
+        });
+        safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId, outcome: "openai" });
+        return { token, model, voice, expiresAt, provider: "openai" };
+      } catch (error) {
+        safeLogger.error("Live voice mint failed", {
+          event: "live_voice_mint_failed",
+          userId,
+          errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+        });
+        throw new HttpsError("unavailable", "live_voice_unavailable");
+      }
+    }
+    const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new HttpsError("failed-precondition", "live_voice_not_configured");
+    const model = process.env.IRONBOI_LIVE_MODEL || LIVE_MODEL_DEFAULT;
+    const instruction = await buildLiveSystemInstruction({ db, coach, userId, today });
     try {
       const { token, expiresAt } = await mintLiveToken({
         apiKey,
         setup: liveBrainSetup({ model, voice, instruction, resumeHandle: parsed.resumeHandle }),
       });
       safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId, outcome: parsed.resumeHandle ? "resume" : "new" });
-      return { token, model, voice, expiresAt };
+      return { token, model, voice, expiresAt, provider: "gemini" };
     } catch (error) {
       safeLogger.error("Live voice mint failed", {
         event: "live_voice_mint_failed",
