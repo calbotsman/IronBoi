@@ -1743,6 +1743,31 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    /// Something you told Coach about yourself mid-workout — "my knee
+    /// hurts", "stop telling me that", "use a deeper voice" — kept as a
+    /// confirmed fact, so every coach (regular and live) knows it next time.
+    /// Shows up in the memory screen, where you can remove it. Best-effort:
+    /// a failure here never interrupts the workout.
+    func rememberFromUser(factId: String, category: String, content: String) {
+        let fact = MemoryFact(id: factId, category: category, content: content, source: "user_stated",
+                              state: "confirmed", happenedOn: nil, until: nil,
+                              createdAt: Date(), expiresAt: nil)
+        memoryFacts = memoryFacts.filter { $0.id != factId } + [fact]
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        Task {
+            do {
+                try await callCallable("upsertMemoryFact", data: [
+                    "factId": factId, "category": category, "content": content,
+                    "source": "user_stated", "confidence": 1,
+                ])
+            } catch {
+                AudioHub.log("remember failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Soft-deletes a fact; Coach stops seeing it on the next reply.
     func deleteMemoryFact(_ factId: String) async -> Bool {
         await mutateMemoryFact(callable: "deleteMemoryFact", factId: factId) { _ in nil }

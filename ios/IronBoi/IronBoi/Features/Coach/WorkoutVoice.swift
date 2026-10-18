@@ -181,7 +181,7 @@ enum WorkoutVoice {
     /// eight", "all sets done" — for when you didn't count out loud. Needs
     /// the word "set", so a bare "done" (finishing the workout?) isn't one.
     static func setsLogged(in transcript: String) -> SetsLogged? {
-        let t = normalized(transcript)
+        let t = heardAsSetDone(normalized(transcript))
         func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
         // "How many sets did I do?", "two sets left" — questions and counts
         // of what's to come aren't logging anything.
@@ -214,14 +214,34 @@ enum WorkoutVoice {
         return Int(word) ?? numberWords[word]
     }
 
+    /// What the recogniser makes of "set done" in a gym — "said done",
+    /// "sat down", "parents come, said done" — read back as "set done", so
+    /// a set logs without counting. Only the phrase on its own (or at the
+    /// end of what you said) is rewritten; "I sat down on the bench" isn't.
+    static func heardAsSetDone(_ t: String) -> String {
+        t.replacingOccurrences(
+            of: #"\b(said|sat|sit|shut|set|sets|said that|cette|that)\s+(done|down|dun|don)\s*[.!]?\s*$"#,
+            with: "set done", options: .regularExpression)
+    }
+
     // MARK: - Weight
 
     /// A weight change, if that's what you said. Pounds unless you say kilos.
-    static func weightChange(in transcript: String) -> WeightChange? {
+    /// `timed`: the lift is a hold or carry. Then a bare number ("at 60",
+    /// "make it 45") is its time, never a weight — only a unit makes it one.
+    static func weightChange(in transcript: String, timed: Bool = false) -> WeightChange? {
         let t = normalized(transcript)
         guard let number = firstNumber(in: t), number >= 2.5, number <= 1000 else { return nil }
-        // "Go to 12 reps", "it's 5 sets" — that number is reps or sets.
-        if t.range(of: #"\b\d+\s*(reps?|sets?|times|rounds?)\b"#, options: .regularExpression) != nil { return nil }
+        // "Go to 12 reps", "it's 5 sets", "60 seconds" — that number is
+        // reps, sets or time.
+        if t.range(of: #"\b\d+\s*(reps?|sets?|times|rounds?|s|secs?|seconds?|minutes?|mins?|second hold)\b"#, options: .regularExpression) != nil { return nil }
+        if t.range(of: #"\b(seconds?|secs?|minutes?|mins?|hold|longer|shorter)\b"#, options: .regularExpression) != nil,
+           t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?)\b"#, options: .regularExpression) == nil {
+            return nil
+        }
+        if timed, t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?|heavier|lighter)\b"#, options: .regularExpression) == nil {
+            return nil
+        }
         let isKilos = t.range(of: #"\b(kg|kgs|kilo|kilos|kilograms?)\b"#, options: .regularExpression) != nil
         let pounds = isKilos ? (number * 2.20462 / 2.5).rounded() * 2.5 : number
         let mentionsWeight = t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?|heavier|lighter)\b"#,

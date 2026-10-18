@@ -127,6 +127,38 @@ struct CoachStageView: View {
     @State private var holdStartedAt: Date?
     @State private var holdEndsAt: Date?
     @State private var holdTask: Task<Void, Never>?
+    @State private var holdCountdownTask: Task<Void, Never>?
+    /// What Coach says after a set: useful, never repeated, tuned by you.
+    @State private var advisor = WorkoutCoaching.SetAdvisor()
+    /// The last thing the advisor said, so "stop telling me that" and
+    /// "that's helpful" know what you mean, and an answer to its question
+    /// lands on the right lift.
+    @State private var lastAdvice: (kind: WorkoutCoaching.SetAdvisor.Kind, text: String, exercise: Int, at: Date)?
+    /// How the last set went (from reps, or what you said): sets the rest.
+    @State private var lastEffort: WorkoutCoaching.Effort?
+    /// "I can't do this set" — Coach asked what's wrong, for this lift.
+    @State private var cantDoAskedFor: (exercise: Int, at: Date)?
+    /// The last line Coach said out loud, for "stop telling me that".
+    @State private var lastCoachLine = ""
+    /// A warm-up or cooldown being walked through, one timed move at a time.
+    @State private var guided: GuidedRoutine?
+    @State private var guidedTask: Task<Void, Never>?
+    /// The cooldown on offer after the top stretch was named: "want the rest?"
+    @State private var cooldownOffer: [WorkoutCoaching.Move]?
+    /// Sets done per lift, kept as the workout goes, for the cooldown after
+    /// it's over (the workout itself is gone by then).
+    @State private var workDone: [String: Int] = [:]
+    @State private var workOrder: [String] = []
+
+    struct GuidedRoutine: Equatable {
+        enum Kind { case warmup, cooldown }
+        let kind: Kind
+        let moves: [WorkoutCoaching.Move]
+        var index: Int
+        var side: Int
+        var endsAt: Date
+        var move: WorkoutCoaching.Move { moves[index] }
+    }
     /// What Coach hadn't said yet when you cut in — offered back once the
     /// set is logged ("want the rest of what I was saying?").
     @State private var interruptedSpeech: String?
@@ -158,8 +190,11 @@ struct CoachStageView: View {
 
     /// Any card that needs the space below the body.
     private var cardOpen: Bool {
-        swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || appModel.pendingEffortSessionId != nil || !appModel.pendingBaselineSuggestions.isEmpty || showReminderSetup || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
+        swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || (appModel.pendingEffortSessionId != nil && !inRoutine) || !appModel.pendingBaselineSuggestions.isEmpty || showReminderSetup || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
     }
+    /// A warm-up or cooldown is on (or on offer): its panel, not a card.
+    private var inRoutine: Bool { guided != nil || cooldownOffer != nil }
+
     /// The newest coach reply already checked for a move, so history
     /// loading on launch never sets the body off.
     @State private var lastCueCheckedReplyId: String?
@@ -524,7 +559,7 @@ struct CoachStageView: View {
                     SessionChangesCard(changes: appModel.pendingSessionChanges)
                         .padding(.horizontal, MyoTheme.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else if appModel.pendingEffortSessionId != nil {
+                } else if appModel.pendingEffortSessionId != nil, !inRoutine {
                     EffortCard(onAnswer: answerEffort, onSkip: skipEffort)
                         .padding(.horizontal, MyoTheme.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -623,6 +658,53 @@ struct CoachStageView: View {
 
     @ViewBuilder
     private var caption: some View {
+        if let panel = timerPanel {
+            panel
+        } else {
+            plainCaption
+        }
+    }
+
+    /// Resting, holding, or in a warm-up/cooldown: the screen goes quiet
+    /// and shows the clock.
+    private var timerPanel: TimerPanel? {
+        if let routine = guided {
+            let move = routine.move
+            let upNext = routine.index + 1 < routine.moves.count ? "Then: \(routine.moves[routine.index + 1].name)" : nil
+            let side = move.eachSide ? (routine.side == 0 ? " · first side" : " · other side") : ""
+            return TimerPanel(
+                title: (routine.kind == .warmup ? "Warm-up" : "Cooldown") + " \(routine.index + 1) of \(routine.moves.count)",
+                endsAt: routine.endsAt, next: move.name + side, tip: upNext ?? move.cue,
+                primary: ("Next", { advanceGuided() }),
+                secondary: ("End", { finishGuided(skipped: true) }))
+        }
+        guard appModel.activeWorkout != nil else { return nil }
+        if let holdEndsAt {
+            return TimerPanel(title: "Hold", endsAt: holdEndsAt, next: currentExercise.map { Self.short($0.name) }, tip: nil,
+                              primary: ("Done", { finishHold(early: true) }), secondary: nil)
+        }
+        if let restEndsAt {
+            return TimerPanel(title: "Rest", endsAt: restEndsAt, next: restNextLabel.isEmpty ? nil : "Next: " + restNextLabel,
+                              tip: restTip,
+                              primary: ("Skip", { _ = handleRestCommand("skip") }),
+                              secondary: ("+30s", { _ = handleRestCommand("thirty more") }))
+        }
+        return nil
+    }
+
+    /// One thing to think about while resting: the next form cue Coach
+    /// hasn't said yet, or a breath.
+    private var restTip: String? {
+        guard let exercise = currentExercise else { return nil }
+        if let cue = ExerciseKnowledge.lookup(exercise.name).cues.first(where: { !(lastAdvice?.text.contains($0) ?? false) }),
+           !advisor.muted.contains(.cue) {
+            return cue
+        }
+        return "Slow breaths. Let your heart rate come down."
+    }
+
+    @ViewBuilder
+    private var plainCaption: some View {
         VStack(spacing: MyoTheme.Spacing.sm) {
             // During a move the status line narrates it ("2 / 3 · Push away").
             // The welcome card is its own title; no "Tap to talk" over it.
@@ -1309,8 +1391,12 @@ struct CoachStageView: View {
             }
             return
         }
+        if handleGuidedCommand(text) { return }
+        if handleTuning(text) { return }
         if appModel.activeWorkout != nil, handleHoldCommand(text) { return }
         if appModel.activeWorkout != nil, handleRestCommand(text) { return }
+        if appModel.activeWorkout != nil, handleCantDo(text) { return }
+        if appModel.activeWorkout != nil, handleAdviceAnswer(text) { return }
         if let choice = swapChoice, questionIsFresh, let pick = Self.pickSwap(text, from: choice.options) {
             chooseSwap(pick)
             return
@@ -1320,12 +1406,13 @@ struct CoachStageView: View {
             return
         }
         if !appModel.pendingSessionChanges.isEmpty, let keep = Self.yesOrNo(text) {
+            let cooldown = appModel.activeWorkout == nil ? offerCooldown().map { " " + $0 } ?? "" : ""
             if keep {
-                confirm("Done. I'll send it over to update your plan.")
+                confirm("Done. I'll send it over to update your plan." + cooldown)
                 Task { await appModel.keepSessionChanges() }
             } else {
                 appModel.dismissSessionChanges()
-                confirm("Just today, then.")
+                confirm("Just today, then." + cooldown)
             }
             return
         }
@@ -1402,9 +1489,10 @@ struct CoachStageView: View {
                 }
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 let head = count == 1 ? "Set \(last ?? 1) done." : "\(count) sets logged."
-                confirm(setDoneLine(head, exerciseIndex: index))
+                confirm(count == 1 ? afterSet(head, exerciseIndex: index) : head + restLine(afterSetOn: index))
                 return
-            } else if short, let change = WorkoutVoice.weightChange(in: text), let index = currentExerciseIndex,
+            } else if short, let change = WorkoutVoice.weightChange(in: text, timed: currentExercise.map { ExerciseKnowledge.isTimed($0.name) } ?? false),
+                      let index = currentExerciseIndex,
                       let exercise = currentExercise {
                 let now = appModel.workingWeight(for: exercise)
                 let next: Double
@@ -1590,8 +1678,7 @@ struct CoachStageView: View {
         } else {
             head = "Set \(setNumber) done."
         }
-        var line = setDoneLine(head, exerciseIndex: countedIndex)
-        line += restLine(afterSetOn: countedIndex)
+        var line = afterSet(head, exerciseIndex: countedIndex)
         if let interrupted = interruptedSpeech, !interrupted.isEmpty {
             line += " Want the rest of what I was saying?"
             resumeOffered = true
@@ -1602,6 +1689,367 @@ struct CoachStageView: View {
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
+    }
+
+
+    // MARK: - After a set
+
+    /// Everything said once a set is logged: what happened, one useful
+    /// thing (or nothing), the rest, and — last, so it's what you answer —
+    /// a question if the advisor asked one.
+    private func afterSet(_ head: String, exerciseIndex index: Int?) -> String {
+        var line = head
+        var question: String?
+        if let index, let exercise = appModel.activeWorkout?.exercises[index] {
+            let reps = exercise.completedSets.last(where: \.completed)?.reps ?? exercise.targetReps
+            let timed = ExerciseKnowledge.isTimed(exercise.name)
+            lastEffort = timed ? nil : WorkoutCoaching.effort(reps: reps, target: exercise.targetReps)
+            noteWork(exercise.name)
+            let lastSet = exercise.completedSetCount >= exercise.targetSets
+            // The last set of a lift is closed out on the way to the next
+            // one; no tip for a set that isn't coming.
+            if tips != .quiet, !lastSet || reps < exercise.targetReps - 1,
+               let advice = advisor.line(exercise: exercise.name, set: exercise.completedSetCount,
+                                         targetSets: exercise.targetSets, reps: reps, target: exercise.targetReps,
+                                         timed: timed, hype: tone == .hype, tipsFull: tips == .full) {
+                lastAdvice = (advice.kind, advice.text, index, Date())
+                if advice.asks { question = advice.text } else { line += " " + advice.text }
+            }
+        }
+        line += restLine(afterSetOn: index)
+        if let question {
+            line += " " + question
+            askedAt = Date()
+            questionAskedAt = Date()
+        }
+        return line
+    }
+
+    /// Sets done per lift, for the cooldown.
+    private func noteWork(_ name: String) {
+        if workDone[name] == nil { workOrder.append(name) }
+        workDone[name, default: 0] += 1
+    }
+
+    /// A fresh advisor for a new workout, carrying what you've told Coach
+    /// before ("stop telling me that") from your memory.
+    private func resetCoachingForWorkout() {
+        var fresh = WorkoutCoaching.SetAdvisor()
+        let tuned = WorkoutCoaching.tunings(fromFactIds: appModel.memoryFacts.filter { $0.state != "rejected" }.map(\.id))
+        fresh.muted = tuned.muted
+        fresh.liked = tuned.liked
+        advisor = fresh
+        lastAdvice = nil
+        lastEffort = nil
+        cantDoAskedFor = nil
+        workDone = [:]
+        workOrder = []
+    }
+
+    /// Your answer to the advisor's question: "easy" → a bit more weight,
+    /// "hard" → a longer rest; "yes" to a lighter weight → lighter.
+    private func handleAdviceAnswer(_ text: String) -> Bool {
+        guard let advice = lastAdvice, advice.kind == .question || advice.kind == .shortfall,
+              Date().timeIntervalSince(advice.at) < 45,
+              let workout = appModel.activeWorkout, workout.exercises.indices.contains(advice.exercise) else { return false }
+        let exercise = workout.exercises[advice.exercise]
+        let weight = appModel.workingWeight(for: exercise)
+        if advice.kind == .shortfall {
+            guard let yes = Self.yesOrNo(text) else { return false }
+            lastAdvice = nil
+            if yes, weight > 0 {
+                let next = WorkoutCoaching.lighter(weight)
+                appModel.setWorkoutExerciseWeight(exerciseIndex: advice.exercise, weight: next)
+                confirm("\(LiveWorkoutCard.pounds(next)) pounds next set.")
+            } else if yes {
+                let reps = max(1, Int((Double(exercise.targetReps) * 0.75).rounded()))
+                appModel.setWorkoutTargets(advice.exercise, sets: nil, reps: reps)
+                confirm("Let's make it \(reps) reps.")
+            } else {
+                confirm(tone == .hype ? "Same weight. You've got this." : "Same weight, then.")
+            }
+            return true
+        }
+        guard let effort = WorkoutCoaching.effortAnswer(text) else { return false }
+        lastAdvice = nil
+        switch effort {
+        case .easy:
+            if weight > 0, !ExerciseKnowledge.isTimed(exercise.name) {
+                let next = weight + (weight < 20 ? 2.5 : 5)
+                appModel.setWorkoutExerciseWeight(exerciseIndex: advice.exercise, weight: next)
+                confirm("Then let's go up. \(LiveWorkoutCard.pounds(next)) pounds next set.")
+            } else {
+                confirm("Good. Slow the lowering down to make it count.")
+            }
+        case .hard:
+            if let ends = restEndsAt {
+                setRest(endsAt: ends.addingTimeInterval(30))
+                confirm("Take an extra thirty, then.")
+            } else {
+                confirm("Noted. Take your time between sets.")
+            }
+        case .right:
+            confirm(["Good. Same again.", "That's the spot.", "Perfect, keep it there."].randomElement()!)
+        }
+        return true
+    }
+
+    // MARK: - "Stop telling me that" / "that's helpful"
+
+    /// Feedback on what Coach just said, remembered for good: it shows in
+    /// your memory (where you can remove it) and every coach reads it.
+    private func handleTuning(_ text: String) -> Bool {
+        guard let tuning = WorkoutCoaching.tuning(in: text) else { return false }
+        let recent = lastAdvice.flatMap { Date().timeIntervalSince($0.at) < 90 ? $0 : nil }
+        if let advice = recent {
+            if tuning == .stop {
+                advisor.muted.insert(advice.kind)
+                advisor.liked.remove(advice.kind)
+            } else {
+                advisor.liked.insert(advice.kind)
+                advisor.muted.remove(advice.kind)
+            }
+            appModel.rememberFromUser(
+                factId: WorkoutCoaching.tuningFactId(tuning, advice.kind), category: "preference",
+                content: WorkoutCoaching.tuningFactContent(tuning, advice.kind, example: advice.text))
+            lastAdvice = nil
+        } else {
+            // Something else Coach said: remember the line itself.
+            let said = lastCoachLine.isEmpty ? voice.spokenText : lastCoachLine
+            guard !said.isEmpty else { return false }
+            let id = "coach-tune-line-\(abs(said.lowercased().hashValue) % 1_000_000)"
+            appModel.rememberFromUser(
+                factId: id, category: "preference",
+                content: tuning == .stop
+                    ? "Doesn't want to hear things like: \"\(said.prefix(120))\". Say it differently or not at all."
+                    : "Found this helpful, more like it: \"\(said.prefix(120))\".")
+        }
+        voice.stop()
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        if live.isActive {
+            live.note(tuning == .stop
+                      ? "The user asked you to stop saying what you just said. Don't say it or anything like it again."
+                      : "The user found what you just said helpful. Do more of that.")
+        }
+        confirm(tuning == .stop ? "Got it. I'll stop." : "Good to know. I'll keep that coming.")
+        return true
+    }
+
+    // MARK: - "I can't do this set"
+
+    /// "I can't", "too heavy", "my shoulder hurts": Coach asks what's wrong
+    /// if you didn't say, then adapts — lighter, a swap, or done for today.
+    private func handleCantDo(_ text: String) -> Bool {
+        guard let index = currentExerciseIndex, let exercise = currentExercise else { return false }
+        let asked = cantDoAskedFor.flatMap { $0.exercise == index && Date().timeIntervalSince($0.at) < 30 ? $0 : nil }
+        if asked != nil, let reason = WorkoutCoaching.cantDoReason(text) {
+            cantDoAskedFor = nil
+            adapt(exercise: index, for: reason)
+            return true
+        }
+        let reason = WorkoutCoaching.cantDoReason(text)
+        let hurts: Bool = { if case .hurts = reason { return true } else { return false } }()
+        // Unprompted, pain counts only said briefly ("my shoulder hurts"),
+        // not in passing ("I'll be sore tomorrow").
+        guard WorkoutCoaching.saysCantDo(text) || (hurts && text.split(separator: " ").count <= 10
+                                                   && !text.lowercased().contains("tomorrow")) else { return false }
+        if holdEndsAt != nil { finishHold(early: true) }
+        if repCount > 0 { finishCount() }
+        if let reason {
+            adapt(exercise: index, for: reason)
+        } else {
+            cantDoAskedFor = (index, Date())
+            askedAt = Date()
+            questionAskedAt = Date()
+            confirm("That's okay. Is it too heavy, does something hurt, or are you done with \(Self.short(exercise.name)) for today?")
+        }
+        return true
+    }
+
+    private func adapt(exercise index: Int, for reason: WorkoutCoaching.CantDoReason) {
+        guard let workout = appModel.activeWorkout, workout.exercises.indices.contains(index) else { return }
+        let exercise = workout.exercises[index]
+        let name = Self.short(exercise.name)
+        switch reason {
+        case .tooHeavy:
+            let weight = appModel.workingWeight(for: exercise)
+            if weight > 0, !ExerciseKnowledge.isTimed(exercise.name) {
+                let next = WorkoutCoaching.lighter(weight)
+                appModel.setWorkoutExerciseWeight(exerciseIndex: index, weight: next)
+                appModel.rememberFromUser(
+                    factId: "coach-heavy-\(Self.slug(exercise.name))", category: "exercise_response",
+                    content: "\(exercise.name) at \(LiveWorkoutCard.pounds(weight)) lb was too heavy on \(Self.today); dropped to \(LiveWorkoutCard.pounds(next)) lb.")
+                confirm("Let's drop it to \(LiveWorkoutCard.pounds(next)). Catch your breath, and go when you're ready.")
+            } else {
+                let reps = max(ExerciseKnowledge.isTimed(exercise.name) ? 10 : 1, Int((Double(exercise.targetReps) * 0.7).rounded()))
+                appModel.setWorkoutTargets(index, sets: nil, reps: reps)
+                let unit = ExerciseKnowledge.isTimed(exercise.name) ? "seconds" : "reps"
+                confirm("Let's make it \(reps) \(unit). Catch your breath, and go when you're ready.")
+            }
+        case .hurts(let part):
+            let what = part.isEmpty ? "something" : "your \(part)"
+            appModel.rememberFromUser(
+                factId: "coach-hurt-\(Self.slug(part.isEmpty ? exercise.name : part))", category: "safety_note",
+                content: "Said \(part.isEmpty ? "something hurt" : "their \(part) hurt") during \(exercise.name) on \(Self.today). Go easy on it and check in before loading it.")
+            if live.isActive { live.note("The user just said \(what) hurts during \(exercise.name). Stop that lift; don't push through pain.") }
+            confirm("Stop there. Never push through pain. I'll remember \(what) is bothering you.")
+            offerSwaps(for: index)
+        case .tired:
+            let done = exercise.completedSetCount
+            if done > 0 {
+                appModel.setWorkoutTargets(index, sets: done, reps: nil)
+            } else {
+                appModel.skipWorkoutExercise(index)
+            }
+            cancelRest()
+            confirm("No problem. That's enough \(name) for today.")
+        }
+    }
+
+    private static var today: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    private static func slug(_ s: String) -> String {
+        s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: "-")
+    }
+
+    // MARK: - Warm-up and cooldown
+
+    /// "Skip", "next", "done" move through a routine; "stop" ends it.
+    /// "Yes"/"no" answers the cooldown offer.
+    private func handleGuidedCommand(_ text: String) -> Bool {
+        if let offer = cooldownOffer {
+            guard let yes = Self.yesOrNo(text) ?? (text.lowercased().contains("rest") ? true : nil) else { return false }
+            cooldownOffer = nil
+            if yes {
+                startGuided(.cooldown, moves: offer)
+            } else {
+                confirm(tone == .hype ? "Good work today. See you next time!" : "Good work today.")
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if guided == nil, appModel.activeWorkout == nil { endConversation() }
+                }
+            }
+            return true
+        }
+        guard guided != nil else { return false }
+        let t = text.lowercased()
+        func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        guard t.split(separator: " ").count <= 6 else { return false }
+        if says(#"\b(stop|skip (the )?(warm ?up|cooldown|stretch(es|ing)?)|i'm good|that's enough|end it|let's lift|start the workout)\b"#) {
+            finishGuided(skipped: true)
+            return true
+        }
+        if says(#"\b(next|skip|done|go on|move on)\b"#) {
+            advanceGuided()
+            return true
+        }
+        return false
+    }
+
+    private func startGuided(_ kind: GuidedRoutine.Kind, moves: [WorkoutCoaching.Move], intro: String? = nil) {
+        guard !moves.isEmpty else { return }
+        cancelRest()
+        guided = GuidedRoutine(kind: kind, moves: moves, index: 0, side: 0, endsAt: .distantFuture)
+        runGuidedStep(intro: intro)
+    }
+
+    /// Says the move, waits for Coach to finish, then times it — each side
+    /// in turn — and moves on by itself.
+    private func runGuidedStep(intro: String? = nil) {
+        guard var routine = guided else { return }
+        let move = routine.move
+        let sideWord = move.eachSide ? (routine.side == 0 ? " First side." : " Other side.") : ""
+        let line: String
+        if routine.side == 1 {
+            line = "Switch sides."
+        } else {
+            let lead = routine.index == 0 ? "" : routine.index == routine.moves.count - 1 ? "Last one. " : "Next, "
+            line = (intro.map { $0 + " " } ?? "") + lead + WorkoutCoaching.spoken(move) + " " + move.cue + sideWord
+        }
+        routine.endsAt = .distantFuture
+        guided = routine
+        confirm(line)
+        guidedTask?.cancel()
+        guidedTask = Task {
+            // Let the line finish before the clock starts.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            for _ in 0..<100 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
+            guard !Task.isCancelled, var current = guided, current.index == routine.index, current.side == routine.side else { return }
+            let ends = Date().addingTimeInterval(TimeInterval(move.seconds))
+            current.endsAt = ends
+            guided = current
+            AudioHub.shared.play(cue: .tick)
+            var saidHalf = false
+            while !Task.isCancelled, guided?.endsAt == ends {
+                let left = Int(ends.timeIntervalSinceNow.rounded(.up))
+                if left <= 0 { break }
+                if left <= 3 {
+                    AudioHub.shared.play(cue: .tick)
+                } else if !saidHalf, move.seconds >= 30, left == move.seconds / 2, speaksReplies, tips != .quiet, !voice.isSpeaking {
+                    saidHalf = true
+                    voice.speak(["Breathe into it.", "Long exhale.", "Relax into it.", "Let your shoulders drop."].randomElement()!,
+                                messageId: "local-\(UUID().uuidString)")
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            guard !Task.isCancelled, guided?.endsAt == ends else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            advanceGuided()
+        }
+    }
+
+    private func advanceGuided() {
+        guard var routine = guided else { return }
+        guidedTask?.cancel()
+        if routine.move.eachSide, routine.side == 0 {
+            routine.side = 1
+        } else if routine.index + 1 < routine.moves.count {
+            routine.index += 1
+            routine.side = 0
+        } else {
+            finishGuided(skipped: false)
+            return
+        }
+        guided = routine
+        runGuidedStep()
+    }
+
+    private func finishGuided(skipped: Bool) {
+        guard let routine = guided else { return }
+        guidedTask?.cancel()
+        guidedTask = nil
+        guided = nil
+        switch routine.kind {
+        case .warmup:
+            if let first = currentExerciseIndex {
+                if !skipped { AudioHub.shared.play(cue: .target) }
+                introduce(exercise: first, first: true, warmedUp: true)
+            }
+        case .cooldown:
+            AudioHub.shared.play(cue: .target)
+            confirm(skipped ? "Okay. Good work today." : (tone == .hype ? "That's the cooldown. You'll thank yourself tomorrow!" : "That's the cooldown. Good work today."))
+            Task {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if guided == nil, cooldownOffer == nil, appModel.activeWorkout == nil { endConversation() }
+            }
+        }
+    }
+
+    /// After the workout: the one stretch that matters most — "if you're in
+    /// a rush, do this one" — then an offer to do the rest together.
+    private func offerCooldown() -> String? {
+        let work = workOrder.map { ($0, workDone[$0] ?? 0) }
+        let moves = WorkoutCoaching.cooldown(for: work)
+        guard let top = moves.first else { return nil }
+        cooldownOffer = moves
+        askedAt = Date()
+        questionAskedAt = Date()
+        let rest = moves.count > 1 ? " Want to do all \(moves.count) stretches with me? It's about \(max(2, moves.reduce(0) { $0 + $1.seconds * ($1.eachSide ? 2 : 1) } / 60)) minutes." : " Want to do it with me now?"
+        return "If you're in a rush, the one thing to do is a \(top.name.lowercased()), \(top.seconds) seconds\(top.eachSide ? " each side" : "")." + rest
     }
 
     // MARK: - Timed holds (planks, carries)
@@ -1625,6 +2073,8 @@ struct CoachStageView: View {
 
     private func startHold() {
         guard holdEndsAt == nil, let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return }
+        holdCountdownTask?.cancel()
+        holdCountdownTask = nil
         if restEndsAt != nil { cancelRest() }
         let seconds = max(5, min(exercise.targetReps, 600))
         let start = Date()
@@ -1672,8 +2122,7 @@ struct CoachStageView: View {
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         AudioHub.shared.play(cue: .target)
         let head = held < target ? "Set \(set): \(held) seconds." : "Set \(set) done."
-        var line = setDoneLine(head, exerciseIndex: index)
-        line += restLine(afterSetOn: index)
+        let line = afterSet(head, exerciseIndex: index)
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
@@ -1684,14 +2133,43 @@ struct CoachStageView: View {
         holdTask = nil
         holdEndsAt = nil
         holdStartedAt = nil
+        holdCountdownTask?.cancel()
+        holdCountdownTask = nil
+    }
+
+    /// A hold starts by itself: once Coach has finished talking, a few
+    /// seconds to get in position ("three, two, one"), then the clock. Saying
+    /// "go" starts it sooner; resting or moving on cancels it.
+    private func autoStartHold(lead: String? = nil) {
+        guard let index = currentExerciseIndex, let exercise = currentExercise,
+              ExerciseKnowledge.isTimed(exercise.name), holdEndsAt == nil, restEndsAt == nil,
+              exercise.completedSetCount < exercise.targetSets else { return }
+        holdCountdownTask?.cancel()
+        if let lead, conversationActive, speaksReplies, tips != .quiet {
+            voice.speak(lead, messageId: "local-\(UUID().uuidString)")
+        }
+        holdCountdownTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            for _ in 0..<150 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
+            // Time to get down into it.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            for n in [3, 2, 1] {
+                guard !Task.isCancelled, currentExerciseIndex == index, holdEndsAt == nil, restEndsAt == nil else { return }
+                if speaksReplies, tips != .quiet, conversationActive {
+                    voice.speak("\(n)", messageId: "local-\(UUID().uuidString)")
+                } else {
+                    AudioHub.shared.play(cue: .tick)
+                }
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            guard !Task.isCancelled, currentExerciseIndex == index, holdEndsAt == nil, restEndsAt == nil else { return }
+            startHold()
+        }
     }
 
     // MARK: - Rest between sets
 
-    /// Heavy compounds get a minute and a half, everything else a minute.
-    private static func restSeconds(for exercise: ActiveWorkoutExercise) -> Int {
-        ExerciseMotion.match(exercise.name)?.isHeavy == true ? 90 : 60
-    }
 
     /// Starts the rest if there's more work after this set, and returns the
     /// words for it. Nothing if the workout is done.
@@ -1701,30 +2179,65 @@ struct CoachStageView: View {
         let moreOnThis = exercise.completedSetCount < exercise.targetSets
         let moreToCome = workout.exercises.indices.contains(index + 1)
         guard moreOnThis || moreToCome else { return "" }
-        let seconds = Self.restSeconds(for: exercise)
+        // Rest for what comes next: this lift's next set, or the next lift.
+        let restFor = moreOnThis ? exercise.name : workout.exercises[index + 1].name
+        let seconds = WorkoutCoaching.restSeconds(for: restFor, effort: moreOnThis ? lastEffort : nil)
         startRest(seconds: seconds)
-        return tips == .quiet ? "" : " Rest \(seconds == 90 ? "ninety" : "sixty") seconds."
+        return tips == .quiet ? "" : " Rest \(WorkoutCoaching.spokenDuration(seconds))."
     }
 
     private func startRest(seconds: Int) {
+        setRest(endsAt: Date().addingTimeInterval(TimeInterval(seconds)))
+    }
+
+    /// Rests until `ends`: the countdown on screen and the lock screen, a
+    /// heads-up ten seconds out, then "go" — or, for a hold, the hold
+    /// starts by itself. Timed against the clock, so a rest that ran out
+    /// while the app was in the background still ends on time.
+    private func setRest(endsAt ends: Date) {
         restTask?.cancel()
-        let ends = Date().addingTimeInterval(TimeInterval(seconds))
         restEndsAt = ends
+        RestActivity.shared.show(endsAt: ends, next: restNextLabel)
         restTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            var warned = false
+            while !Task.isCancelled, restEndsAt == ends {
+                let left = ends.timeIntervalSinceNow
+                if left <= 0 { break }
+                if !warned, left <= 10.5, left > 8, conversationActive, speaksReplies, tips == .full, !voice.isSpeaking {
+                    warned = true
+                    voice.speak("Ten seconds.", messageId: "local-\(UUID().uuidString)")
+                }
+                try? await Task.sleep(nanoseconds: UInt64(min(1, max(0.05, left)) * 1_000_000_000))
+            }
             guard !Task.isCancelled, restEndsAt == ends else { return }
             restEndsAt = nil
+            RestActivity.shared.end()
             UINotificationFeedbackGenerator().notificationOccurred(.success)
-            if conversationActive, speaksReplies, tips != .quiet {
+            if let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name), holdEndsAt == nil {
+                autoStartHold(lead: tone == .hype ? "Hold time! Get in position." : "Get in position.")
+            } else if conversationActive, speaksReplies, tips != .quiet {
                 confirm(tone == .hype ? "Go!" : "Go.")
             }
         }
+    }
+
+    /// "Squat · set 2 of 3 · 135 lb" — what's after the rest.
+    private var restNextLabel: String {
+        guard let exercise = currentExercise else { return "" }
+        let set = min(exercise.targetSets, exercise.completedSetCount + 1)
+        let weight = appModel.workingWeight(for: exercise)
+        let timed = ExerciseKnowledge.isTimed(exercise.name)
+        var parts = [Self.short(exercise.name), "Set \(set) of \(exercise.targetSets)"]
+        parts.append(timed ? "\(exercise.targetReps) s" : "\(exercise.targetReps) reps")
+        if weight > 0 { parts.append("\(LiveWorkoutCard.pounds(weight)) lb") }
+        return parts.joined(separator: " · ")
     }
 
     private func cancelRest() {
         restTask?.cancel()
         restTask = nil
         restEndsAt = nil
+        RestActivity.shared.end()
     }
 
     /// "Skip rest" / "go" / "ready" ends it; "thirty more" / "add a minute"
@@ -1735,23 +2248,24 @@ struct CoachStageView: View {
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         if says(#"\b(skip|skip rest|skip the rest|go|ready|let's go|lets go|next set|i'm ready|im ready)\b"#), t.split(separator: " ").count <= 5 {
             cancelRest()
-            confirm(tone == .hype ? "Go!" : "Go.")
+            if let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) {
+                autoStartHold(lead: "Get in position.")
+            } else {
+                confirm(tone == .hype ? "Go!" : "Go.")
+            }
+            return true
+        }
+        // "Give me two minutes" — the rest becomes that long, from now.
+        if let length = WorkoutCoaching.restLength(in: text) {
+            setRest(endsAt: Date().addingTimeInterval(TimeInterval(length)))
+            confirm("\(WorkoutCoaching.spokenDuration(length).capitalizingFirst) it is.")
             return true
         }
         if says(#"\b(more|add|extend|longer)\b"#) {
             let number = WorkoutVoice.numberWords.first { t.range(of: #"\b"# + $0.key + #"\b"#, options: .regularExpression) != nil }?.value
                 ?? Int(t.components(separatedBy: CharacterSet.decimalDigits.inverted).joined())
             let extra = says(#"\bminute\b"#) ? 60 : (number ?? 30)
-            restEndsAt = (restEndsAt ?? Date()).addingTimeInterval(TimeInterval(extra))
-            let ends = restEndsAt!
-            restTask?.cancel()
-            restTask = Task {
-                try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
-                guard !Task.isCancelled, restEndsAt == ends else { return }
-                restEndsAt = nil
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                if conversationActive, speaksReplies, tips != .quiet { confirm(tone == .hype ? "Go!" : "Go.") }
-            }
+            setRest(endsAt: (restEndsAt ?? Date()).addingTimeInterval(TimeInterval(extra)))
             confirm("\(extra) more seconds.")
             return true
         }
@@ -1823,21 +2337,9 @@ struct CoachStageView: View {
         return nil
     }
 
-    /// After a set: the fact, a word in your tone, and — with tips on and
-    /// sets left on this lift — one cue for the next.
-    private func setDoneLine(_ head: String, exerciseIndex: Int?) -> String {
-        var line = head
-        if tips != .quiet { line += " " + CoachingStyle.praise(tone) }
-        if tips == .full, let index = exerciseIndex, let exercise = appModel.activeWorkout?.exercises[index],
-           exercise.completedSetCount < exercise.targetSets,
-           let motion = ExerciseMotion.match(exercise.name) {
-            line += " Next one: " + ExerciseLesson.cue(for: motion).lowercased()
-        }
-        return line
-    }
-
     /// A short spoken acknowledgement, then straight back to listening.
     private func confirm(_ line: String) {
+        lastCoachLine = line
         // Always on screen too, so a typed "set 2 done" visibly lands.
         show(notice: line)
         if typedTurn, !conversationActive {
@@ -1931,6 +2433,7 @@ struct CoachStageView: View {
                 silentRestarts = []
                 director.rest()
             }
+            resetCoachingForWorkout()
             if let first = currentExerciseIndex { introduce(exercise: first, first: true) }
             offerVoiceIsolation()
         }
@@ -1975,7 +2478,7 @@ struct CoachStageView: View {
         Task {
             for _ in 0..<40 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
             guard currentExerciseIndex == next else { return }
-            introduce(exercise: next, first: false)
+            introduce(exercise: next, first: false, closing: previous)
         }
     }
 
@@ -2004,6 +2507,16 @@ struct CoachStageView: View {
             if speaksReplies, tips != .quiet {
                 voice.speak(line, messageId: "local-\(UUID().uuidString)")
             } else {
+                resumeListening()
+            }
+        } else if conversationActive, let cooldown = offerCooldown() {
+            // The cooldown, most important stretch first; "yes" walks you
+            // through the rest. How it felt is on screen after.
+            if speaksReplies, tips != .quiet {
+                markRestartHandled()
+                voice.speak(said + " " + cooldown, messageId: "local-\(UUID().uuidString)")
+            } else {
+                show(notice: cooldown)
                 resumeListening()
             }
         } else {
@@ -2240,13 +2753,28 @@ struct CoachStageView: View {
     /// (you asked to be shown).
     /// `replay`: you asked to hear it again — the whole thing, sets and form,
     /// whatever your tips setting.
-    private func introduce(exercise index: Int, first: Bool, teach: Bool = false, replay: Bool = false) {
+    /// `warmedUp`: the warm-up is done (or skipped); the first lift's intro
+    /// otherwise starts with one. `closing`: the lift you just finished,
+    /// closed out before this one is named.
+    private func introduce(exercise index: Int, first: Bool, teach: Bool = false, replay: Bool = false,
+                           warmedUp: Bool = false, closing previous: Int? = nil) {
         guard let workout = appModel.activeWorkout, workout.exercises.indices.contains(index) else { return }
         let exercise = workout.exercises[index]
         let motion = ExerciseMotion.match(exercise.name)
         let style = teach || replay ? CoachingStyle.Tips.full : tips
+        let timed = ExerciseKnowledge.isTimed(exercise.name)
         guard style != .quiet else {
+            if timed, !teach { autoStartHold() }
             resumeListening()
+            return
+        }
+        // Before the first lift: a short warm-up for what's planned, unless
+        // you've already lifted today.
+        if first, !teach, !replay, !warmedUp, !appModel.activeWorkoutHasProgress {
+            startGuided(.warmup, moves: WorkoutCoaching.warmup(for: workout.exercises.map(\.name)),
+                        intro: tone == .hype
+                            ? "Let's get warm first. About a minute and a half. Say skip if you're already warm."
+                            : "A quick warm-up first, about a minute and a half. Say skip if you're already warm.")
             return
         }
         var lines: [String] = []
@@ -2256,12 +2784,23 @@ struct CoachStageView: View {
             let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
             let side = WorkoutVoice.isEachSide(exercise.name) ? " each side" : ""
-            if ExerciseKnowledge.isTimed(exercise.name) {
-                lines.append("\(lead), \(exercise.name). \(exercise.targetSets) holds of \(exercise.targetReps) seconds\(side)\(load). Say go when you're set.")
+            if timed {
+                lines.append("\(lead), \(exercise.name). \(exercise.targetSets) holds of \(exercise.targetReps) seconds\(side)\(load). I'll start the clock once you're in position.")
             } else {
                 lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(side)\(load).")
             }
             cues.append(.hold(0))
+            // Close out the lift you just finished: well done, it's done,
+            // what to stretch so it's less sore tomorrow. Then next up.
+            if let previous, workout.exercises.indices.contains(previous) {
+                let done = workout.exercises[previous]
+                if done.completedSetCount > 0 {
+                    lines.insert(WorkoutCoaching.closeOut(exerciseName: done.name, short: Self.short(done.name).lowercased(),
+                                                          hype: tone == .hype, sayStretches: style == .full),
+                                 at: 0)
+                    cues.insert(.hold(0), at: 0)
+                }
+            }
         }
         if style == .full, let motion {
             for beat in ExerciseLesson.beats(for: motion) {
@@ -2286,6 +2825,7 @@ struct CoachStageView: View {
             markRestartHandled()
             voiceInput.stop()
         }
+        if timed, !teach { autoStartHold() }
         if speaksReplies {
             voice.speak(lines: lines, messageId: plan.id)
             try? AudioHub.shared.start()
@@ -2381,6 +2921,10 @@ struct CoachStageView: View {
 
     private func endConversation() {
         cancelRest()
+        guidedTask?.cancel()
+        guidedTask = nil
+        guided = nil
+        cooldownOffer = nil
         interruptedSpeech = nil
         resumeOffered = false
         swapChoice = nil

@@ -4,9 +4,9 @@ import SwiftUI
 /// brick/ochre selection, sticky save bar. No stock Form chrome.
 /// Built to docs/design/myo-you-tab-layout-spec.md.
 struct PreferencesView: View {
-    /// Live voice (beta): talk to the coach over Gemini Live outside a
-    /// workout. Off by default; the regular coach is unchanged.
-    @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = false
+    /// Live voice: talk to the coach over Gemini Live. On by default (it's
+    /// the fast voice); off falls back to the regular coach.
+    @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = true
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
     /// Training-day nudges — on the phone, not part of the saved profile.
@@ -394,11 +394,11 @@ struct PreferencesView: View {
                 .pickerStyle(.menu)
             }
 
-            MyoValueRow(label: "Live voice (beta)") {
-                Toggle("Live voice (beta)", isOn: $liveVoiceBeta).labelsHidden()
+            MyoValueRow(label: "Live voice") {
+                Toggle("Live voice", isOn: $liveVoiceBeta).labelsHidden()
             }
             // Turning it on is the consent, so say what it does first.
-            Text("Talk in real time. While it's on, your voice goes straight from your phone to Google's Gemini to answer you; we don't keep the audio.")
+            Text("Talk in real time. While it's on (the default), your voice goes straight from your phone to Google's Gemini to answer you; we don't keep the audio.")
                 .font(.caption)
                 .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)

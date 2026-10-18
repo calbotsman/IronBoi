@@ -26,7 +26,8 @@ final class LiveVoiceSession: ObservableObject {
     let agentMeter = VoiceMeter()
 
     static let defaultsKey = "liveVoiceBeta"
-    static var enabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
+    /// On unless you've turned it off: it's the fast voice (2026-10-18).
+    static var enabled: Bool { UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true }
 
     var isActive: Bool { state != .idle }
 
