@@ -44,6 +44,8 @@ final class LiveVoiceSession: ObservableObject {
     /// The provider of the connection that's open now.
     private(set) var activeProvider: Provider = .gemini
     private var openAI: Bool { activeProvider == .openai }
+    /// OpenAI tool calls still running this turn.
+    private var openAIToolsPending = 0
 
     struct Ticket: Decodable { let token: String; let model: String; let provider: String? }
     struct TurnResult: Decodable { let saved: Bool; let stop: Bool; let line: String? }
@@ -334,13 +336,19 @@ final class LiveVoiceSession: ObservableObject {
             guard let name = message["name"] as? String, let callId = message["call_id"] as? String else { return }
             let raw = (message["arguments"] as? String)?.data(using: .utf8)
             let args = raw.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            openAIToolsPending += 1
             runTool(name: name, args: args) { [weak self] response in
-                guard let self, let socket = self.socket else { return }
+                guard let self else { return }
+                self.openAIToolsPending = max(0, self.openAIToolsPending - 1)
+                guard let socket = self.socket else { return }
                 let output = (try? Self.json(response)) ?? "{}"
                 let item: [String: Any] = ["type": "conversation.item.create",
                                            "item": ["type": "function_call_output", "call_id": callId, "output": output]]
                 if let json = try? Self.json(item) { try? await socket.send(.string(json)) }
-                if let json = try? Self.json(["type": "response.create"]) { try? await socket.send(.string(json)) }
+                // One reply once every tool in the turn has answered.
+                if self.openAIToolsPending == 0, let json = try? Self.json(["type": "response.create"]) {
+                    try? await socket.send(.string(json))
+                }
             }
         case "response.done":
             coachTurnDone = true

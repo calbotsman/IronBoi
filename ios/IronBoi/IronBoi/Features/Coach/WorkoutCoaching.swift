@@ -201,6 +201,34 @@ enum WorkoutCoaching {
         return "\(minutes) \(s)"
     }
 
+    /// The first number in what you said: digits, or words up to ninety-nine
+    /// ("forty five", "ninety", "two").
+    static func number(in text: String) -> Int? {
+        let t = text.lowercased().replacingOccurrences(of: "-", with: " ")
+        if let digits = t.range(of: #"\d+"#, options: .regularExpression) { return Int(t[digits]) }
+        let tens = ["twenty": 20, "thirty": 30, "forty": 40, "fourty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90]
+        let words = t.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+        for (i, word) in words.enumerated() {
+            if let ten = tens[word] {
+                if i + 1 < words.count, let unit = WorkoutVoice.numberWords[words[i + 1]], unit < 10 { return ten + unit }
+                return ten
+            }
+            if let n = WorkoutVoice.numberWords[word] { return n }
+            if word == "a" || word == "an", i + 1 < words.count, words[i + 1].hasPrefix("minute") { return 1 }
+        }
+        return nil
+    }
+
+    /// "Thirty more", "add two minutes", "another minute" → seconds to add.
+    static func restExtension(in text: String) -> Int? {
+        let t = text.lowercased()
+        guard t.range(of: #"\b(more|add|extend|longer|another|extra)\b"#, options: .regularExpression) != nil else { return nil }
+        let minutes = t.range(of: #"\bminutes?\b"#, options: .regularExpression) != nil
+        let n = number(in: t) ?? (minutes ? 1 : 30)
+        let seconds = minutes ? n * 60 : n
+        return (5...600).contains(seconds) ? seconds : nil
+    }
+
     /// "Give me two minutes", "rest 90 seconds", "make it a minute" —
     /// the rest set to a length (not extended by it).
     static func restLength(in text: String) -> Int? {
@@ -210,9 +238,7 @@ enum WorkoutCoaching {
         let number: Int? = {
             if t.contains("a minute and a half") || t.contains("minute and a half") { return 90 }
             if t.range(of: #"\b(a|one) minute\b"#, options: .regularExpression) != nil { return 60 }
-            let n = WorkoutVoice.numberWords.first { t.range(of: #"\b"# + $0.key + #"\b"#, options: .regularExpression) != nil }?.value
-                ?? Int(t.components(separatedBy: CharacterSet.decimalDigits.inverted).first { !$0.isEmpty } ?? "")
-            guard let n else { return nil }
+            guard let n = Self.number(in: t) else { return nil }
             if t.range(of: #"\bminutes?\b"#, options: .regularExpression) != nil { return n * 60 }
             if t.range(of: #"\b(seconds?|secs?)\b"#, options: .regularExpression) != nil { return n }
             return nil
@@ -253,6 +279,18 @@ enum WorkoutCoaching {
         if says(#"\b(heavy|weight|too much|lighter|drop it|strength|can't lift|form (is )?(breaking|going))\b"#) { return .tooHeavy }
         if says(#"\b(tired|exhausted|gassed|cooked|spent|done|fatigued|no energy|wiped|skip( it)?|move on|next)\b"#) { return .tired }
         return nil
+    }
+
+    /// Said unprompted, only clear pain counts: "my knee hurts", "that
+    /// hurt my back", "I tweaked something" — not "pull-ups", "sore
+    /// tomorrow", or "that's not right" about a count.
+    static func saysPain(_ text: String) -> Bool {
+        let t = text.lowercased().replacingOccurrences(of: "’", with: "'")
+        guard t.range(of: #"\b(no|not|doesn't|does not|didn't|nothing) (hurt|hurts|pain)"#, options: .regularExpression) == nil,
+              !t.contains("tomorrow") else { return false }
+        return t.range(of: #"\b(hurts|hurting|it hurt|that hurt|this hurt|painful|in pain|sharp pain|pain in|injured|tweaked|pulled (my|a|something)|strained|twinged|felt a pop|something popped)\b"#,
+                       options: .regularExpression) != nil
+            || (bodyPart(in: t) != nil && t.range(of: #"\b(pain|aches?|aching|pinch(ing)?|killing me)\b"#, options: .regularExpression) != nil)
     }
 
     static func bodyPart(in t: String) -> String? {

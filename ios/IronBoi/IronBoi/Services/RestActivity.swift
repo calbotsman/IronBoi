@@ -24,6 +24,7 @@ final class RestActivity {
     }
 
     func end() {
+        nudgeGeneration += 1
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.nudgeId])
         guard let activity else { return }
         self.activity = nil
@@ -31,6 +32,9 @@ final class RestActivity {
     }
 
     private static let nudgeId = "rest-over"
+    /// Bumped on every show/end, so a settings check that comes back late
+    /// can't schedule a nudge for a rest that's already over.
+    private var nudgeGeneration = 0
 
     /// A backstop for when iOS has paused the app anyway: a buzz when the
     /// rest is over. Only if you've already allowed notifications (training
@@ -38,18 +42,24 @@ final class RestActivity {
     private func scheduleNudge(at endsAt: Date, next: String) {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.nudgeId])
-        let seconds = endsAt.timeIntervalSinceNow
-        guard seconds > 1 else { return }
+        nudgeGeneration += 1
+        let generation = nudgeGeneration
+        guard endsAt.timeIntervalSinceNow > 1 else { return }
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else { return }
-            let content = UNMutableNotificationContent()
-            content.title = "Rest's over"
-            content.body = next.isEmpty ? "Next set." : "Next: \(next)"
-            content.sound = .default
-            content.interruptionLevel = .timeSensitive
-            let request = UNNotificationRequest(identifier: Self.nudgeId, content: content,
-                                                trigger: UNTimeIntervalNotificationTrigger(timeInterval: seconds, repeats: false))
-            center.add(request)
+            Task { @MainActor in
+                guard generation == self.nudgeGeneration else { return }
+                let seconds = endsAt.timeIntervalSinceNow
+                guard seconds > 1 else { return }
+                let content = UNMutableNotificationContent()
+                content.title = "Rest's over"
+                content.body = next.isEmpty ? "Next set." : "Next: \(next)"
+                content.sound = .default
+                content.interruptionLevel = .timeSensitive
+                let request = UNNotificationRequest(identifier: Self.nudgeId, content: content,
+                                                    trigger: UNTimeIntervalNotificationTrigger(timeInterval: seconds, repeats: false))
+                center.add(request)
+            }
         }
     }
 }
