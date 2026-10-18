@@ -148,8 +148,8 @@ struct TodayWorkoutCard: View {
             Spacer(minLength: MyoTheme.Spacing.sm)
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text("\(exercise.sets) × \(exercise.reps)")
-                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                Text(WorkoutCoaching.setsOf(exercise.sets, exercise.reps, timed: ExerciseKnowledge.isTimed(exercise.name)))
+                    .font(.system(.body).weight(.semibold))
                     .foregroundStyle(MyoColor.Text.primary.color)
                 Text(exercise.weight > 0 ? "\(Self.pounds(exercise.weight)) lb" : "bodyweight")
                     .font(.system(.caption, design: .monospaced))

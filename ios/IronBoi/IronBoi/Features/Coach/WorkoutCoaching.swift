@@ -6,6 +6,12 @@ import Foundation
 /// with the stretches that matter most for what you just did.
 enum WorkoutCoaching {
 
+    /// "3 sets of 10", "3 sets of 30 s", "1 set of 8" — spelled out, so
+    /// nobody has to decode "3 × 10".
+    static func setsOf(_ sets: Int, _ reps: Int, timed: Bool) -> String {
+        "\(sets) \(sets == 1 ? "set" : "sets") of \(reps)\(timed ? " s" : "")"
+    }
+
     // MARK: - Stretches and warm-ups
 
     struct Move: Equatable {

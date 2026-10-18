@@ -215,8 +215,8 @@ struct LiveWorkoutCard: View {
                         .foregroundStyle(exercise.exerciseDone ? MyoColor.Text.tertiary.color : MyoColor.Text.primary.color)
                         .strikethrough(exercise.exerciseDone, color: MyoColor.Text.tertiary.color)
                         .lineLimit(2)
-                    Text("\(exercise.targetSets) × \(exercise.targetReps)\(ExerciseKnowledge.isTimed(exercise.name) ? " s" : "")")
-                        .font(.system(.caption, design: .monospaced))
+                    Text(WorkoutCoaching.setsOf(exercise.targetSets, exercise.targetReps, timed: ExerciseKnowledge.isTimed(exercise.name)))
+                        .font(.system(.caption))
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                 }
                 .contentShape(Rectangle())

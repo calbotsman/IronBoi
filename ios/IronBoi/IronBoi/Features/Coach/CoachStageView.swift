@@ -23,6 +23,7 @@ struct CoachStageView: View {
     var typed: TypedLine? = nil
     @Binding var showKeyboard: Bool
 
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
     /// How much Coach says, and how — set by what you tell it.
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
@@ -323,7 +324,9 @@ struct CoachStageView: View {
         // Audio was rebuilt (AirPods in/out, a call ended): listen again so
         // the mic matches the new route.
         .onReceive(NotificationCenter.default.publisher(for: AudioHub.resetNotification)) { _ in
-            guard conversationActive, voiceInput.isListening else { return }
+            // Mid-workout the mic comes back after a call or Siri even if
+            // it had stopped, so the coach is still there when you are.
+            guard conversationActive, voiceInput.isListening || appModel.activeWorkout != nil, !live.isActive else { return }
             markRestartHandled()
             voiceInput.stop()
             resumeListening()
@@ -651,6 +654,22 @@ struct CoachStageView: View {
                     .onAppear { stageSize = geo.size }
                     .onChange(of: geo.size) { _, size in stageSize = size }
             }
+        }
+        .onChange(of: scenePhase) { _, phase in scenePhaseChanged(phase) }
+    }
+
+    /// Locked, or in another app: the workout keeps going (the audio
+    /// session carries the app). Coming back, pick the mic up if it dropped
+    /// while away.
+    private func scenePhaseChanged(_ phase: ScenePhase) {
+        guard appModel.activeWorkout != nil || guided != nil, conversationActive, !live.isActive else { return }
+        switch phase {
+        case .background:
+            try? AudioHub.shared.start()
+        case .active:
+            if !voiceInput.isListening, !voice.isSpeaking { resumeListening() }
+        default:
+            break
         }
     }
 
