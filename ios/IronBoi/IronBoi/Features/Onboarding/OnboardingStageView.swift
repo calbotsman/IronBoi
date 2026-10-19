@@ -47,6 +47,8 @@ struct OnboardingStageView: View {
     @State private var about = AboutYou()
     @State private var safety = SafetyAnswers()
     @State private var activities: Set<String> = []
+    /// The goals picked so far (labels), before Continue.
+    @State private var goalPicks: Set<String> = []
     /// Said before the next question: an honest word about what MYO coaches.
     @State private var aside: String?
     @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
@@ -166,7 +168,7 @@ struct OnboardingStageView: View {
         .onAppear {
             voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
             // Answers here are lists and descriptions: don't cut them off.
-            voiceInput.extraPause = 1_200_000_000
+            voiceInput.extraPause = 700_000_000
             voiceInput.onPause = { text in
                 voiceInput.release()
                 answerInWords(text, mode: .dictation)
@@ -179,6 +181,18 @@ struct OnboardingStageView: View {
             voice.stop()
             voiceInput.release()
         }
+        // Gear ticks as you name it, not after.
+        .onChange(of: voiceInput.transcript) { _, heard in
+            if case .gear = step?.kind {
+                let named = GearCard.heard(in: heard)
+                if !named.isEmpty { gear.formUnion(named); if gear.count > 1 { gear.subtract(GearCard.exclusive) } }
+            } else if case .multi(let options) = step?.kind {
+                let t = heard.lowercased()
+                for option in options where Self.goalWords[option.label].map({ t.range(of: $0, options: .regularExpression) != nil }) ?? false {
+                    goalPicks.insert(option.label)
+                }
+            }
+        }
         .onChange(of: appModel.onboardingMissingFields) { _, _ in serverMoved() }
         .onChange(of: appModel.onboardingStatus) { _, _ in serverMoved() }
         .onChange(of: appModel.pendingProgramProposal?.proposalId) { _, id in
@@ -189,7 +203,7 @@ struct OnboardingStageView: View {
         // turns it back into the blob, which would hide all of that.)
         .onChange(of: stepIndex) { _, step in
             Task {
-                try? await Task.sleep(nanoseconds: 1_300_000_000)
+                try? await Task.sleep(nanoseconds: 700_000_000)
                 if stepIndex == step { askCurrentQuestion() }
             }
         }
@@ -380,12 +394,13 @@ struct OnboardingStageView: View {
                     answer(["equipment": list.map(\.key)], chip: list.map(\.label).joined(separator: " · "),
                            content: list.map(\.label).joined(separator: ", "))
                 }
+            case .multi(let options):
+                MultiChoiceCard(options: options, selected: $goalPicks) {
+                    answerGoals(options)
+                }
             case .activities:
                 ActivitiesCard(selected: $activities) {
                     let picked = ActivitiesCard.options.filter { activities.contains($0.key) }
-                    if !activities.isDisjoint(with: ["run", "yoga", "sport"]) {
-                        aside = "Good to know. For now I build strength plans, with mobility and easy cardio in them. Running and yoga plans are coming. "
-                    }
                     answer(["activities": picked.map(\.key)], chip: picked.map(\.label).joined(separator: " · "),
                            content: picked.map(\.label).joined(separator: ", "))
                 }
@@ -473,6 +488,15 @@ struct OnboardingStageView: View {
         advance()
     }
 
+    /// Goals, tapped or said: every goal picked, as one answer.
+    private func answerGoals(_ options: [Step.Option]) {
+        let picked = options.filter { goalPicks.contains($0.label) }
+        guard !picked.isEmpty else { return }
+        let goals = picked.flatMap { ($0.answer["goals"] as? [String]) ?? [] }
+        answer(["goals": goals], chip: picked.map(\.chip).joined(separator: " · "),
+               content: picked.map(\.label).joined(separator: ", "))
+    }
+
     /// "Make it yours" answers live on this phone, not the server.
     private func finishLocal(_ step: Step, chip: String) {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -487,7 +511,13 @@ struct OnboardingStageView: View {
     /// it understood.
     private func answerInWords(_ text: String, mode: CoachInputMode) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, let step else { return }
+        guard !trimmed.isEmpty else { return }
+        // Talking about the week on screen: the plan is rebuilt from it.
+        if isWeek, appModel.pendingProgramProposal != nil {
+            reviseWeek(trimmed, mode: mode)
+            return
+        }
+        guard let step else { return }
         if step.fields.isEmpty {
             notice = "Tap your pick below."
             return
@@ -496,6 +526,9 @@ struct OnboardingStageView: View {
             notice = "Tap your answers below, so nothing gets misheard."
             return
         }
+        // Understood right here: move on at once, like a tap (the server
+        // still gets the words). Only what can't be read here waits.
+        if answerLocally(trimmed, step: step) { return }
         voice.stop()
         notice = nil
         awaitingParse = step.field
@@ -518,6 +551,67 @@ struct OnboardingStageView: View {
             }
         }
     }
+
+    /// "Tuesdays instead, and only 40 minutes": the server reads the changes,
+    /// rebuilds the week, and the coach says what changed (or that it'll
+    /// remember it, when nothing in the plan needed to change).
+    private func reviseWeek(_ text: String, mode: CoachInputMode) {
+        voice.stop()
+        notice = nil
+        awaitingParse = "week"
+        Task {
+            let reply = await appModel.sendOnboardingAnswer(text, inputMode: mode)
+            awaitingParse = nil
+            // The new week arriving shouldn't re-read "Here's your week".
+            lastSpokenStep = stepIndex
+            let line = reply ?? "Got it, I'll keep that in mind."
+            notice = line
+            speak(line)
+        }
+    }
+
+    /// Goals, gear, and one-of choices said out loud: read on the phone, so
+    /// the next question comes straight away.
+    private func answerLocally(_ text: String, step: Step) -> Bool {
+        let t = text.lowercased()
+        switch step.kind {
+        case .multi(let options):
+            let picked = options.filter { Self.goalWords[$0.label].map { t.range(of: $0, options: .regularExpression) != nil } ?? false }
+            guard !picked.isEmpty else { return false }
+            goalPicks = Set(picked.map(\.label))
+            answerGoals(options)
+            return true
+        case .gear:
+            let heard = GearCard.heard(in: t)
+            guard !heard.isEmpty else { return false }
+            gear = heard
+            let list = GearCard.options.filter { heard.contains($0.key) }
+            answer(["equipment": list.map(\.key)], chip: list.map(\.label).joined(separator: " · "),
+                   content: text)
+            return true
+        case .choices(let options) where step.field == "trainingExperience":
+            let index: Int? = {
+                if t.range(of: #"\b(never|not really|brand new|first time|no experience)\b"#, options: .regularExpression) != nil { return 0 }
+                if t.range(of: #"\b(serious(ly)?|advanced|competit\w*|for years and years|decade)\b"#, options: .regularExpression) != nil { return 3 }
+                if t.range(of: #"\b(on and off|off and on|years|a while|used to)\b"#, options: .regularExpression) != nil { return 2 }
+                if t.range(of: #"\b(a little|a bit|some|not much|beginner|few months)\b"#, options: .regularExpression) != nil { return 1 }
+                return nil
+            }()
+            guard let index, options.indices.contains(index) else { return false }
+            answer(options[index].answer, chip: options[index].chip, content: text)
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static let goalWords: [String: String] = [
+        "Build muscle": #"muscle|bigger|size|bulk|hypertrophy|gain"#,
+        "Lose fat": #"fat|lean|lose|weight loss|cut|slim|tone"#,
+        "Get stronger": #"strong|strength|lift more|heavier"#,
+        "Feel fitter": #"fit|fitter|health|energy|feel better|general"#,
+        "Get back into it": #"back into|get back|return|again|restart|been a while"#,
+    ]
 
     private func enqueue(_ content: String, structured: [String: Any]?, mode: CoachInputMode, then: (@MainActor () -> Void)? = nil) {
         inFlight += 1
@@ -583,6 +677,9 @@ struct OnboardingStageView: View {
         }
         if let saved = draft["equipment"] as? [String] { gear = Set(saved) }
         if let saved = draft["activities"] as? [String] { activities = Set(saved) }
+        if let saved = draft["goals"] as? [String], case .multi(let options)? = Step.all.first(where: { $0.field == "goals" })?.kind {
+            goalPicks = Set(options.filter { (($0.answer["goals"] as? [String]) ?? []).contains(where: saved.contains) }.map(\.label))
+        }
         about.adopt(draft)
         safety.adopt(draft)
         syncStep()
@@ -616,13 +713,13 @@ struct OnboardingStageView: View {
             guard let proposal = appModel.pendingProgramProposal else { return }
             lastSpokenStep = stepIndex
             let days = proposal.workoutDays.filter { !$0.exerciseNames.isEmpty }.map { Self.dayName($0.dayKey) }
-            speak("Here's your week: \(Self.list(days)). Tap Start with this, or tap your answers up top to change one.")
+            speak("Here's your week: \(Self.list(days)). If anything's off, just tell me, like \"Tuesdays instead\" or \"my knee's bad\", and I'll change it. Otherwise, tap Start.")
             return
         }
         guard let step else { return }
         lastSpokenStep = stepIndex
         let intro = stepIndex == 0 && chips.isEmpty
-            ? "Hi, I'm your coach. A few quick questions and I'll build your first week. "
+            ? "Hey, I'm your coach. Give me a few quick answers, and I'll build your first week around you. "
             : ""
         speak((aside ?? "") + intro + step.question)
         aside = nil
@@ -693,6 +790,8 @@ private struct Step {
 
     enum Kind {
         case choices([Option])
+        /// Pick any number, then Continue.
+        case multi([Option])
         case schedule
         case gear
         case aboutYou
@@ -755,6 +854,11 @@ private struct Step {
             guard let days = value as? [String], !days.isEmpty else { return nil }
             let time = (draft["preferredTime"] as? String).map { " · \($0)" } ?? ""
             return days.joined(separator: " ") + time
+        case .multi(let options):
+            guard let picked = value as? [Any], !picked.isEmpty else { return nil }
+            let keys = picked.map { "\($0)" }
+            let chips = options.filter { option in ((option.answer[field] as? [String]) ?? []).contains(where: keys.contains) }.map(\.chip)
+            return chips.isEmpty ? keys.joined(separator: ", ") : chips.joined(separator: " · ")
         case .choices(let options):
             if let match = options.first(where: { option in
                 option.answer[field].map(Self.normalized) == Self.normalized(value)
@@ -777,27 +881,27 @@ private struct Step {
     }
 
     static let all: [Step] = [
-        Step(field: "goals", question: "What do you want from training right now?", kind: .choices([
+        Step(field: "goals", question: "So, what are you after right now? Pick as many as you like.", kind: .multi([
             Option(label: "Build muscle", chip: "Build muscle", answer: ["goals": ["muscle_gain"]]),
             Option(label: "Lose fat", chip: "Lose fat", answer: ["goals": ["fat_loss"]]),
             Option(label: "Get stronger", chip: "Get stronger", answer: ["goals": ["strength"]]),
             Option(label: "Feel fitter", chip: "Feel fitter", answer: ["goals": ["general_fitness"]]),
             Option(label: "Get back into it", chip: "Getting back into it", answer: ["goals": ["return_to_training"]]),
         ])),
-        Step(field: "activities", question: "What do you like to do, or want to try? Pick any.", kind: .activities),
-        Step(field: "trainingExperience", question: "How much have you trained before?", kind: .choices([
+        Step(field: "activities", question: "Nice. And what do you enjoy doing, or want to try? Pick any.", kind: .activities),
+        Step(field: "trainingExperience", question: "How much training have you done before? No wrong answer.", kind: .choices([
             Option(label: "Never really", chip: "New to this", answer: ["trainingExperience": "new"]),
             Option(label: "A little", chip: "A little training", answer: ["trainingExperience": "beginner"]),
             Option(label: "On and off for years", chip: "Trained before", answer: ["trainingExperience": "intermediate"]),
             Option(label: "Seriously, for years", chip: "Experienced", answer: ["trainingExperience": "advanced"]),
         ])),
-        Step(field: "equipment", question: "What do you have to train with? Pick everything.", kind: .gear),
-        Step(field: "preferredDays", question: "Which days work, and what time?", kind: .schedule),
-        Step(field: "ageYears", question: "A bit about you.", kind: .aboutYou),
+        Step(field: "equipment", question: "What have you got to train with? Just name it all.", kind: .gear),
+        Step(field: "preferredDays", question: "Which days work for you, and roughly what time?", kind: .schedule),
+        Step(field: "ageYears", question: "Now a little about you.", kind: .aboutYou),
         Step(field: "injuriesOrLimitations",
-             question: "Four quick health questions, so I keep you safe.",
+             question: "Four quick health questions, just so I keep you safe.",
              kind: .safety),
-        Step(field: "customize", question: "Now make me yours. Pick my color.", kind: .customize),
+        Step(field: "customize", question: "Okay, now make me yours. Pick my color.", kind: .customize),
         Step(field: "voice", question: "Last thing: how should I sound, and how should I coach you?", kind: .voice),
     ]
 }
@@ -839,6 +943,40 @@ private struct ChoicesCard: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+}
+
+/// Several answers to one question: tap all that apply, then Continue.
+private struct MultiChoiceCard: View {
+    let options: [Step.Option]
+    @Binding var selected: Set<String>
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            FlowRow(spacing: 8) {
+                ForEach(options) { option in
+                    let on = selected.contains(option.label)
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        if on { selected.remove(option.label) } else { selected.insert(option.label) }
+                    } label: {
+                        Text(option.label)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(on ? MyoTheme.Colors.ink : MyoColor.Text.primary.color)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 46)
+                            .contentShape(Capsule())
+                            .myoGlass(tint: on ? MyoTheme.Colors.coachAmber.opacity(0.45) : nil)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+            }
+            DoneButton(title: "Continue", enabled: !selected.isEmpty, action: onDone)
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .myoCard()
     }
 }
 
@@ -1048,9 +1186,30 @@ private struct GearCard: View {
         Item(key: "bench", label: "Bench"),
         Item(key: "pull-up bar", label: "Pull-up bar"),
         Item(key: "bands", label: "Bands"),
+        Item(key: "medicine ball", label: "Medicine ball"),
         Item(key: "bodyweight", label: "Just my body"),
     ]
-    private static let exclusive: Set<String> = ["full gym", "bodyweight"]
+
+    /// What's named in something said, as it's said: "kettlebells,
+    /// dumbbells, bands, medicine ball" ticks each one as you go.
+    static func heard(in text: String) -> Set<String> {
+        let t = text.lowercased()
+        func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        var found = Set<String>()
+        if says(#"\b(full|commercial|public)? ?gym\b"#), !says(#"home gym"#) { found.insert("full gym") }
+        if says(#"dumb ?bells?|\bdbs?\b"#) { found.insert("dumbbells") }
+        if says(#"kettle ?bells?|\bkbs?\b"#) { found.insert("kettlebells") }
+        if says(#"barbells?|squat rack|power rack"#) { found.insert("barbell") }
+        if says(#"\bbench"#) { found.insert("bench") }
+        if says(#"pull[- ]?up|chin[- ]?up"#) { found.insert("pull-up bar") }
+        if says(#"\bbands?\b|resistance band"#) { found.insert("bands") }
+        if says(#"med(icine)? ?balls?|\bmed ball"#) { found.insert("medicine ball") }
+        if says(#"home gym"#) { found.formUnion(["dumbbells", "barbell", "bench", "pull-up bar", "kettlebells"]) }
+        if found.isEmpty, says(#"\b(nothing|no equipment|just (my )?body|bodyweight|body weight)\b"#) { found.insert("bodyweight") }
+        if found.count > 1 { found.subtract(exclusive) }
+        return found
+    }
+    static let exclusive: Set<String> = ["full gym", "bodyweight"]
 
     @Binding var selected: Set<String>
     let onDone: () -> Void
@@ -1095,7 +1254,12 @@ private struct GearCard: View {
 private struct AboutYou {
     var age = 30
     var sex: String?
-    var metric = Locale.current.measurementSystem != .us
+    /// Pounds and feet in the US (and Liberia, Myanmar); kg and cm
+    /// everywhere else — from the phone's region, and switchable.
+    var metric: Bool = {
+        if let region = Locale.current.region?.identifier, ["US", "LR", "MM"].contains(region) { return false }
+        return Locale.current.measurementSystem != .us
+    }()
     var heightCm = 175
     var weightKg = 75.0
 
@@ -1200,9 +1364,13 @@ private struct AboutYouCard: View {
                 }
             }
             HStack {
-                Button(about.metric ? "Use lb and ft" : "Use kg and cm") { about.metric.toggle() }
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(MyoColor.Text.secondary.color)
+                // Shows what's in use, not what tapping switches to.
+                Picker("Units", selection: $about.metric) {
+                    Text("lb · ft").tag(false)
+                    Text("kg · cm").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 150)
                 Spacer()
                 Text("MYO is for adults, 18 and up")
                     .font(.caption)

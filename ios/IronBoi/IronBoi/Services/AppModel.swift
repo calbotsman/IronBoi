@@ -514,29 +514,37 @@ final class AppModel: NSObject, ObservableObject {
         selectedTab = .coach
     }
 
+    /// Returns the coach's reply when the answer changed the drafted week.
+    @discardableResult
     func sendOnboardingAnswer(
         _ content: String,
         inputMode: CoachInputMode,
         structuredAnswer: [String: Any]? = nil
-    ) async {
+    ) async -> String? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || structuredAnswer?.isEmpty == false else { return }
-        guard !isOnboardingBusy else { return }
+        guard !trimmed.isEmpty || structuredAnswer?.isEmpty == false else { return nil }
+        guard !isOnboardingBusy else { return nil }
 
         isOnboardingBusy = true
         defer { isOnboardingBusy = false }
 
+        struct Reply: Decodable {
+            struct Revision: Decodable { let reply: String }
+            let revision: Revision?
+        }
         do {
             let now = Self.isoString(from: Date())
-            try await callCallable("sendOnboardingAnswer", data: [
+            let result: Reply = try await callCallable("sendOnboardingAnswer", data: [
                 "messageId": "ios_onboarding_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
                 "timestamp": now,
                 "inputMode": inputMode.rawValue,
                 "structuredAnswer": structuredAnswer ?? [:],
             ])
+            return result.revision?.reply
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 

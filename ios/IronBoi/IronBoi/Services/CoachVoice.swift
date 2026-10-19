@@ -71,6 +71,10 @@ final class CoachVoice: NSObject, ObservableObject {
     }
 
     private func play(_ chunks: [String], messageId: String) {
+        // A chunk of only punctuation is "too small" for the server, and
+        // that error used to drop the rest of the reply to the robot voice.
+        let chunks = chunks.filter { $0.rangeOfCharacter(from: .alphanumerics) != nil }
+        guard !chunks.isEmpty else { return }
         let spoken = chunks.joined(separator: " ")
         stop()
         spokenText = spoken
@@ -102,25 +106,41 @@ final class CoachVoice: NSObject, ObservableObject {
             guard let self else { return }
             do {
                 try self.hub.start()
-                self.installMeterTap()
             } catch {
-                self.speakOnDevice(spoken)
-                return
+                // The engine wouldn't start (often -50 after a route change):
+                // rebuild it once rather than fall back to the robot voice.
+                AudioHub.log("voice: engine wouldn't start, rebuilding")
+                self.hub.recover()
+                do { try self.hub.start() } catch {
+                    self.speakOnDevice(spoken)
+                    return
+                }
             }
-            var next: Task<Data, Error>? = Task { try await fetchAudio(chunks[0]) }
+            self.installMeterTap()
+            // Every chunk is fetched at once, so the gaps between sentences
+            // are just playback, never a download.
+            func fetch(_ text: String) -> Task<Data, Error> {
+                Task {
+                    do { return try await fetchAudio(text) } catch {
+                        // One retry: a dropped connection mid-sentence
+                        // shouldn't switch voices.
+                        try await Task.sleep(nanoseconds: 350_000_000)
+                        return try await fetchAudio(text)
+                    }
+                }
+            }
+            let pending = chunks.map(fetch)
             for (index, chunk) in chunks.enumerated() {
-                guard gen == self.generation, let pending = next else { return }
+                guard gen == self.generation else { pending.forEach { $0.cancel() }; return }
                 let buffer: AVAudioPCMBuffer
                 do {
-                    buffer = try AudioHub.buffer(fromWAV: try await pending.value)
+                    buffer = try AudioHub.buffer(fromWAV: try await pending[index].value)
                 } catch {
                     guard gen == self.generation else { return }
-                    AudioHub.log("voice fetch failed, on-device fallback: \(error.localizedDescription)")
+                    AudioHub.log("voice fetch failed twice, on-device fallback: \(error.localizedDescription)")
                     self.speakOnDevice(chunks[index...].joined(separator: " "))
                     return
                 }
-                // Download the next chunk while this one plays.
-                next = index + 1 < chunks.count ? Task { try await fetchAudio(chunks[index + 1]) } : nil
                 guard gen == self.generation else { return }
                 // Breathe like a person: in before a real sentence (not a
                 // one-word "Go."), and now and then between longer ones,
@@ -129,7 +149,7 @@ final class CoachVoice: NSObject, ObservableObject {
                     await self.hub.play(breath)
                     guard gen == self.generation else { return }
                 } else if index > 0 {
-                    try? await Task.sleep(nanoseconds: UInt64.random(in: 60_000_000...220_000_000))
+                    try? await Task.sleep(nanoseconds: UInt64.random(in: 30_000_000...110_000_000))
                     guard gen == self.generation else { return }
                 }
                 self.caption = chunk

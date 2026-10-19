@@ -645,6 +645,23 @@ final class LiveVoiceSession: ObservableObject {
 
     // MARK: - The app talking to the coach
 
+    /// The phone is about to say an app line itself ("Set 2 done, rest
+    /// ninety seconds"): live goes quiet for about as long as that takes —
+    /// anything it was saying is dropped — and is told what was said.
+    private var quietUntil = Date.distantPast
+    func yieldTo(_ line: String) {
+        let seconds = min(14, 1.0 + Double(line.split(separator: " ").count) * 0.4)
+        quietUntil = Date().addingTimeInterval(seconds)
+        if state == .speaking || buffersPlaying > 0 {
+            hub.stopPlayback()
+            buffersPlaying = 0
+            agentMeter.reset()
+            uplink.coachSpeaking = false
+            if state == .speaking { state = .listening }
+        }
+        sendClientTurn("[app] The app just said this to them out loud, in your voice: \"\(line)\" Don't repeat it.", respond: false)
+    }
+
     /// Something the coach should know, without answering it ("[app] set 2
     /// logged"). It stays quiet and remembers.
     func note(_ text: String) {
@@ -736,7 +753,7 @@ final class LiveVoiceSession: ObservableObject {
     private func play(_ buffer: AVAudioPCMBuffer) {
         // You're counting a set (the mic to the coach is muted for it): the
         // coach stays quiet until it's logged, even audio already on its way.
-        if uplinkMuted { return }
+        if uplinkMuted || Date() < quietUntil { return }
         if !hub.engine.isRunning { try? hub.start() }
         state = .speaking
         uplink.coachSpeaking = true

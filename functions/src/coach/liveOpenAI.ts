@@ -52,7 +52,7 @@ export function openAISessionConfig(args: { model: string; voice: string; instru
     audio: {
       input: {
         format: { type: "audio/pcm", rate: 24000 },
-        transcription: { model: "gpt-4o-mini-transcribe" },
+        transcription: { model: "gpt-4o-mini-transcribe", language: "en" },
         // Waits for the end of a thought, not just a pause — closer to
         // how Gemini's low-sensitivity detection behaves in a gym.
         turn_detection: { type: "semantic_vad", eagerness: "low", interrupt_response: true, create_response: true },

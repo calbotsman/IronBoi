@@ -118,6 +118,8 @@ struct CoachStageView: View {
     /// The count reached before the current transcript began; counting
     /// carries across the recognizer's restarts.
     @State private var countBase = 0
+    /// A set closed short of its target, in case the count picks back up.
+    @State private var closedShort: (exercise: Int, set: Int, reps: Int, at: Date)?
     /// Closes the count after a quiet stretch.
     @State private var closeCountTask: Task<Void, Never>?
     /// Resting between sets: when the rest ends. The status line counts it
@@ -151,6 +153,9 @@ struct CoachStageView: View {
     /// it's over (the workout itself is gone by then).
     @State private var workDone: [String: Int] = [:]
     @State private var workOrder: [String] = []
+    /// The warm-up hasn't happened yet this workout: if it's cut short (the
+    /// conversation restarts), it's offered again when the mic comes back.
+    @State private var warmupPending = false
 
     struct GuidedRoutine: Equatable {
         enum Kind { case warmup, cooldown }
@@ -1347,13 +1352,25 @@ struct CoachStageView: View {
                 return
             }
             if inWorkout {
-                voice.redirect = { [live] text in live.say(text) }
+                // App lines (set done, rest, next up) are said by the phone in
+                // the same voice: Gemini re-wording them got them cut off,
+                // late, or in the wrong language. Live stays quiet for them
+                // and is told what was said, so the conversation keeps up.
+                voice.redirect = { [live] text in live.yieldTo(text); return false }
                 conversationActive = true
                 silentRestarts = []
                 voiceInput.toggle()
                 if let note = liveWorkoutNote { live.note(note) }
+                resumeWarmupIfPending()
             }
         }
+    }
+
+    /// The warm-up was cut short before any lifting: start it again.
+    private func resumeWarmupIfPending() {
+        guard warmupPending, guided == nil, !appModel.activeWorkoutHasProgress,
+              let first = currentExerciseIndex else { return }
+        introduce(exercise: first, first: true)
     }
 
     private func liveDropped() {
@@ -1620,6 +1637,19 @@ struct CoachStageView: View {
         }
         // "Add curls, 3 by 12" isn't counting, even though "12" reads as 1, 2.
         guard WorkoutVoice.looksLikeCounting(transcript, running: repCount > 0) else { return }
+        // Picked back up after a pause ("…11" — check the screen — "12, 13"):
+        // the set that closed short continues, instead of a new one at 1.
+        if repCount == 0, countedSet == nil, let short = closedShort, short.exercise == index,
+           Date().timeIntervalSince(short.at) < 90,
+           WorkoutVoice.repCount(in: transcript, from: 0) == 0,
+           WorkoutVoice.repCount(in: transcript, from: short.reps) > short.reps {
+            AudioHub.log("count resumed at \(short.reps) on set \(short.set)")
+            closedShort = nil
+            countedSet = (short.exercise, short.set)
+            countBase = short.reps
+            repCount = short.reps
+            if restEndsAt != nil { cancelRest() }
+        }
         let count = WorkoutVoice.repCount(in: transcript, from: countBase)
         guard count > repCount else { return }
         AudioHub.log("count \(repCount) → \(count) (heard: \(transcript.suffix(40)))")
@@ -1650,7 +1680,7 @@ struct CoachStageView: View {
         // target (you might push a couple more); long if you're short of
         // it (slow tempo, or catching your breath mid-set).
         closeCountTask?.cancel()
-        let wait: UInt64 = countedSet != nil ? 4 : 12
+        let wait: UInt64 = countedSet != nil ? 4 : 25
         closeCountTask = Task {
             try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
             if !Task.isCancelled { finishCount() }
@@ -1721,6 +1751,7 @@ struct CoachStageView: View {
                   let set = appModel.completeNextSet(exerciseIndex: index, reps: finalCount) {
             target = appModel.activeWorkout?.exercises[index].targetReps ?? finalCount
             setNumber = set
+            closedShort = finalCount < target ? (index, set, finalCount, Date()) : nil
         } else {
             discardHeard()
             return
@@ -1759,6 +1790,7 @@ struct CoachStageView: View {
             let reps = exercise.completedSets.last(where: \.completed)?.reps ?? exercise.targetReps
             let timed = ExerciseKnowledge.isTimed(exercise.name)
             lastEffort = timed ? nil : WorkoutCoaching.effort(reps: reps, target: exercise.targetReps)
+            warmupPending = false
             let lastSet = exercise.completedSetCount >= exercise.targetSets
             // The last set of a lift is closed out on the way to the next
             // one; no tip for a set that isn't coming.
@@ -1802,6 +1834,7 @@ struct CoachStageView: View {
         cantDoAskedFor = nil
         workDone = [:]
         workOrder = []
+        warmupPending = true
     }
 
     /// Your answer to the advisor's question: "easy" → a bit more weight,
@@ -2100,6 +2133,7 @@ struct CoachStageView: View {
         guided = nil
         switch routine.kind {
         case .warmup:
+            warmupPending = false
             if let first = currentExerciseIndex {
                 if !skipped { AudioHub.shared.play(cue: .target) }
                 introduce(exercise: first, first: true, warmedUp: true)
@@ -2279,6 +2313,8 @@ struct CoachStageView: View {
     private func setRest(endsAt ends: Date) {
         restTask?.cancel()
         restEndsAt = ends
+        // Rest mode: the card folds away so the clock is what you see.
+        if workoutExpanded { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { workoutExpanded = false } }
         RestActivity.shared.show(endsAt: ends, next: restNextLabel)
         restTask = Task {
             var warned = false
@@ -2508,7 +2544,14 @@ struct CoachStageView: View {
             // Hands-free from here: the mic stays on so you can count out
             // loud, and Coach walks you into the first lift. Without the
             // mic, Coach still walks you in; you tap Set done.
-            if !conversationActive, VoiceInputEngine.permissionsGranted {
+            if live.isActive, voice.redirect == nil {
+                // Live was a plain conversation: the phone's own ears (for
+                // counting) couldn't open beside it, and the failure ended
+                // everything — warm-up included. Reconnect in workout mode.
+                live.stop()
+                conversationActive = false
+                startLive()
+            } else if !conversationActive, VoiceInputEngine.permissionsGranted {
                 conversationActive = true
                 silentRestarts = []
                 director.rest()

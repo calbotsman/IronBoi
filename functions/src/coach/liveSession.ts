@@ -82,6 +82,8 @@ export function liveSetup(args: { model: string; voice: string; prompt: string }
     model: `models/${args.model}`,
     generationConfig: {
       responseModalities: ["AUDIO"],
+      // Native-audio models pick their language themselves and don't take
+      // a languageCode; English is held by the prompt (LIVE_RULES).
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: args.voice } } },
     },
     systemInstruction: { parts: [{ text: args.prompt }] },
@@ -221,6 +223,8 @@ const LIVE_RULES = [
   "- You are talking out loud, live. They can interrupt you; if they do, stop and listen. Keep replies to one to three spoken sentences unless they ask for more.",
   "- In live voice there is no <current_user_message> tag: the current message is whatever they're saying to you right now.",
   "- If they're counting reps, stay quiet. Never count for them.",
+  "- Always speak English. If what you hear sounds like another language, it's a mishearing in a noisy gym: answer in English, or ask them to say it again.",
+  "- The app says set results, rest times and the next exercise itself, in your voice, and tells you with an [app] line. Never repeat those; add something only if it's genuinely useful.",
   "- Speech gets misheard, especially in a gym. If a phrase doesn't make sense (\"leave a bench\" while they're on a row), take the closest sensible meaning given the exercise they're on and what was just said (\"lean on a bench\"), and answer that, naming your guess in passing. Only ask them to say it again if you truly can't tell.",
   "- Keep the thread: a follow-up (\"can I…\", \"what about…\", \"show me\") is about the exercise or topic you were just talking about.",
   "- When they ask you to show them, call show_exercise and talk them through it while it plays.",

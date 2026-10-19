@@ -16,6 +16,9 @@ struct ExerciseMotion: Equatable {
     /// How the body is set for an arm lift: on its feet, on a seat, or on
     /// its knees. Any front-on arm lift can take any of them.
     var stance: Stance = .standing
+    /// Push-ups only, radians: positive lifts the feet (decline push-ups,
+    /// feet on a bench), negative lifts the hands (incline push-ups).
+    var feetUp: Float = 0
 
     enum Stance: Equatable {
         case standing, seated, kneeling
@@ -56,7 +59,12 @@ struct ExerciseMotion: Equatable {
         // A lat pulldown is done sitting at the machine unless it says otherwise.
         let machineSeat = lift == .pullDown && n.range(of: #"pull ?-?down|lat pull"#, options: .regularExpression) != nil
         let stance = Stance.named(in: n) ?? (machineSeat ? .seated : .standing)
-        return ExerciseMotion(lift, Gear.match(name, lift: lift), incline: incline, stance: stance)
+        var motion = ExerciseMotion(lift, Gear.match(name, lift: lift), incline: incline, stance: stance)
+        if lift == .pushups {
+            if n.contains("decline") || n.contains("feet elevated") { motion.feetUp = 0.24 }
+            else if n.contains("incline") { motion.feetUp = -0.32 }
+        }
+        return motion
     }
 
     var repDuration: Float { spec?.seconds ?? lift.repDuration }
@@ -72,12 +80,31 @@ struct ExerciseMotion: Equatable {
 
     func frame(at t: Float) -> BodyPose {
         if let spec { return spec.pose(progress: spec.progress(at: t), time: t, gear: gear) }
-        return Self.set(Self.inclined(lift.frame(at: t, gear: gear), by: incline), stance)
+        return Self.raised(Self.set(Self.inclined(lift.frame(at: t, gear: gear), by: incline), stance), feet: feetUp)
     }
 
     func frame(holding p: Float, time t: Float) -> BodyPose {
         if let spec { return spec.pose(progress: p, time: t, gear: gear) }
-        return Self.set(Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline), stance)
+        return Self.raised(Self.set(Self.inclined(lift.frame(holding: p, time: t, gear: gear), by: incline), stance), feet: feetUp)
+    }
+
+    /// A push-up with the feet up on a bench (decline) or the hands up on
+    /// one (incline): the whole body tips about the hands, which stay on
+    /// the floor (decline) — or about the feet, which do (incline).
+    private static func raised(_ pose: BodyPose, feet angle: Float) -> BodyPose {
+        guard angle != 0 else { return pose }
+        let j = pose.joints
+        let hands = SIMD2((j[5].x + j[8].x) / 2, (j[5].y + j[8].y) / 2)
+        let feet = SIMD2((j[10].x + j[12].x) / 2, (j[10].y + j[12].y) / 2)
+        let pivot = angle > 0 ? hands : feet
+        // Turn whichever way lifts the far end (feet for decline, hands for incline).
+        let far = angle > 0 ? feet : hands
+        let magnitude = abs(angle)
+        let tryUp = OneBodyMotion.turned([Joint(far.x, far.y, 0)], by: magnitude, about: pivot)[0]
+        let signed = tryUp.y > far.y ? magnitude : -magnitude
+        var out = pose
+        out.joints = OneBodyMotion.turned(j, by: signed, about: pivot)
+        return out
     }
 
     /// Sits or kneels a standing, front-on pose. The upper body keeps its

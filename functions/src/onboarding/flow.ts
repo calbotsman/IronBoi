@@ -14,6 +14,7 @@ import {
 import {
   coachSessionMessagePath,
   coachSessionPath,
+  memoryFactPath,
   profilePath,
   programProposalPath,
   trainingProgramPath,
@@ -27,6 +28,7 @@ import { trainingDaysPerWeek, welcomeMessage } from "../journey/recap.js";
 import { writeGeneralCoachMessage } from "../journey/messages.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import { ALL_SCREEN_NOTES, MODERATE_NOTE, readHealthScreen, screenOutcome } from "./healthScreen.js";
+import { reviseDraftFromWords, revisionReply } from "./revise.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -96,12 +98,20 @@ export async function processOnboardingAnswer(
   const profileRef = db.doc(profilePath(userId));
   const profileSnap = await profileRef.get();
   const current = profileSnap.data() ?? {};
-  const draft = applyAnswer(
-    readDraft(current.onboardingDraft),
-    current.onboardingStep,
-    request.content,
-    request.structuredAnswer,
-  );
+  // Talking about the drafted week ("Tuesdays instead, and only 40
+  // minutes"): read the changes into the draft and rebuild the plan.
+  const revising = current.onboardingStatus === "proposal_ready"
+    && Object.keys(request.structuredAnswer ?? {}).length === 0
+    && request.content.trim().length > 0;
+  const revision = revising ? reviseDraftFromWords(readDraft(current.onboardingDraft), request.content) : null;
+  const draft = revision
+    ? normalizeDraft(revision.draft)
+    : applyAnswer(
+      readDraft(current.onboardingDraft),
+      current.onboardingStep,
+      request.content,
+      request.structuredAnswer,
+    );
   const missingFields = missingRequiredFields(draft);
   const nextStep = missingFields[0] ?? "proposal_ready";
   if (Array.isArray(draft.activities) && request.structuredAnswer?.activities !== undefined) {
@@ -199,7 +209,9 @@ export async function processOnboardingAnswer(
       userId,
       `${turnId}_coach`,
       request.timestamp,
-      "I have enough to draft your first MYO plan. Review the weekly workout plan and calorie estimate, then accept it when it looks right.",
+      revision
+        ? revisionReply(revision.changes)
+        : "I have enough to draft your first MYO plan. Review the weekly workout plan and calorie estimate, then accept it when it looks right.",
     ),
   ]);
 
@@ -207,6 +219,7 @@ export async function processOnboardingAnswer(
     ok: true,
     onboardingStatus: "proposal_ready",
     proposal,
+    ...(revision ? { revision: { changes: revision.changes, reply: revisionReply(revision.changes) } } : {}),
   };
 }
 
@@ -288,9 +301,41 @@ export async function acceptProgramProposal(
     );
   });
 
+  await rememberPlanNotes(db, userId, serverDecidedAt);
   await welcomeToCoach(db, userId, request.proposalId, serverDecidedAt);
 
   return { ok: true, proposalId: request.proposalId, decidedAt: serverDecidedAt };
+}
+
+/**
+ * What they told the coach while looking at their first week ("my knee's
+ * bad, and I hate burpees") becomes memory the coach keeps, so it never
+ * has to be said again. Best-effort, like the welcome.
+ */
+async function rememberPlanNotes(db: Firestore, userId: string, now: string) {
+  try {
+    const notes = (await db.doc(profilePath(userId)).get()).get("onboardingDraft.planNotes");
+    if (!Array.isArray(notes)) return;
+    await Promise.all(notes.filter((note): note is string => typeof note === "string" && note.trim().length > 0)
+      .map((note, index) => db.doc(memoryFactPath(userId, `onboarding-note-${index}`)).set({
+        userId,
+        factId: `onboarding-note-${index}`,
+        category: /hurt|pain|injur|knee|back|shoulder|hip|surgery/i.test(note) ? "safety_note" : "preference",
+        content: `Said while setting up their first week: "${note.slice(0, 280)}"`,
+        source: "user_stated",
+        confidence: 1,
+        state: "confirmed",
+        lastConfirmedAt: now,
+        createdAt: now,
+        serverUpdatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true })));
+  } catch (error) {
+    safeLogger.warn("Onboarding notes not remembered", {
+      event: "onboarding_notes_failed",
+      userId,
+      errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+    });
+  }
 }
 
 /**
