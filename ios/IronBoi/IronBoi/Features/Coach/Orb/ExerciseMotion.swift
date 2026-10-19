@@ -55,7 +55,8 @@ struct ExerciseMotion: Equatable {
         }
         guard let lift = Lift.match(name) else { return nil }
         let n = name.lowercased()
-        let incline: Float = lift == .benchPress ? (n.contains("incline") ? 0.5 : n.contains("decline") ? -0.3 : 0) : 0
+        // ~35° is a typical incline bench; a decline a little under 20°.
+        let incline: Float = lift == .benchPress ? (n.contains("incline") ? 0.6 : n.contains("decline") ? -0.3 : 0) : 0
         // A lat pulldown is done sitting at the machine unless it says otherwise.
         let machineSeat = lift == .pullDown && n.range(of: #"pull ?-?down|lat pull"#, options: .regularExpression) != nil
         let stance = Stance.named(in: n) ?? (machineSeat ? .seated : .standing)
@@ -144,7 +145,11 @@ struct ExerciseMotion: Equatable {
         guard angle != 0 else { return pose }
         var out = pose
         let hips = SIMD2(pose.joints[2].x, pose.joints[2].y)
-        var turned = OneBodyMotion.turned(pose.joints, by: angle, about: hips)
+        // The body lies head to the LEFT, so lifting the head is a clockwise
+        // (negative) turn. Turning by +angle tipped the head down: every
+        // "incline" press showed as a decline.
+        let turn = -angle
+        var turned = OneBodyMotion.turned(pose.joints, by: turn, about: hips)
         for (shoulder, elbow, hand) in [(3, 4, 5), (6, 7, 8)] {
             let dx = turned[shoulder].x - pose.joints[shoulder].x
             let dy = turned[shoulder].y - pose.joints[shoulder].y
@@ -152,7 +157,7 @@ struct ExerciseMotion: Equatable {
             turned[hand] = Joint(pose.joints[hand].x + dx, pose.joints[hand].y + dy, pose.joints[hand].z)
         }
         out.joints = turned
-        out.benchAngle = angle
+        out.benchAngle = turn
         return out
     }
 }
