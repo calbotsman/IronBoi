@@ -32,11 +32,16 @@ export const StartLiveCoachSessionRequest = z.object({
   // Which live voice model: Gemini Live (default) or OpenAI Realtime, for
   // an A/B. OpenAI only where IRONBOI_LIVE_OPENAI_ENABLED is on.
   provider: z.enum(["gemini", "openai"]).optional(),
+  // A seamless handover to a fresh connection mid-conversation: counted
+  // against its own, larger cap so a long workout never runs out.
+  handover: z.boolean().optional(),
 }).strict();
 
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";
 export const LIVE_VOICE_DEFAULT = "Kore";
 export const LIVE_MINTS_PER_DAY_DEFAULT = 40;
+/** Handovers (about one per 7.5 min of live talk) — roughly 25 hours a day. */
+export const LIVE_HANDOVERS_PER_DAY_DEFAULT = 200;
 const TOKEN_MINUTES = 15;
 const NEW_SESSION_SECONDS = 60;
 
@@ -119,12 +124,18 @@ export async function mintLiveToken(args: {
 }
 
 /** Counts a mint against the day's cap; false when the cap is reached. */
-export async function takeLiveMint(db: Firestore, userId: string, cap: number, now = new Date()): Promise<boolean> {
+export async function takeLiveMint(
+  db: Firestore,
+  userId: string,
+  cap: number,
+  now = new Date(),
+  counter: "liveMints" | "liveHandovers" = "liveMints",
+): Promise<boolean> {
   const ref = db.doc(usagePath(userId, `live-${todayUtcDateKey(now)}`));
   return db.runTransaction(async (tx) => {
-    const used = ((await tx.get(ref)).get("liveMints") as number | undefined) ?? 0;
+    const used = ((await tx.get(ref)).get(counter) as number | undefined) ?? 0;
     if (used >= cap) return false;
-    tx.set(ref, { liveMints: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    tx.set(ref, { [counter]: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
     return true;
   });
 }

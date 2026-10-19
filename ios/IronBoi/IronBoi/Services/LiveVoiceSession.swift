@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Network
 
 /// Live voice (beta): the phone talks straight to Gemini Live — your voice
 /// streams up, the coach's streams back, and talking over it stops it
@@ -52,7 +53,8 @@ final class LiveVoiceSession: ObservableObject {
 
     /// The server, as the session needs it.
     struct Backend {
-        var mint: (_ resumeHandle: String?) async throws -> Ticket
+        /// `handover`: a fresh connection mid-conversation (its own cap).
+        var mint: (_ resumeHandle: String?, _ handover: Bool) async throws -> Ticket
         var recordTurn: (_ user: String, _ coach: String, _ startedAt: Date, _ interrupted: Bool) async throws -> TurnResult
         var runTool: (_ name: String, _ args: [String: Any], _ turnId: String, _ rawUserText: String) async throws -> [String: Any]
     }
@@ -98,6 +100,18 @@ final class LiveVoiceSession: ObservableObject {
     /// When you were last heard, so a handover never lands mid-sentence.
     private var lastHeardAt = Date.distantPast
 
+    // Wi-Fi to cellular (walking out of the gym, a dead spot) kills a
+    // connection without warning — far more often than the time limit. The
+    // moment the network changes, hand over to a connection on the new one.
+    private var pathMonitor: NWPathMonitor?
+    private var lastInterface: NWInterface.InterfaceType?
+
+    // For the log: every handover and every gap you could have heard.
+    private var gapStartedAt: Date?
+    private var gapReason = ""
+    private var handovers = 0
+    private var gaps: [Int] = []
+
     // The exchange in progress: what you said, what it said back.
     private var turnId = UUID().uuidString
     private var turnUser = ""
@@ -115,7 +129,29 @@ final class LiveVoiceSession: ObservableObject {
         heard = ""
         resetTurn()
         state = .connecting
+        watchNetwork()
         return await connect(resume: nil)
+    }
+
+    private func watchNetwork() {
+        pathMonitor?.cancel()
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let interface: NWInterface.InterfaceType? = path.status == .satisfied
+                ? [.wifi, .cellular, .wiredEthernet].first { path.usesInterfaceType($0) } : nil
+            Task { @MainActor in self?.networkChanged(to: interface) }
+        }
+        monitor.start(queue: DispatchQueue(label: "live.path"))
+        pathMonitor = monitor
+        lastInterface = nil
+    }
+
+    private func networkChanged(to interface: NWInterface.InterfaceType?) {
+        defer { if interface != nil { lastInterface = interface } }
+        guard state != .idle, socket != nil, let interface, let before = lastInterface, interface != before else { return }
+        AudioHub.log("live: network \(before) → \(interface), handing over now")
+        // Go now: the old connection is riding a network that's leaving.
+        mustMoveBy = Date()
     }
 
     func stop() {
@@ -129,6 +165,14 @@ final class LiveVoiceSession: ObservableObject {
         handoverWatch?.cancel()
         handoverWatch = nil
         mustMoveBy = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        if state != .idle {
+            AudioHub.log("live: session summary — handovers \(handovers), gaps \(gaps.count)\(gaps.isEmpty ? "" : " (ms: \(gaps.map(String.init).joined(separator: ", ")))")")
+        }
+        handovers = 0
+        gaps = []
+        gapStartedAt = nil
         socketBox.socket = nil
         removeTap()
         uplinkMuted = false
@@ -142,6 +186,15 @@ final class LiveVoiceSession: ObservableObject {
         caption = ""
         reconnecting = false
         hub.stop()
+    }
+
+    /// A reconnect finished: how long you were without the coach.
+    private func endGap() {
+        guard let started = gapStartedAt else { return }
+        let ms = Int(Date().timeIntervalSince(started) * 1000)
+        gaps.append(ms)
+        gapStartedAt = nil
+        AudioHub.log("live: GAP \(ms) ms (\(gapReason))")
     }
 
     /// It died and couldn't come back: stop, and let the caller take over.
@@ -159,7 +212,7 @@ final class LiveVoiceSession: ObservableObject {
         connection += 1
         let mine = connection
         do {
-            let ticket = try await backend.mint(handle)
+            let ticket = try await backend.mint(handle, handle != nil || gapStartedAt != nil)
             guard mine == connection else { return false }
             model = ticket.model
             activeProvider = Provider(rawValue: ticket.provider ?? "") ?? .gemini
@@ -245,7 +298,8 @@ final class LiveVoiceSession: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self, self.state != .idle, self.socket != nil else { return }
-                guard !self.handingOver else { continue }
+                // A reconnect already under way does the same job.
+                guard !self.handingOver, !self.reconnecting else { continue }
                 let due = Date().timeIntervalSince(self.connectedAt) > self.handoverAge || self.mustMoveBy != nil
                 // Close to the provider's cut-off: go now, quiet or not.
                 let urgent = self.mustMoveBy.map { $0.timeIntervalSinceNow < 6 } ?? false
@@ -258,7 +312,7 @@ final class LiveVoiceSession: ObservableObject {
     /// the mic across in one step. The coach's last words finish on the old
     /// one; anything you said in the last two seconds is sent again.
     private func handOver() async {
-        guard let backend, !handingOver, state != .idle else { return }
+        guard let backend, !handingOver, !reconnecting, state != .idle else { return }
         handingOver = true
         defer { handingOver = false }
         let mine = connection
@@ -266,7 +320,7 @@ final class LiveVoiceSession: ObservableObject {
         do {
             // Gemini resumes the same session; OpenAI starts a fresh one,
             // minted with the whole conversation so far.
-            let ticket = try await backend.mint(openAI ? nil : resumeHandle)
+            let ticket = try await backend.mint(openAI ? nil : resumeHandle, true)
             guard mine == connection, state != .idle else { return }
             standbyReady = false
             let task = try await openSocket(ticket, resume: openAI ? nil : resumeHandle, connection: mine, standby: true)
@@ -289,9 +343,11 @@ final class LiveVoiceSession: ObservableObject {
             socket = task
             standby = nil
             socketBox.moveTo(task)
+            let age = Int(Date().timeIntervalSince(connectedAt))
             connectedAt = Date()
             mustMoveBy = nil
-            AudioHub.log("live: handover done")
+            handovers += 1
+            AudioHub.log("live: handover done, no gap (#\(handovers), after \(age) s)")
             Task {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 old?.cancel(with: .normalClosure, reason: nil)
@@ -311,6 +367,7 @@ final class LiveVoiceSession: ObservableObject {
     private func reconnect(reason: String) {
         guard !reconnecting, state != .idle else { return }
         reconnecting = true
+        if gapStartedAt == nil { gapStartedAt = Date(); gapReason = reason }
         AudioHub.log("live: reconnecting (\(reason))")
         let old = socket
         socketBox.socket = nil
@@ -387,6 +444,7 @@ final class LiveVoiceSession: ObservableObject {
         }
         if message["setupComplete"] != nil {
             AudioHub.log("live: ready")
+            endGap()
             socketBox.socket = task
             if state == .connecting { state = .listening }
             installTap()
@@ -462,6 +520,7 @@ final class LiveVoiceSession: ObservableObject {
         case "session.created", "session.updated":
             guard socketBox.socket == nil else { return }
             AudioHub.log("live: ready (OpenAI)")
+            endGap()
             socketBox.socket = task
             if state == .connecting { state = .listening }
             installTap()

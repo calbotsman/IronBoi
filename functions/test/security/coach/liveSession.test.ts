@@ -83,6 +83,10 @@ describe("live voice session mint", () => {
     expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(true);
     expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(false);
     expect(await takeLiveMint(db, USER_ID, 2, new Date("2026-10-13T12:00:00Z"))).toBe(true);
+    // Handovers have their own counter: a long workout doesn't eat the day's sessions.
+    expect(await takeLiveMint(db, USER_ID, 1, now, "liveHandovers")).toBe(true);
+    expect(await takeLiveMint(db, USER_ID, 1, now, "liveHandovers")).toBe(false);
+    expect(await takeLiveMint(db, USER_ID, 3, now)).toBe(true);
   });
 });
 

@@ -372,9 +372,10 @@ final class AppModel: NSObject, ObservableObject {
     /// tools run with the text coach's gates.
     var liveBackend: LiveVoiceSession.Backend {
         LiveVoiceSession.Backend(
-            mint: { [weak self] handle in
+            mint: { [weak self] handle, handover in
                 guard let self else { throw CancellationError() }
                 var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
+                if handover { data["handover"] = true }
                 // Only sent for OpenAI: a server without the A/B rejects the field.
                 if LiveVoiceSession.provider == .openai { data["provider"] = "openai" }
                 if let handle { data["resumeHandle"] = handle }

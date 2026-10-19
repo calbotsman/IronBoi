@@ -86,6 +86,7 @@ import {
 } from "./coach/liveOpenAI.js";
 import {
   CoachLiveToolRequest,
+  LIVE_HANDOVERS_PER_DAY_DEFAULT,
   LIVE_MINTS_PER_DAY_DEFAULT,
   LIVE_MODEL_DEFAULT,
   LIVE_VOICE_DEFAULT,
@@ -553,7 +554,15 @@ export const finishWorkoutSessionCallable = onCall(
 // single-use Gemini Live token with the coach's prompt locked in; the phone
 // connects straight to Gemini with it. Off unless IRONBOI_LIVE_VOICE_ENABLED.
 export const startLiveCoachSession = onCall(
-  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey] },
+  {
+    ...CALLABLE_OPTS,
+    timeoutSeconds: 20,
+    memory: "256MiB",
+    secrets: [geminiApiKey, openAIApiKey],
+    // A warm instance makes a reconnect take one round trip, not a cold
+    // start — the difference between a blip and a gap. Set per project.
+    minInstances: Number(process.env.IRONBOI_LIVE_MIN_INSTANCES) || 0,
+  },
   async (request) => {
     const userId = requireUserId(request.auth);
     if (!liveVoiceEnabled()) throw new HttpsError("failed-precondition", "live_voice_disabled");
@@ -563,8 +572,10 @@ export const startLiveCoachSession = onCall(
       throw new HttpsError("permission-denied", "live_voice_requires_sign_in");
     }
     const parsed = parseCallablePayload(StartLiveCoachSessionRequest, request.data ?? {}, "startLiveCoachSession");
-    const cap = Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT;
-    if (!(await takeLiveMint(db, userId, cap))) {
+    const cap = parsed.handover
+      ? Number(process.env.IRONBOI_LIVE_HANDOVERS_PER_DAY) || LIVE_HANDOVERS_PER_DAY_DEFAULT
+      : Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT;
+    if (!(await takeLiveMint(db, userId, cap, new Date(), parsed.handover ? "liveHandovers" : "liveMints"))) {
       safeLogger.warn("Live voice daily cap reached", { event: "live_voice_cap_reached", userId });
       throw new HttpsError("resource-exhausted", "live_voice_daily_cap");
     }
