@@ -23,7 +23,9 @@ final class CoachVoice: NSObject, ObservableObject {
     /// Text in, WAV out. Set by the screen that owns the backend connection.
     var fetchAudio: ((String) async throws -> Data)?
     /// Set while live voice runs a workout: lines go to the live coach.
-    var redirect: ((String) -> Void)?
+    /// Returns false when the live coach can't take it right now (it's
+    /// between connections): then this voice says it, so there's no dead air.
+    var redirect: ((String) -> Bool)?
 
     private let hub = AudioHub.shared
     private var generation = 0
@@ -82,8 +84,7 @@ final class CoachVoice: NSObject, ObservableObject {
         // Live voice is on: the live coach says it, in its own voice and
         // words. This voice stays "speaking" for about as long as the line
         // takes, so lessons and the mic's turn-taking keep their timing.
-        if let redirect {
-            redirect(spoken)
+        if let redirect, redirect(spoken) {
             let seconds = min(12, 1.2 + Double(spoken.split(separator: " ").count) * 0.38)
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))

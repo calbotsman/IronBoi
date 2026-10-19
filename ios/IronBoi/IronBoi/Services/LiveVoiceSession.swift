@@ -60,6 +60,9 @@ final class LiveVoiceSession: ObservableObject {
     /// The server's severe screen fired on what you said: the session ends
     /// and the caller says this line.
     var onSafetyStop: ((String) -> Void)?
+    /// Live dropped and couldn't come back: the caller carries on with the
+    /// regular coach, without a word about it.
+    var onDropped: (() -> Void)?
     /// Every mic buffer also goes here (the phone's own counter, mid-workout).
     var sideTap: ((AVAudioPCMBuffer) -> Void)?
     /// While you count, the coach doesn't hear the mic at all — it can't
@@ -80,6 +83,20 @@ final class LiveVoiceSession: ObservableObject {
     private var model = ""
     private var resumeHandle: String?
     private var reconnecting = false
+
+    // The handover. Connections don't last (Gemini ~10 min, OpenAI 60), so
+    // before one ends a second is opened alongside it and the mic moves over
+    // at a quiet moment — nobody talking, nothing playing — so you never
+    // hear it. The audio session is never released, so AirPods don't blip.
+    private var standby: URLSessionWebSocketTask?
+    private var standbyReady = false
+    private var connectedAt = Date()
+    /// The provider said this connection is ending: hand over by then.
+    private var mustMoveBy: Date?
+    private var handingOver = false
+    private var handoverWatch: Task<Void, Never>?
+    /// When you were last heard, so a handover never lands mid-sentence.
+    private var lastHeardAt = Date.distantPast
 
     // The exchange in progress: what you said, what it said back.
     private var turnId = UUID().uuidString
@@ -106,6 +123,12 @@ final class LiveVoiceSession: ObservableObject {
         recordTurnIfAny(interrupted: true)
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
+        standby?.cancel(with: .normalClosure, reason: nil)
+        standby = nil
+        standbyReady = false
+        handoverWatch?.cancel()
+        handoverWatch = nil
+        mustMoveBy = nil
         socketBox.socket = nil
         removeTap()
         uplinkMuted = false
@@ -121,6 +144,14 @@ final class LiveVoiceSession: ObservableObject {
         hub.stop()
     }
 
+    /// It died and couldn't come back: stop, and let the caller take over.
+    private func drop() {
+        guard state != .idle else { return }
+        AudioHub.log("live: dropped, handing to the regular coach")
+        stop()
+        onDropped?()
+    }
+
     // MARK: - Connecting
 
     private func connect(resume handle: String?) async -> Bool {
@@ -133,36 +164,10 @@ final class LiveVoiceSession: ObservableObject {
             model = ticket.model
             activeProvider = Provider(rawValue: ticket.provider ?? "") ?? .gemini
             try hub.start(reconfigure: !tapInstalled)
-            if openAI {
-                // Realtime: the client secret goes in the header; the session
-                // (brain, voice, tools) was attached when it was minted.
-                guard let url = URL(string: "wss://api.openai.com/v1/realtime?model=\(ticket.model)") else { throw URLError(.badURL) }
-                var request = URLRequest(url: url)
-                request.setValue("Bearer \(ticket.token)", forHTTPHeaderField: "Authorization")
-                let task = URLSession.shared.webSocketTask(with: request)
-                task.maximumMessageSize = 8 * 1024 * 1024
-                socket = task
-                task.resume()
-                receive(on: task, connection: mine)
-                AudioHub.log("live: connecting OpenAI \(ticket.model)")
-                return true
-            }
-            let token = ticket.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+/=&"))) ?? ticket.token
-            guard let url = URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=\(token)") else {
-                throw URLError(.badURL)
-            }
-            let task = URLSession.shared.webSocketTask(with: url)
-            task.maximumMessageSize = 8 * 1024 * 1024
-            socket = task
-            task.resume()
-            receive(on: task, connection: mine)
-            var setup: [String: Any] = [
-                "model": "models/\(ticket.model)",
-                "generationConfig": ["responseModalities": ["AUDIO"]],
-            ]
-            if let handle { setup["sessionResumption"] = ["handle": handle] }
-            try await task.send(.string(Self.json(["setup": setup])))
-            AudioHub.log("live: connecting \(ticket.model)\(handle == nil ? "" : " (resuming)")")
+            _ = try await openSocket(ticket, resume: handle, connection: mine)
+            connectedAt = Date()
+            mustMoveBy = nil
+            watchForHandover()
             return true
         } catch {
             AudioHub.log("live: connect failed \(error.localizedDescription)")
@@ -179,6 +184,128 @@ final class LiveVoiceSession: ObservableObject {
         }
     }
 
+    /// Opens a connection for this ticket and starts reading it.
+    /// `standby`: it's the next connection for a handover, not the one in use.
+    private func openSocket(_ ticket: Ticket, resume handle: String?, connection mine: Int,
+                            standby asStandby: Bool = false) async throws -> URLSessionWebSocketTask {
+        // Claimed before anything can arrive on it, so its first message
+        // ("ready") is never dropped.
+        func claim(_ task: URLSessionWebSocketTask) {
+            if asStandby { standby = task } else { socket = task }
+        }
+        if openAI {
+            // Realtime: the client secret goes in the header; the session
+            // (brain, voice, tools) was attached when it was minted.
+            guard let url = URL(string: "wss://api.openai.com/v1/realtime?model=\(ticket.model)") else { throw URLError(.badURL) }
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(ticket.token)", forHTTPHeaderField: "Authorization")
+            let task = URLSession.shared.webSocketTask(with: request)
+            task.maximumMessageSize = 8 * 1024 * 1024
+            claim(task)
+            task.resume()
+            receive(on: task, connection: mine)
+            AudioHub.log("live: connecting OpenAI \(ticket.model)")
+            return task
+        }
+        let token = ticket.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+/=&"))) ?? ticket.token
+        guard let url = URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=\(token)") else {
+            throw URLError(.badURL)
+        }
+        let task = URLSession.shared.webSocketTask(with: url)
+        task.maximumMessageSize = 8 * 1024 * 1024
+        claim(task)
+        task.resume()
+        receive(on: task, connection: mine)
+        var setup: [String: Any] = [
+            "model": "models/\(ticket.model)",
+            "generationConfig": ["responseModalities": ["AUDIO"]],
+        ]
+        if let handle { setup["sessionResumption"] = ["handle": handle] }
+        try await task.send(.string(Self.json(["setup": setup])))
+        AudioHub.log("live: connecting \(ticket.model)\(handle == nil ? "" : " (resuming)")")
+        return task
+    }
+
+    // MARK: - The handover
+
+    /// How long a connection is kept before it's handed over: well inside
+    /// Gemini's ~10 minutes and OpenAI's 60.
+    private var handoverAge: TimeInterval { openAI ? 45 * 60 : 7.5 * 60 }
+
+    /// Nobody's talking and nothing's playing: a handover here is unheard.
+    /// Counting a set counts as quiet — the coach's mic is muted for it.
+    private var isQuiet: Bool {
+        (state == .listening || uplinkMuted) && buffersPlaying == 0 && coachTurnDone && openAIToolsPending == 0
+            && Date().timeIntervalSince(lastHeardAt) > 2.5 && !handingOver
+    }
+
+    private func watchForHandover() {
+        handoverWatch?.cancel()
+        handoverWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, self.state != .idle, self.socket != nil else { return }
+                guard !self.handingOver else { continue }
+                let due = Date().timeIntervalSince(self.connectedAt) > self.handoverAge || self.mustMoveBy != nil
+                // Close to the provider's cut-off: go now, quiet or not.
+                let urgent = self.mustMoveBy.map { $0.timeIntervalSinceNow < 6 } ?? false
+                if due, urgent || self.isQuiet { await self.handOver() }
+            }
+        }
+    }
+
+    /// Opens the next connection beside this one, waits for it, then moves
+    /// the mic across in one step. The coach's last words finish on the old
+    /// one; anything you said in the last two seconds is sent again.
+    private func handOver() async {
+        guard let backend, !handingOver, state != .idle else { return }
+        handingOver = true
+        defer { handingOver = false }
+        let mine = connection
+        AudioHub.log("live: handover starting (\(openAI ? "OpenAI" : "Gemini"))")
+        do {
+            // Gemini resumes the same session; OpenAI starts a fresh one,
+            // minted with the whole conversation so far.
+            let ticket = try await backend.mint(openAI ? nil : resumeHandle)
+            guard mine == connection, state != .idle else { return }
+            standbyReady = false
+            let task = try await openSocket(ticket, resume: openAI ? nil : resumeHandle, connection: mine, standby: true)
+            for _ in 0..<100 where !standbyReady && standby === task && mine == connection {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            guard standbyReady, standby === task, mine == connection else {
+                AudioHub.log("live: handover connection never got ready")
+                if standby === task { standby = nil }
+                task.cancel(with: .normalClosure, reason: nil)
+                return
+            }
+            // It's up. Wait for a quiet beat if one's coming (up to ~8 s),
+            // unless the old one is about to go.
+            for _ in 0..<32 where !isQuietIgnoringHandover && !(mustMoveBy.map { $0.timeIntervalSinceNow < 4 } ?? false) {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            guard standby === task, mine == connection else { return }
+            let old = socket
+            socket = task
+            standby = nil
+            socketBox.moveTo(task)
+            connectedAt = Date()
+            mustMoveBy = nil
+            AudioHub.log("live: handover done")
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                old?.cancel(with: .normalClosure, reason: nil)
+            }
+        } catch {
+            AudioHub.log("live: handover failed \(error.localizedDescription)")
+        }
+    }
+
+    private var isQuietIgnoringHandover: Bool {
+        (state == .listening || uplinkMuted) && buffersPlaying == 0 && coachTurnDone && openAIToolsPending == 0
+            && Date().timeIntervalSince(lastHeardAt) > 2.5
+    }
+
     /// The connection is ending (server's ~10-minute limit, or it dropped):
     /// a new token and the resume handle carry the conversation on.
     private func reconnect(reason: String) {
@@ -191,7 +318,10 @@ final class LiveVoiceSession: ObservableObject {
             let ok = await connect(resume: resumeHandle)
             old?.cancel(with: .normalClosure, reason: nil)
             reconnecting = false
-            if !ok { AudioHub.log("live: reconnect failed") }
+            if !ok {
+                AudioHub.log("live: reconnect failed")
+                drop()
+            }
         }
     }
 
@@ -201,10 +331,18 @@ final class LiveVoiceSession: ObservableObject {
         task.receive { [weak self] result in
             Task { @MainActor in
                 guard let self, mine == self.connection else { return }
+                // An old connection after a handover: done with it.
+                let current = task === self.socket, spare = task === self.standby
+                guard current || spare || self.socket == nil else { return }
                 switch result {
                 case .failure(let error):
+                    if spare {
+                        AudioHub.log("live: handover connection closed \(error.localizedDescription)")
+                        self.standby = nil
+                        return
+                    }
                     AudioHub.log("live: socket closed \(error.localizedDescription)")
-                    if self.state != .idle, self.resumeHandle != nil { self.reconnect(reason: "closed") } else { self.stop() }
+                    if self.state != .idle, self.resumeHandle != nil || self.openAI { self.reconnect(reason: "closed") } else { self.drop() }
                 case .success(let message):
                     let data: Data?
                     switch message {
@@ -215,13 +353,29 @@ final class LiveVoiceSession: ObservableObject {
                     if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         self.handle(object, socket: task)
                     }
-                    if mine == self.connection { self.receive(on: task, connection: mine) }
+                    if mine == self.connection, task === self.socket || task === self.standby { self.receive(on: task, connection: mine) }
                 }
             }
         }
     }
 
     private func handle(_ message: [String: Any], socket task: URLSessionWebSocketTask) {
+        // The next connection, warming up: only listen for "ready".
+        if task === standby {
+            if message["setupComplete"] != nil || ["session.created", "session.updated"].contains(message["type"] as? String ?? "") {
+                standbyReady = true
+                AudioHub.log("live: handover connection ready")
+            } else if message["error"] != nil {
+                AudioHub.log("live: handover connection refused")
+                standby?.cancel(with: .normalClosure, reason: nil)
+                standby = nil
+            } else if let update = message["sessionResumptionUpdate"] as? [String: Any],
+                      update["resumable"] as? Bool != false, let handle = update["newHandle"] as? String, !handle.isEmpty {
+                resumeHandle = handle
+            }
+            return
+        }
+        guard task === socket else { return }
         if openAI {
             handleOpenAI(message, socket: task)
             return
@@ -242,7 +396,12 @@ final class LiveVoiceSession: ObservableObject {
            update["resumable"] as? Bool != false, let handle = update["newHandle"] as? String, !handle.isEmpty {
             resumeHandle = handle
         }
-        if message["goAway"] != nil { reconnect(reason: "time limit") }
+        if let away = message["goAway"] as? [String: Any] {
+            // "timeLeft": "12s" — hand over before then, at a quiet beat if one comes.
+            let left = (away["timeLeft"] as? String).flatMap { Double($0.trimmingCharacters(in: CharacterSet(charactersIn: "s"))) } ?? 10
+            mustMoveBy = Date().addingTimeInterval(left)
+            AudioHub.log("live: connection ends in \(Int(left)) s, handing over")
+        }
         if let toolCall = message["toolCall"] as? [String: Any],
            let calls = toolCall["functionCalls"] as? [[String: Any]] {
             for call in calls { runTool(call) }
@@ -265,6 +424,7 @@ final class LiveVoiceSession: ObservableObject {
             if turnUser.isEmpty { turnStartedAt = Date() }
             turnUser += input
             heard = turnUser
+            lastHeardAt = Date()
         }
         if let parts = (content["modelTurn"] as? [String: Any])?["parts"] as? [[String: Any]] {
             for part in parts {
@@ -306,6 +466,7 @@ final class LiveVoiceSession: ObservableObject {
             if state == .connecting { state = .listening }
             installTap()
         case "input_audio_buffer.speech_started":
+            lastHeardAt = Date()
             // You talked over it: drop what's queued, right now. The server
             // cancels the response itself (interrupt_response).
             guard state == .speaking else { return }
@@ -433,8 +594,11 @@ final class LiveVoiceSession: ObservableObject {
 
     /// A line the app wants said now (a set confirmed, the next exercise):
     /// the coach says it briefly, in its own words.
-    func say(_ text: String) {
+    @discardableResult
+    func say(_ text: String) -> Bool {
+        guard socket != nil, state != .idle, state != .connecting else { return false }
         sendClientTurn("[app] Say this to them now, briefly, in your own words: \(text)", respond: true)
+        return true
     }
 
     /// Something you said that the coach didn't hear (the mic was muted for
@@ -568,11 +732,11 @@ final class LiveVoiceSession: ObservableObject {
         input.installTap(onBus: 0, bufferSize: 1_024, format: format) { buffer, _ in
             side?(buffer)
             analyzer.process(buffer, into: meter)
-            guard let chunk = uplink.append(buffer), let socket = box.socket else { return }
+            guard let chunk = uplink.append(buffer), box.socket != nil else { return }
             let message = openAI
                 ? "{\"type\":\"input_audio_buffer.append\",\"audio\":\"\(chunk.base64EncodedString())\"}"
                 : "{\"realtimeInput\":{\"audio\":{\"data\":\"\(chunk.base64EncodedString())\",\"mimeType\":\"audio/pcm;rate=16000\"}}}"
-            socket.send(.string(message)) { _ in }
+            box.send(message)
         }
         tapInstalled = true
         if !hub.engine.isRunning { try? hub.start() }
@@ -610,9 +774,34 @@ final class LiveVoiceSession: ObservableObject {
 private final class SocketBox: @unchecked Sendable {
     private let lock = NSLock()
     private var value: URLSessionWebSocketTask?
+    /// The last ~2 s of mic messages, sent again to the next connection on
+    /// a handover so nothing said across it is lost.
+    private var recent: [String] = []
+    private static let keep = 20
     var socket: URLSessionWebSocketTask? {
         get { lock.lock(); defer { lock.unlock() }; return value }
-        set { lock.lock(); value = newValue; lock.unlock() }
+        set { lock.lock(); value = newValue; if newValue == nil { recent.removeAll() }; lock.unlock() }
+    }
+
+    /// A mic message: sent, and remembered for a handover.
+    func send(_ message: String) {
+        lock.lock()
+        let socket = value
+        if socket != nil {
+            recent.append(message)
+            if recent.count > Self.keep { recent.removeFirst(recent.count - Self.keep) }
+        }
+        lock.unlock()
+        socket?.send(.string(message)) { _ in }
+    }
+
+    /// The mic moves to `next`: the last two seconds first, then live.
+    func moveTo(_ next: URLSessionWebSocketTask) {
+        lock.lock()
+        let replay = recent
+        value = next
+        lock.unlock()
+        for message in replay { next.send(.string(message)) { _ in } }
     }
 }
 

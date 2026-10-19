@@ -1327,6 +1327,9 @@ struct CoachStageView: View {
         let inWorkout = appModel.activeWorkout != nil
         live.sideTap = inWorkout ? voiceInput.audioSink : nil
         voiceInput.useExternalFeed(inWorkout)
+        // Live dropped for good: the regular coach carries on in the same
+        // voice, without a word about it, and live is tried again later.
+        live.onDropped = { liveDropped() }
         live.onSafetyStop = { line in
             // The server's severe screen fired: the live session is over
             // and the regular voice says the stop line.
@@ -1350,6 +1353,33 @@ struct CoachStageView: View {
                 voiceInput.toggle()
                 if let note = liveWorkoutNote { live.note(note) }
             }
+        }
+    }
+
+    private func liveDropped() {
+        voice.redirect = nil
+        voiceInput.useExternalFeed(false)
+        // Mid-workout the regular loop is already running alongside; outside
+        // one, live was the whole conversation, so the regular one starts.
+        if conversationActive {
+            silentRestarts = []
+            resumeListening()
+        } else {
+            conversationActive = true
+            silentRestarts = []
+            voiceInput.toggle()
+        }
+        Task {
+            // Try live again in a bit, at a moment nobody's talking.
+            try? await Task.sleep(nanoseconds: 45_000_000_000)
+            for _ in 0..<120 where voice.isSpeaking || !voiceInput.transcript.isEmpty || repCount > 0 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+            guard conversationActive, !live.isActive, LiveVoiceSession.enabled else { return }
+            AudioHub.log("live: trying again after a drop")
+            // startLive takes the mic over from the regular loop.
+            conversationActive = false
+            startLive()
         }
     }
 
