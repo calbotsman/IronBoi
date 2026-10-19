@@ -28,6 +28,7 @@ struct PreferencesView: View {
     @State private var saveGeneration = 0
     @State private var contentVisible = false
     @State private var showDeleteAccountConfirm = false
+    @State private var showStartOverConfirm = false
     @State private var showDeleteAccountFinalConfirm = false
     @AppStorage(CoachVoiceOption.storageKey) private var voiceName = CoachVoiceOption.defaultName
     /// Plays a line when you try a voice.
@@ -585,6 +586,26 @@ struct PreferencesView: View {
 
             MyoHairline()
 
+            // Keeps the account, wipes everything the coach knows and the
+            // plan, and runs onboarding again from the first question.
+            Button {
+                showStartOverConfirm = true
+            } label: {
+                HStack {
+                    Text("Start over…")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MyoTheme.Colors.ink)
+                    Spacer()
+                    Image(systemName: "arrow.counterclockwise")
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            MyoHairline()
+
             // Apple guideline 5.1.1(v): deletion must be discoverable. Two
             // steps so an accidental tap can't wipe anything.
             Button {
@@ -602,6 +623,24 @@ struct PreferencesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+        .alert("Start over?", isPresented: $showStartOverConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Start over", role: .destructive) {
+                Task {
+                    await appModel.resetMyData()
+                    // The phone's own memory of you goes too: the welcome,
+                    // the voice and style you picked, the tips already shown.
+                    for key in ["welcomeHeardId", "micPermissionExplained", "voiceIsolationTipsShown",
+                                CoachVoiceOption.storageKey, CoachVoiceOption.chosenKey,
+                                CoachingStyle.tipsKey, CoachingStyle.toneKey] {
+                        UserDefaults.standard.removeObject(forKey: key)
+                    }
+                    dismiss()
+                }
+            }
+        } message: {
+            Text("Keeps your account but wipes your plan, workouts, coach history and everything the coach remembers about you, then starts onboarding again.")
         }
         .alert("Delete account?", isPresented: $showDeleteAccountConfirm) {
             Button("Cancel", role: .cancel) {}
