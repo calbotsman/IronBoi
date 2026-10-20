@@ -553,16 +553,10 @@ export const finishWorkoutSessionCallable = onCall(
 // Live voice (beta) — docs/design/live-voice-brain.md milestone 1. Mints a
 // single-use Gemini Live token with the coach's prompt locked in; the phone
 // connects straight to Gemini with it. Off unless IRONBOI_LIVE_VOICE_ENABLED.
+// minInstances: a warm instance makes a reconnect one round trip, not a
+// cold start — the difference between a blip and a gap. Set per project.
 export const startLiveCoachSession = onCall(
-  {
-    ...CALLABLE_OPTS,
-    timeoutSeconds: 20,
-    memory: "256MiB",
-    secrets: [geminiApiKey, openAIApiKey],
-    // A warm instance makes a reconnect take one round trip, not a cold
-    // start — the difference between a blip and a gap. Set per project.
-    minInstances: Number(process.env.IRONBOI_LIVE_MIN_INSTANCES) || 0,
-  },
+  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey], minInstances: Number(process.env.IRONBOI_LIVE_MIN_INSTANCES) || 0 },
   async (request) => {
     const userId = requireUserId(request.auth);
     if (!liveVoiceEnabled()) throw new HttpsError("failed-precondition", "live_voice_disabled");
@@ -668,9 +662,9 @@ export const coachLiveToolCallable = onCall(
   },
 );
 
+// The engine keys: with live voice on, app lines are read in the live
+// engine's own voice (see SpeechEngine).
 export const synthesizeSpeechCallable = onCall(
-  // The engine keys: with live voice on, app lines are read in the live
-  // engine's own voice (see SpeechEngine).
   { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey] },
   async (request) => {
     const userId = requireUserId(request.auth);
