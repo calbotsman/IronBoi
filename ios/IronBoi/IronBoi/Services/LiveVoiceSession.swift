@@ -65,6 +65,10 @@ final class LiveVoiceSession: ObservableObject {
     /// Live dropped and couldn't come back: the caller carries on with the
     /// regular coach, without a word about it.
     var onDropped: (() -> Void)?
+    /// A new connection is up (first one, reconnect or handover): the
+    /// caller re-sends where the workout is, so a fresh session (OpenAI
+    /// can't resume) never answers about the wrong set.
+    var onReconnected: (() -> Void)?
     /// Every mic buffer also goes here (the phone's own counter, mid-workout).
     var sideTap: ((AVAudioPCMBuffer) -> Void)?
     /// While you count, the coach doesn't hear the mic at all — it can't
@@ -173,7 +177,7 @@ final class LiveVoiceSession: ObservableObject {
         handovers = 0
         gaps = []
         gapStartedAt = nil
-        socketBox.socket = nil
+        socketBox.release()
         removeTap()
         uplinkMuted = false
         uplink.muted = false
@@ -212,7 +216,8 @@ final class LiveVoiceSession: ObservableObject {
         connection += 1
         let mine = connection
         do {
-            let ticket = try await backend.mint(handle, handle != nil || gapStartedAt != nil)
+            let handover = handle != nil || gapStartedAt != nil
+            let ticket = try await withDeadline(5) { try await backend.mint(handle, handover) }
             guard mine == connection else { return false }
             model = ticket.model
             activeProvider = Provider(rawValue: ticket.provider ?? "") ?? .gemini
@@ -320,7 +325,8 @@ final class LiveVoiceSession: ObservableObject {
         do {
             // Gemini resumes the same session; OpenAI starts a fresh one,
             // minted with the whole conversation so far.
-            let ticket = try await backend.mint(openAI ? nil : resumeHandle, true)
+            let handle = openAI ? nil : resumeHandle
+            let ticket = try await withDeadline(5) { try await backend.mint(handle, true) }
             guard mine == connection, state != .idle else { return }
             standbyReady = false
             let task = try await openSocket(ticket, resume: openAI ? nil : resumeHandle, connection: mine, standby: true)
@@ -347,6 +353,7 @@ final class LiveVoiceSession: ObservableObject {
             connectedAt = Date()
             mustMoveBy = nil
             handovers += 1
+            onReconnected?()
             AudioHub.log("live: handover done, no gap (#\(handovers), after \(age) s)")
             Task {
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -368,6 +375,11 @@ final class LiveVoiceSession: ObservableObject {
         guard !reconnecting, state != .idle else { return }
         reconnecting = true
         if gapStartedAt == nil { gapStartedAt = Date(); gapReason = reason }
+        socketBox.hold()
+        // A handover in progress is moot now; don't leave its spare open.
+        standby?.cancel(with: .normalClosure, reason: nil)
+        standby = nil
+        standbyReady = false
         AudioHub.log("live: reconnecting (\(reason))")
         let old = socket
         socketBox.socket = nil
@@ -445,7 +457,8 @@ final class LiveVoiceSession: ObservableObject {
         if message["setupComplete"] != nil {
             AudioHub.log("live: ready")
             endGap()
-            socketBox.socket = task
+            socketBox.attach(task)
+            onReconnected?()
             if state == .connecting { state = .listening }
             installTap()
             return
@@ -521,7 +534,8 @@ final class LiveVoiceSession: ObservableObject {
             guard socketBox.socket == nil else { return }
             AudioHub.log("live: ready (OpenAI)")
             endGap()
-            socketBox.socket = task
+            socketBox.attach(task)
+            onReconnected?()
             if state == .connecting { state = .listening }
             installTap()
         case "input_audio_buffer.speech_started":
@@ -859,9 +873,22 @@ private final class SocketBox: @unchecked Sendable {
         set { lock.lock(); value = newValue; if newValue == nil { recent.removeAll() }; lock.unlock() }
     }
 
-    /// A mic message: sent, and remembered for a handover.
+    /// Between connections (a reconnect): the mic is held, up to ~6 s,
+    /// and sent once the next one is up — a dropped second loses nothing.
+    private var holding = false
+    private var held: [String] = []
+    private static let holdMax = 60
+
+    /// A mic message: sent, and remembered for a handover — or held, if
+    /// the connection is being replaced.
     func send(_ message: String) {
         lock.lock()
+        if holding {
+            held.append(message)
+            if held.count > Self.holdMax { held.removeFirst(held.count - Self.holdMax) }
+            lock.unlock()
+            return
+        }
         let socket = value
         if socket != nil {
             recent.append(message)
@@ -871,8 +898,40 @@ private final class SocketBox: @unchecked Sendable {
         socket?.send(.string(message)) { _ in }
     }
 
+    /// The connection dropped: hold the mic (with the last two seconds, in
+    /// case they never arrived) until `attach`.
+    func hold() {
+        lock.lock()
+        if !holding {
+            holding = true
+            held = recent
+            recent = []
+        }
+        lock.unlock()
+    }
+
+    /// The new connection is up: what was held goes first, then live.
+    func attach(_ next: URLSessionWebSocketTask) {
+        lock.lock()
+        let backlog = holding ? held : []
+        holding = false
+        held = []
+        value = next
+        lock.unlock()
+        for message in backlog { next.send(.string(message)) { _ in } }
+    }
+
+    func release() {
+        lock.lock()
+        holding = false
+        held = []
+        value = nil
+        recent = []
+        lock.unlock()
+    }
+
     /// The mic moves to `next`: the last two seconds first, then live.
-    func moveTo(_ next: URLSessionWebSocketTask) {
+    fileprivate func moveTo(_ next: URLSessionWebSocketTask) {
         lock.lock()
         let replay = recent
         value = next

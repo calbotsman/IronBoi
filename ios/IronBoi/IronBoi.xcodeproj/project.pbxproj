@@ -16,6 +16,7 @@
 		1F427C3553FD7EDA6A281A8A /* PaperBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0454D8621A0D45798905DF73 /* PaperBackground.swift */; };
 		2127E711F8AEF1AE4EA68A3B /* OnboardingStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 412AB8D23DE585A4011E7CDC /* OnboardingStageView.swift */; };
 		22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */; };
+		243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */; };
 		25B2EAE2F402BA9568A459D1 /* WorkoutEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083722ABB4FE380F28D66DF6 /* WorkoutEdits.swift */; };
 		28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
 		2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */; };
@@ -27,6 +28,7 @@
 		3F6F0206655328AA35C726F0 /* WorkoutCoaching.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7F65B761BEF94F1AF3A78D /* WorkoutCoaching.swift */; };
 		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
 		4EFF7681C8A26A5D67D5A922 /* RestActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A468463FE2879A9FF09B426B /* RestActivityAttributes.swift */; };
+		4F68D2CFF4E4DF2E173EC8DD /* VoiceCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A47FA7EDB3DBFD24E70FCB /* VoiceCache.swift */; };
 		4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD07E5325615931462D65FF0 /* AmbientLife.swift */; };
 		517EC3482C4841986CFB46AD /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC8A7F0156E886437433E203 /* ConversationView.swift */; };
 		51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */; };
@@ -143,6 +145,7 @@
 		77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseMotion.swift; sourceTree = "<group>"; };
 		8251B627C5781604E47176FE /* CoachView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
 		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		8E6486137A4FFFD180E600A3 /* TypeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypeBar.swift; sourceTree = "<group>"; };
 		92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeLife.swift; sourceTree = "<group>"; };
 		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
@@ -163,6 +166,7 @@
 		EDC6CE12E7E58F297DFC0194 /* SetupCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupCard.swift; sourceTree = "<group>"; };
 		EF82FC6D6FEC44A6DBE3C92F /* OrbView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbView.swift; sourceTree = "<group>"; };
 		F433BDABFADDC8C6D06785F7 /* RecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordView.swift; sourceTree = "<group>"; };
+		F6A47FA7EDB3DBFD24E70FCB /* VoiceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceCache.swift; sourceTree = "<group>"; };
 		F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCheckProviderFactory.swift; sourceTree = "<group>"; };
 		FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachVoice.swift; sourceTree = "<group>"; };
 		FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutVoice.swift; sourceTree = "<group>"; };
@@ -220,6 +224,7 @@
 			isa = PBXGroup;
 			children = (
 				ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */,
+				8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */,
 				B4E60CD7DDA97B7D6E1C118C /* Info.plist */,
 				967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */,
 				5041EB6152324AB118525DA6 /* IronBoiApp.swift */,
@@ -245,6 +250,7 @@
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				4F10C35335B09DF5C8E78766 /* RestActivity.swift */,
 				5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */,
+				F6A47FA7EDB3DBFD24E70FCB /* VoiceCache.swift */,
 				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
 			);
 			path = Services;
@@ -467,6 +473,7 @@
 				E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */,
 				AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */,
 				D6444B3E1D84C06921141B78 /* GoogleService-Info-Staging.plist in Resources */,
+				243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */,
 				B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */,
 				5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */,
 			);
@@ -551,6 +558,7 @@
 				1015F45B673FF88BCFA8C97E /* TrainingReminders.swift in Sources */,
 				5E98F19676BE3E591B1B881B /* TypeBar.swift in Sources */,
 				971478636E13DB8A91D04639 /* UserProfile.swift in Sources */,
+				4F68D2CFF4E4DF2E173EC8DD /* VoiceCache.swift in Sources */,
 				672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */,
 				572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */,
 				3F6F0206655328AA35C726F0 /* WorkoutCoaching.swift in Sources */,

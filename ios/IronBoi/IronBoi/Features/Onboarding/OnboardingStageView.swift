@@ -166,7 +166,7 @@ struct OnboardingStageView: View {
             Text(appModel.errorMessage ?? voiceInput.errorMessage ?? "")
         }
         .onAppear {
-            voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+            voice.fetchAudio = { [appModel] text, engine in try await appModel.synthesizeSpeech(text, engine: engine) }
             // Answers here are lists and descriptions: don't cut them off.
             voiceInput.extraPause = 700_000_000
             voiceInput.onPause = { text in

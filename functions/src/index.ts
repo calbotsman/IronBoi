@@ -669,7 +669,9 @@ export const coachLiveToolCallable = onCall(
 );
 
 export const synthesizeSpeechCallable = onCall(
-  { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB" },
+  // The engine keys: with live voice on, app lines are read in the live
+  // engine's own voice (see SpeechEngine).
+  { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey] },
   async (request) => {
     const userId = requireUserId(request.auth);
     const signInProvider = (request.auth?.token as { firebase?: { sign_in_provider?: string } } | undefined)
@@ -697,7 +699,10 @@ export const synthesizeSpeechCallable = onCall(
       });
       throw new HttpsError("resource-exhausted", cap.reason);
     }
-    const speech = await synthesizeSpeech(parsed);
+    const speech = await synthesizeSpeech(parsed, fetch, {
+      gemini: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openai: openAIApiKey.value() || process.env.OPENAI_API_KEY,
+    });
     // Count only audio that was actually produced; a failed synthesis
     // costs nothing and should not eat the budget.
     await recordTtsUsage(db, userId, cap.dateKey, parsed.text.length);

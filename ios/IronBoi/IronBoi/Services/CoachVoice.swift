@@ -21,7 +21,8 @@ final class CoachVoice: NSObject, ObservableObject {
 
     let meter = VoiceMeter()
     /// Text in, WAV out. Set by the screen that owns the backend connection.
-    var fetchAudio: ((String) async throws -> Data)?
+    /// (words, engine) in → (WAV, the engine that actually read it) out.
+    var fetchAudio: ((String, String) async throws -> (Data, String))?
     /// Set while live voice runs a workout: lines go to the live coach.
     /// Returns false when the live coach can't take it right now (it's
     /// between connections): then this voice says it, so there's no dead air.
@@ -39,6 +40,91 @@ final class CoachVoice: NSObject, ObservableObject {
     override init() {
         super.init()
         synthesizer.delegate = self
+    }
+
+    /// No coach voice to be had at all: the device voice outside a workout;
+    /// in one, a tone and the words on screen — the voice never changes.
+    private func cannotSpeak(_ lines: [String], generation gen: Int) {
+        if allowsDeviceVoice {
+            speakOnDevice(lines.joined(separator: " "))
+            return
+        }
+        AudioHub.log("voice: couldn't speak — shown instead")
+        AudioHub.shared.play(cue: .tick)
+        for line in lines { onUnspoken?(line) }
+        if gen == generation { finish() }
+    }
+
+    /// Outside a workout the on-device voice can stand in when the network
+    /// fails; in one, the voice must never change, so it's a tone and the
+    /// words on screen instead.
+    var allowsDeviceVoice = true
+    /// A line that couldn't be spoken in the coach's voice (shown instead).
+    var onUnspoken: ((String) -> Void)?
+
+    /// One sentence's audio: from the phone if it's there, else fetched —
+    /// within 4 s all told (one quick retry if the first fails fast). A
+    /// fetch that lands late is still saved for next time. Nil when there's
+    /// none to be had; low signal skips the wait for lines not saved.
+    private func audio(for text: String) -> Task<Data?, Never> {
+        let fetchAudio = self.fetchAudio
+        let engine = VoiceCache.engine
+        return Task {
+            if let saved = VoiceCache.shared.audio(for: text, engine: engine) { return saved }
+            guard let fetchAudio, !VoiceCache.shared.lowSignal else { return nil }
+            let deadline = Date().addingTimeInterval(4)
+            for attempt in 0..<2 {
+                let remaining = deadline.timeIntervalSinceNow
+                guard remaining > 0.3, !Task.isCancelled else { break }
+                let fetch = Task { () -> Data? in
+                    guard let (data, served) = try? await fetchAudio(text, engine) else { return nil }
+                    if served == engine { VoiceCache.shared.store(data, for: text, engine: engine) }
+                    return data
+                }
+                do {
+                    if let data = try await withDeadline(remaining, { await fetch.value }) {
+                        VoiceCache.shared.noteSuccess()
+                        return data
+                    }
+                    AudioHub.log("voice fetch \(attempt + 1) failed")
+                } catch {
+                    AudioHub.log("voice fetch timed out after 4 s")
+                    break
+                }
+            }
+            // Counted once per line, and never for a line that was simply
+            // no longer wanted (the coach moved on).
+            if !Task.isCancelled { VoiceCache.shared.noteFailure() }
+            return nil
+        }
+    }
+
+    /// Gets lines ready ahead of time (today's workout script), a few at a
+    /// time, quietly. Lines already saved cost nothing.
+    func prepare(_ lines: [String]) {
+        guard let fetchAudio else { return }
+        let engine = VoiceCache.engine
+        let missing = Array(Set(lines.flatMap { Self.sentences(Self.speakable($0)) })).filter { !VoiceCache.shared.has($0, engine: engine) }
+        guard !missing.isEmpty else { return }
+        AudioHub.log("voice: preparing \(missing.count) lines")
+        Task.detached(priority: .utility) {
+            await withTaskGroup(of: Void.self) { group in
+                var next = 0
+                func add() {
+                    guard next < missing.count else { return }
+                    let text = missing[next]
+                    next += 1
+                    group.addTask {
+                        if let (data, served) = try? await withDeadline(8, { try await fetchAudio(text, engine) }), served == engine {
+                            VoiceCache.shared.store(data, for: text, engine: engine)
+                        }
+                    }
+                }
+                for _ in 0..<4 { add() }
+                while await group.next() != nil { add() }
+            }
+            await MainActor.run { AudioHub.log("voice: prepared") }
+        }
     }
 
     /// When Coach last drew a breath; not again within a few seconds, or
@@ -98,8 +184,8 @@ final class CoachVoice: NSObject, ObservableObject {
             return
         }
 
-        guard let fetchAudio else {
-            speakOnDevice(spoken)
+        guard fetchAudio != nil else {
+            cannotSpeak(chunks, generation: gen)
             return
         }
         Task { [weak self] in
@@ -112,48 +198,47 @@ final class CoachVoice: NSObject, ObservableObject {
                 AudioHub.log("voice: engine wouldn't start, rebuilding")
                 self.hub.recover()
                 do { try self.hub.start() } catch {
-                    self.speakOnDevice(spoken)
+                    self.cannotSpeak(chunks, generation: gen)
                     return
                 }
             }
             self.installMeterTap()
-            // Every chunk is fetched at once, so the gaps between sentences
-            // are just playback, never a download.
-            func fetch(_ text: String) -> Task<Data, Error> {
-                Task {
-                    do { return try await fetchAudio(text) } catch {
-                        // One retry: a dropped connection mid-sentence
-                        // shouldn't switch voices.
-                        try await Task.sleep(nanoseconds: 350_000_000)
-                        return try await fetchAudio(text)
-                    }
-                }
+            // Sentence by sentence, each from the phone if it's been said
+            // before (or prepared), else fetched — all at once, so the gaps
+            // between sentences are just playback.
+            let units = chunks.enumerated().flatMap { line, text in
+                Self.sentences(text).map { (text: $0, line: line) }
             }
-            let pending = chunks.map(fetch)
-            for (index, chunk) in chunks.enumerated() {
+            let pending = units.map { self.audio(for: $0.text) }
+            for (index, unit) in units.enumerated() {
                 guard gen == self.generation else { pending.forEach { $0.cancel() }; return }
-                let buffer: AVAudioPCMBuffer
-                do {
-                    buffer = try AudioHub.buffer(fromWAV: try await pending[index].value)
-                } catch {
+                guard let data = await pending[index].value, let buffer = try? AudioHub.buffer(fromWAV: data) else {
                     guard gen == self.generation else { return }
-                    AudioHub.log("voice fetch failed twice, on-device fallback: \(error.localizedDescription)")
-                    self.speakOnDevice(chunks[index...].joined(separator: " "))
-                    return
+                    if self.allowsDeviceVoice {
+                        AudioHub.log("voice: no audio, on-device fallback")
+                        self.speakOnDevice(units[index...].map(\.text).joined(separator: " "))
+                        return
+                    }
+                    // Mid-workout the voice never changes: a soft tone and
+                    // the words on screen instead, then on to the next line.
+                    AudioHub.log("voice: no audio for \"\(unit.text.prefix(40))\" — shown, not spoken")
+                    AudioHub.shared.play(cue: .tick)
+                    self.onUnspoken?(unit.text)
+                    continue
                 }
                 guard gen == self.generation else { return }
                 // Breathe like a person: in before a real sentence (not a
                 // one-word "Go."), and now and then between longer ones,
                 // with gaps that aren't all the same length.
-                if self.breathes(before: chunk, index: index), let breath = AudioHub.breath() {
+                if self.breathes(before: unit.text, index: index), let breath = AudioHub.breath() {
                     await self.hub.play(breath)
                     guard gen == self.generation else { return }
                 } else if index > 0 {
                     try? await Task.sleep(nanoseconds: UInt64.random(in: 30_000_000...110_000_000))
                     guard gen == self.generation else { return }
                 }
-                self.caption = chunk
-                self.lineIndex = index
+                self.caption = unit.text
+                self.lineIndex = unit.line
                 if index == 0 { AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))") }
                 await self.hub.play(buffer)
             }
@@ -214,6 +299,19 @@ final class CoachVoice: NSObject, ObservableObject {
 
     /// Sentences, merged so each request is a natural phrase (≤ ~220 chars)
     /// but the first one is short — that's what you wait for.
+    /// One sentence each — the unit that's saved and reused ("Rest ninety
+    /// seconds." is the same audio every time).
+    static func sentences(_ text: String) -> [String] {
+        var out: [String] = []
+        text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { s, _, _, _ in
+            if let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), s.rangeOfCharacter(from: .alphanumerics) != nil {
+                out.append(String(s.prefix(590)))
+            }
+        }
+        if out.isEmpty, text.rangeOfCharacter(from: .alphanumerics) != nil { return [String(text.prefix(590))] }
+        return out
+    }
+
     static func chunks(_ text: String) -> [String] {
         var sentences: [String] = []
         text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { s, _, _, _ in

@@ -384,7 +384,7 @@ struct PreferencesView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(MyoColor.Text.secondary.color)
             CoachVoicePicker(name: $voiceName) { sample in
-                tryVoice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+                tryVoice.fetchAudio = { [appModel] text, engine in try await appModel.synthesizeSpeech(text, engine: engine) }
                 tryVoice.speak(sample, messageId: "try-voice-\(UUID().uuidString)")
             }
             .padding(.bottom, MyoTheme.Spacing.xs)

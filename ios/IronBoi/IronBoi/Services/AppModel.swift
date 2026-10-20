@@ -410,13 +410,17 @@ final class AppModel: NSObject, ObservableObject {
         )
     }
 
-    func synthesizeSpeech(_ text: String) async throws -> Data {
-        struct Speech: Decodable { let audio: String }
+    /// One line's audio, and which engine actually read it (the server
+    /// falls back to Cloud TTS if the live engine's voice fails).
+    func synthesizeSpeech(_ text: String, engine: String) async throws -> (Data, String) {
+        struct Speech: Decodable { let audio: String; let engine: String? }
         let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: [
             "text": text, "voice": CoachVoiceOption.current,
-        ])
+            // With live voice on, read in the live engine's own voice.
+            "engine": engine,
+        ], timeout: 10)
         guard let data = Data(base64Encoded: speech.audio) else { throw CocoaError(.coderReadCorrupt) }
-        return data
+        return (data, speech.engine ?? "chirp")
     }
 
     func sendCoachMessage(
@@ -1328,7 +1332,7 @@ final class AppModel: NSObject, ObservableObject {
         let _: EmptyFunctionResponse = try await callCallable(name, data: data)
     }
 
-    private func callCallable<T: Decodable>(_ name: String, data: [String: Any]) async throws -> T {
+    private func callCallable<T: Decodable>(_ name: String, data: [String: Any], timeout: TimeInterval? = nil) async throws -> T {
         // Fail fast with a friendly message instead of an opaque
         // UNAUTHENTICATED from the backend. Also keeps `user` fresh.
         guard let currentUser = Auth.auth().currentUser else {
@@ -1338,7 +1342,9 @@ final class AppModel: NSObject, ObservableObject {
 
         // The SDK attaches the Auth ID token and App Check token itself —
         // this is the exact pattern deleteAccount has always used.
-        let result = try await callableFunctions.httpsCallable(name).call(data)
+        let callable = callableFunctions.httpsCallable(name)
+        if let timeout { callable.timeoutInterval = timeout }
+        let result = try await callable.call(data)
 
         // Callables surface the function's return value as
         // `HTTPSCallableResult.data` (an `Any` of JSON-compatible values).

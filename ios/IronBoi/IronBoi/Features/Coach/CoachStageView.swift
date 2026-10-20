@@ -90,6 +90,9 @@ struct CoachStageView: View {
     /// Message ids that existed when a voice turn was sent; the first new
     /// finished coach message after that is the reply to read aloud.
     @State private var awaitingReplyAfter: Set<String>?
+    /// When that question went out: a reply that turns up much later (the
+    /// signal dropped) is shown, not spoken out of the blue.
+    @State private var awaitingSince = Date()
     /// A hands-free conversation is running: listen → you pause → Coach
     /// thinks → Coach speaks → listen again, until you tap.
     @State private var conversationActive = false
@@ -274,7 +277,10 @@ struct CoachStageView: View {
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
-        .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
+        .onChange(of: appModel.activeWorkout == nil) { _, ended in
+            keepAwake()
+            voice.allowsDeviceVoice = ended
+        }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
         .onChange(of: liveWorkoutNote) { _, note in
             if live.isActive, let note { live.note(note) }
@@ -292,7 +298,11 @@ struct CoachStageView: View {
                 }
                 handleUtterance(text)
             }
-            voice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+            voice.fetchAudio = { [appModel] text, engine in try await appModel.synthesizeSpeech(text, engine: engine) }
+            // A line that can't be spoken in the coach's voice mid-workout is
+            // shown instead (the voice never switches to the device's).
+            voice.onUnspoken = { text in show(notice: text) }
+            voice.allowsDeviceVoice = appModel.activeWorkout == nil
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
             sayWelcomeIfNew()
@@ -1335,6 +1345,10 @@ struct CoachStageView: View {
         // Live dropped for good: the regular coach carries on in the same
         // voice, without a word about it, and live is tried again later.
         live.onDropped = { liveDropped() }
+        // After any reconnect or handover, the coach is told where you are.
+        live.onReconnected = { [live] in
+            if let note = liveWorkoutNote { live.note(note) }
+        }
         live.onSafetyStop = { line in
             // The server's severe screen fired: the live session is over
             // and the regular voice says the stop line.
@@ -1366,6 +1380,76 @@ struct CoachStageView: View {
         }
     }
 
+    static let lostSignalLine = "Lost signal for a sec. I've still got your count and your timer."
+
+    /// Every line the app is likely to say today, built the same way it will
+    /// be said, so each sentence can be made ready ahead of time. Variable
+    /// bits (an exact rep count you stopped at) won't all be here; those are
+    /// fetched when needed.
+    private func todaysScript() -> [String] {
+        guard let workout = appModel.activeWorkout else { return [] }
+        var lines: [String] = [Self.lostSignalLine, "Go.", "Go!", "Ten seconds.", "Halfway. Breathe.", "3", "2", "1",
+                               "Get in position.", "Hold time! Get in position.", "Okay.", "Got it. I'll stop.",
+                               "Good to know. I'll keep that coming.", "That's okay.",
+                               "Stop there. Never push through pain.", "Catch your breath, and go when you're ready.",
+                               "Good. Same again.", "That's the spot.", "Perfect, keep it there.", "Take an extra thirty, then.",
+                               "How did that feel? Easy, good, or hard?", "How was that one? Too light, about right, or tough?",
+                               "Want me to take a little weight off for the next one?", "Nice and steady.",
+                               "Let's go!", "Strong!", "That's it!", "Nice work!", "Big set.", "Clean reps.",
+                               "Nice.", "Good set.", "Solid.", "Steady.", "That's the one.",
+                               "Strong work.", "That was solid.", "Nailed it.", "Good stuff.", "Good work.", "Well done.",
+                               "That's the workout. Well done.", "That's a wrap! You crushed it.", "Done! That was a strong session.",
+                               "Workout complete! Huge effort today.", "And that's the workout! Proud of you.",
+                               "All done. Good, steady work today.", "Finished. That was solid work.",
+                               "Count your reps out loud. I'll keep track.", "Switch sides.", "First side.", "Other side.",
+                               "Breathe into it.", "Long exhale.", "Relax into it.", "Let your shoulders drop.",
+                               "That's the cooldown. You'll thank yourself tomorrow!", "That's the cooldown. Good work today.",
+                               "Okay. Good work today.", "Good work today. See you next time!"]
+        for seconds in [45, 60, 75, 90, 105, 120, 150] {
+            lines.append("Rest \(WorkoutCoaching.spokenDuration(seconds)).")
+            lines.append("\(WorkoutCoaching.spokenDuration(seconds).capitalizingFirst) it is.")
+        }
+        for (i, exercise) in workout.exercises.enumerated() {
+            let timed = ExerciseKnowledge.isTimed(exercise.name)
+            let weight = appModel.workingWeight(for: exercise)
+            let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
+            let side = WorkoutVoice.isEachSide(exercise.name) ? " each side" : ""
+            for lead in i == 0 ? ["First up", "Let's go! First up", "Here it is again"] : ["Next up", "Here it is again"] {
+                lines.append(timed
+                    ? "\(lead), \(exercise.name). \(exercise.targetSets) holds of \(exercise.targetReps) seconds\(side)\(load). I'll start the clock once you're in position."
+                    : "\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(side)\(load).")
+            }
+            if let motion = ExerciseMotion.match(exercise.name) {
+                lines += ExerciseLesson.beats(for: motion).map(\.line)
+            }
+            for set in 1...max(1, exercise.targetSets) { lines.append("Set \(set) done.") }
+            if timed { lines.append("Go. \(max(5, min(exercise.targetReps, 600))) seconds.") }
+            lines += ExerciseKnowledge.lookup(exercise.name).cues.map { cue in
+                "Next one: " + cue.prefix(1).lowercased() + cue.dropFirst().trimmingCharacters(in: .punctuationCharacters) + "."
+            }
+            let short = Self.short(exercise.name).lowercased()
+            lines.append("That's \(short) done.")
+            let stretches = WorkoutCoaching.stretches(after: exercise.name).map { $0.name.lowercased() }
+            if !stretches.isEmpty {
+                let list = stretches.count == 2 ? "a \(stretches[0]) and a \(stretches[1])" : "a \(stretches[0])"
+                lines.append("Do \(list) after, so it's less sore tomorrow.")
+            }
+        }
+        // The warm-up and the likely cooldown, move by move.
+        let warmup = WorkoutCoaching.warmup(for: workout.exercises.map(\.name))
+        let cooldown = WorkoutCoaching.cooldown(for: workout.exercises.map { ($0.name, $0.targetSets) })
+        lines += ["Let's get warm first. About a minute and a half. Say skip if you're already warm.",
+                  "A quick warm-up first, about a minute and a half. Say skip if you're already warm."]
+        for routine in [warmup, cooldown] {
+            for (i, move) in routine.enumerated() {
+                let lead = i == 0 ? "" : i == routine.count - 1 ? "Last one. " : "Next, "
+                lines.append(lead + WorkoutCoaching.spoken(move))
+                lines.append(move.cue)
+            }
+        }
+        return lines
+    }
+
     /// The warm-up was cut short before any lifting: start it again.
     private func resumeWarmupIfPending() {
         guard warmupPending, guided == nil, !appModel.activeWorkoutHasProgress,
@@ -1376,6 +1460,11 @@ struct CoachStageView: View {
     private func liveDropped() {
         voice.redirect = nil
         voiceInput.useExternalFeed(false)
+        // Said in the coach's own voice (it's prepared), so you know why the
+        // chat went quiet, and that the workout itself hasn't.
+        if appModel.activeWorkout != nil, conversationActive {
+            confirm(Self.lostSignalLine)
+        }
         // Mid-workout the regular loop is already running alongside; outside
         // one, live was the whole conversation, so the regular one starts.
         if conversationActive {
@@ -2557,6 +2646,9 @@ struct CoachStageView: View {
                 director.rest()
             }
             resetCoachingForWorkout()
+            // Everything predictable for today, made ready on the phone now,
+            // so it's instant and survives losing signal.
+            voice.prepare(todaysScript())
             if let first = currentExerciseIndex { introduce(exercise: first, first: true) }
             offerVoiceIsolation()
         }
@@ -3026,6 +3118,7 @@ struct CoachStageView: View {
         case .to(let name):
             UserDefaults.standard.set(name, forKey: CoachVoiceOption.storageKey)
             UserDefaults.standard.set(true, forKey: CoachVoiceOption.chosenKey)
+            if appModel.activeWorkout != nil { voice.prepare(todaysScript()) }
             appModel.rememberFromUser(factId: "coach-voice", category: "preference",
                                       content: "Wants the coach to use the \(CoachVoiceOption.voice(named: name).feel.rawValue) \(CoachVoiceOption.voice(named: name).female ? "female" : "male") voice (asked for it by voice).")
             if live.isActive {
@@ -3147,6 +3240,7 @@ struct CoachStageView: View {
         if let move = MoveCue.move(in: trimmed) { director.perform(move) }
         if spoken, conversationActive {
             awaitingReplyAfter = Set(appModel.messages.map(\.id))
+            awaitingSince = Date()
         } else if !spoken {
             // Typed: the answer comes back as text, not voice.
             typedReplyAfter = Set(appModel.messages.map(\.id))
@@ -3202,6 +3296,12 @@ struct CoachStageView: View {
         }) else { return }
         awaitingReplyAfter = nil
         guard conversationActive else { return }
+        if Date().timeIntervalSince(awaitingSince) > 20 {
+            AudioHub.log("reply came late (\(Int(Date().timeIntervalSince(awaitingSince))) s): shown, not spoken")
+            show(notice: String(reply.content.prefix(160)))
+            resumeListening()
+            return
+        }
         // You're counting a set: the reply (often to the set before, a few
         // seconds late) waits until this one is logged, instead of talking
         // over the count and drowning it out.
