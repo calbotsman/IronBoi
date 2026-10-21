@@ -215,7 +215,7 @@ struct LiveWorkoutCard: View {
                         .foregroundStyle(exercise.exerciseDone ? MyoColor.Text.tertiary.color : MyoColor.Text.primary.color)
                         .strikethrough(exercise.exerciseDone, color: MyoColor.Text.tertiary.color)
                         .lineLimit(2)
-                    Text(WorkoutCoaching.setsOf(exercise.targetSets, exercise.targetReps, timed: ExerciseKnowledge.isTimed(exercise.name)))
+                    Text(WorkoutCoaching.setsOf(exercise.targetSets, exercise.targetReps, timed: ExerciseKnowledge.isTimed(exercise.name), minutes: ExerciseKnowledge.isMinutes(exercise.name)))
                         .font(.system(.caption))
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                 }

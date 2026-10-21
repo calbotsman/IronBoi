@@ -718,23 +718,70 @@ export function buildWorkoutPlanFromProfile(
     // Fit the plan to what they have and how long they've trained.
     equipment?: string[];
     trainingExperience?: z.infer<typeof UserHealthProfile>["trainingExperience"];
+    goals?: readonly string[];
   },
   defaultPlan: Record<string, PlannedWorkoutDayType>,
   now: string,
 ) {
+  const days = selectPlanDays(
+    defaultPlan,
+    profile.schedule.daysPerWeek ?? 3,
+    profile.schedule.preferredDays,
+    profile.trainingFocus,
+    { equipment: profile.equipment, experience: profile.trainingExperience },
+  );
   return WorkoutPlan.parse({
     userId,
     planId: "current",
     source: "coach_generated",
-    days: selectPlanDays(
-      defaultPlan,
-      profile.schedule.daysPerWeek ?? 3,
-      profile.schedule.preferredDays,
-      profile.trainingFocus,
-      { equipment: profile.equipment, experience: profile.trainingExperience },
-    ),
+    days: profile.goals?.includes("fat_loss") ? addFatLossWork(days, profile.trainingExperience) : days,
     updatedAt: now,
   });
+}
+
+export const FAT_LOSS_FINISHER = "Burpees";
+export const FAT_LOSS_CARDIO = "Zone 2 Walk/Jog";
+
+/**
+ * Fat loss is mostly what happens outside the lifting, so a fat-loss plan
+ * gets two things on top of it: a short conditioning finisher at the end of
+ * each lifting day (3 rounds of burpees, fewer for a beginner), and easy
+ * zone-2 cardio — a brisk walk or easy jog, 30 minutes (reps are minutes
+ * for this one) — on up to two rest days, spaced between lifting days. A
+ * daily step target is the coach's to set and check (prompt.ts).
+ */
+export function addFatLossWork(
+  days: Record<string, PlannedWorkoutDayType>,
+  experience?: string,
+): Record<string, PlannedWorkoutDayType> {
+  const out: Record<string, PlannedWorkoutDayType> = { ...days };
+  const finisherReps = experience === "new" ? 6 : experience === "advanced" ? 12 : 8;
+  for (const day of WEEK_ORDER) {
+    const session = out[day];
+    if (!session || session.exercises.length === 0) continue;
+    if (session.exercises.some((exercise) => exercise.name === FAT_LOSS_FINISHER)) continue;
+    out[day] = {
+      ...session,
+      exercises: [...session.exercises, { name: FAT_LOSS_FINISHER, sets: 3, reps: finisherReps, weight: 0 }],
+    };
+  }
+  // Rest days that sit between lifting days first, so cardio never lands
+  // the day before a heavy session twice in a row.
+  const rest = WEEK_ORDER.filter((day) => (out[day]?.exercises.length ?? 0) === 0);
+  const lifting = (day: string) => (out[day]?.exercises.length ?? 0) > 0;
+  const between = rest.filter((day) => {
+    const i = WEEK_ORDER.indexOf(day);
+    return lifting(WEEK_ORDER[(i + 6) % 7]) && lifting(WEEK_ORDER[(i + 1) % 7]);
+  });
+  const picks = [...new Set([...between, ...rest])].slice(0, 2);
+  for (const day of picks) {
+    out[day] = {
+      name: "Easy cardio",
+      muscles: ["Conditioning"],
+      exercises: [{ name: FAT_LOSS_CARDIO, sets: 1, reps: 30, weight: 0 }],
+    };
+  }
+  return out;
 }
 
 /**

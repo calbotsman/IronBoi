@@ -35,7 +35,10 @@ enum WorkoutEdit: Equatable {
         // with a pronoun after ("do I need to…", "is this enough"). Bare "do"
         // and polite "can we / could you" are commands ("do squats next",
         // "can we swap the bench").
-        let isQuestion = transcript.contains("?")
+        // "Can you change the inverted row for me?" is a request, question
+        // mark or not.
+        let politeRequest = t.range(of: #"^(?:hey |ok |okay )?(can|could|would|will) (you|we|i)\b"#, options: .regularExpression) != nil
+        let isQuestion = (transcript.contains("?") && !politeRequest)
             || t.range(of: #"^(what|how|when|why|where|which|who|should)\b"#, options: .regularExpression) != nil
             || t.range(of: #"^(do|does|did|will|is|are)\s+(i|we|you|it|they|there|this|that)\b"#,
                        options: .regularExpression) != nil
@@ -45,7 +48,7 @@ enum WorkoutEdit: Equatable {
             || first(#"^i'?m done for (the day|today)\b"#) != nil {
             return .finish
         }
-        let vague = #"^(?:something|anything|another|an alternative|alternative|a different|different|an easier|something easier|something different|something else|another one|something lighter)(?: one| exercise| lift| movement| move| else| option)?$"#
+        let vague = #"^(?:something|anything|another|an alternative|alternative|a different|different|an easier|something easier|something different|something else|another one|something lighter)(?: one| exercise| lift| movement| move| else| option| workout| thing)?(?: for me| please| instead)*$"#
         if let m = first(#"\b(?:swap|switch|replace|sub|substitute|trade|change)(?: out)? (?:the )?(.+?) (?:for|with) (.+)$"#),
            let index = find(m[0]) {
             let target = m[1].trimmingCharacters(in: .whitespaces)
@@ -56,7 +59,7 @@ enum WorkoutEdit: Equatable {
            let index = find(m[0]) {
             return .swapForSomething(index)
         }
-        if let m = first(#"^(?:can (?:we|i|you) |let's |lets |i want to |i'd like to )?(?:swap|switch|replace|sub|change)(?: out)? (?:the |this |that )?(.+?)(?: please)?$"#),
+        if let m = first(#"^(?:can (?:we|i|you) |let's |lets |i want to |i'd like to )?(?:swap|switch|replace|sub|change)(?: out)? (?:the |this |that )?(.+?)(?: for me)?(?: please)?\??$"#),
            !m[0].contains(" for "), !m[0].contains(" with "), let index = find(m[0]) {
             return .swapForSomething(index)
         }

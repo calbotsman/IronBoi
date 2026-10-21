@@ -265,7 +265,11 @@ final class VoiceInputEngine: ObservableObject {
 
     /// The words a workout is made of, so the recogniser leans toward
     /// them: a count ("seven" over "heaven"), and the set being called.
-    private static let workoutWords: [String] = [
+    /// Today's exercise names and the like, added to what the recogniser
+    /// listens for (set when a workout starts).
+    static var extraWords: [String] = []
+    private static var workoutWords: [String] { baseWords + extraWords }
+    private static let baseWords: [String] = [
         "MYO", "Coach", "set done", "sets done", "done", "reps", "skip rest", "I can't", "too heavy", "seconds", "pounds", "go",
         "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",

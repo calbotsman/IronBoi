@@ -14,7 +14,9 @@ struct TodayWorkoutCard: View {
     }
 
     /// Today's session; nil on a rest day (a day with nothing in it counts).
-    private var today: PlannedWorkoutDay? { appModel.todayPlanDay }
+    /// What you'll actually get when you tap Start (a first session is the
+    /// shorter starter).
+    private var today: PlannedWorkoutDay? { appModel.todayPreviewDay }
 
     /// The next planned day after today, for the rest-day card.
     private var nextDay: PlannedWorkoutDay? {
@@ -93,6 +95,19 @@ struct TodayWorkoutCard: View {
                     }
                 }
                 .padding(.top, 2)
+                if appModel.profile.goals.contains(.fatLoss) {
+                    // Most fat loss happens outside the lifting.
+                    Label("Steps goal today: 8,000", systemImage: "figure.walk")
+                        .font(.footnote)
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                        .padding(.top, 2)
+                }
+                if appModel.todayIsStarter {
+                    Text("Your first session: a shorter one, to find your numbers.")
+                        .font(.footnote)
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                        .padding(.top, 2)
+                }
 
                 if !day.muscles.isEmpty {
                     FlowLayout(spacing: 6) {
@@ -148,7 +163,7 @@ struct TodayWorkoutCard: View {
             Spacer(minLength: MyoTheme.Spacing.sm)
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(WorkoutCoaching.setsOf(exercise.sets, exercise.reps, timed: ExerciseKnowledge.isTimed(exercise.name)))
+                Text(WorkoutCoaching.setsOf(exercise.sets, exercise.reps, timed: ExerciseKnowledge.isTimed(exercise.name), minutes: ExerciseKnowledge.isMinutes(exercise.name)))
                     .font(.system(.body).weight(.semibold))
                     .foregroundStyle(MyoColor.Text.primary.color)
                 Text(exercise.weight > 0 ? "\(Self.pounds(exercise.weight)) lb" : "bodyweight")

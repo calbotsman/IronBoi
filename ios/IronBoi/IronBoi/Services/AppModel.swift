@@ -667,6 +667,24 @@ final class AppModel: NSObject, ObservableObject {
         currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() && !$0.exercises.isEmpty }
     }
 
+    /// What today's session will actually be when you start it: the plan's
+    /// day — or, on a very first session, the shorter starter the server
+    /// trims it to (4 lifts, 2 sets each), so the preview never promises 4
+    /// sets and starts 2.
+    var todayPreviewDay: PlannedWorkoutDay? {
+        guard let day = todayPlanDay else { return nil }
+        guard todayIsStarter else { return day }
+        let starter = day.exercises.filter { $0.sets > 0 }.prefix(4)
+            .map { PlannedExercise(name: $0.name, sets: min($0.sets, 2), reps: $0.reps, weight: $0.weight) }
+        return PlannedWorkoutDay(dayKey: day.dayKey, name: day.name, muscles: day.muscles, exercises: Array(starter))
+    }
+
+    /// Today will start as the first-session starter (same rule as the server).
+    var todayIsStarter: Bool {
+        guard let day = todayPlanDay else { return false }
+        return isNewToTraining && !day.isAdjusted
+    }
+
     /// There's a plan, and nothing in it today.
     var isRestDay: Bool {
         currentWorkoutPlan != nil && todayPlanDay == nil
@@ -827,6 +845,12 @@ final class AppModel: NSObject, ObservableObject {
         guard let workout = activeWorkout else { return ["ok": false, "error": "no_active_workout"] }
         guard let replacement = (args["replacementName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !replacement.isEmpty else { return ["ok": false, "error": "replacementName_required"] }
+        // "Different workout", "something else": not an exercise. Ask for
+        // a real one (find_exercise_swaps) rather than add a lift by that name.
+        if replacement.lowercased().range(of: #"^(a |an |another |some )?(different|other|new|alternative|something|anything)( else)?( workout| exercise| one| lift| move)?$"#,
+                                          options: .regularExpression) != nil {
+            return ["ok": false, "error": "not_an_exercise_name: call find_exercise_swaps and offer real options"]
+        }
         func key(_ s: String) -> String { s.lowercased().filter { $0.isLetter } }
         let named = (args["exerciseName"] as? String).map(key)
         let index = named.flatMap { want in

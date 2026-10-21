@@ -280,6 +280,7 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
     trainingFocus: focus.success ? focus.data : undefined,
     equipment: Array.isArray(profileData.equipment) ? (profileData.equipment as string[]) : undefined,
     trainingExperience: experience.success ? experience.data : undefined,
+    goals: Array.isArray(profileData.goals) ? (profileData.goals as string[]) : undefined,
     schedule: {
       daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
         ? profileData.schedule.daysPerWeek

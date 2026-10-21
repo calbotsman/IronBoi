@@ -1,3 +1,4 @@
+import { FAT_LOSS_CARDIO } from "../onboarding/flow.js";
 import { createRequire } from "node:module";
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
@@ -120,6 +121,8 @@ export async function updateTrainingSetup(
         trainingFocus: focus.success ? focus.data : undefined,
         equipment: equipment ?? (Array.isArray(current.equipment) ? current.equipment : undefined),
         trainingExperience: experience.success ? experience.data : undefined,
+        // The goals just set win over the saved ones (build muscle → no fat-loss cardio).
+        goals: (change as { goals?: string[] }).goals ?? (Array.isArray(current.goals) ? (current.goals as string[]) : undefined),
       },
       seed.DEFAULT_PLAN,
       now,
@@ -150,6 +153,10 @@ export async function updateTrainingSetup(
 
 function currentTrainingDays(days: unknown): string[] {
   if (!days || typeof days !== "object") return [];
-  const map = days as Record<string, { exercises?: unknown[] }>;
-  return WEEK.filter((day) => Array.isArray(map[day]?.exercises) && map[day]!.exercises!.length > 0);
+  const map = days as Record<string, { exercises?: Array<{ name?: string }> }>;
+  // A fat-loss plan's easy-cardio day isn't one of their training days.
+  return WEEK.filter((day) => {
+    const exercises = map[day]?.exercises;
+    return Array.isArray(exercises) && exercises.length > 0 && !exercises.every((exercise) => exercise?.name === FAT_LOSS_CARDIO);
+  });
 }

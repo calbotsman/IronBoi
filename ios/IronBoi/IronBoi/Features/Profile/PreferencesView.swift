@@ -8,6 +8,7 @@ struct PreferencesView: View {
     /// the fast voice); off falls back to the regular coach.
     @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = true
     /// Gemini Live or OpenAI Realtime — the voice A/B.
+    @AppStorage(AudioHub.duckMusicKey) private var duckMusic = false
     @AppStorage(LiveVoiceSession.providerKey) private var liveVoiceProvider = LiveVoiceSession.Provider.gemini.rawValue
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -396,6 +397,14 @@ struct PreferencesView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
             }
+
+            MyoValueRow(label: "Lower my music while coaching") {
+                Toggle("Lower my music while coaching", isOn: $duckMusic).labelsHidden()
+            }
+            Text("With headphones your music stays at full volume and the coach talks over it. Turn this on to lower it for the whole workout instead.")
+                .font(.caption)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
 
             MyoValueRow(label: "Live voice") {
                 Toggle("Live voice", isOn: $liveVoiceBeta).labelsHidden()

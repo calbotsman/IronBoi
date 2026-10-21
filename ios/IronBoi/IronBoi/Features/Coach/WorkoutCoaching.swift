@@ -8,8 +8,9 @@ enum WorkoutCoaching {
 
     /// "3 sets of 10", "3 sets of 30 s", "1 set of 8" — spelled out, so
     /// nobody has to decode "3 × 10".
-    static func setsOf(_ sets: Int, _ reps: Int, timed: Bool) -> String {
-        "\(sets) \(sets == 1 ? "set" : "sets") of \(reps)\(timed ? " s" : "")"
+    static func setsOf(_ sets: Int, _ reps: Int, timed: Bool, minutes: Bool = false) -> String {
+        if minutes { return sets == 1 ? "\(reps) min" : "\(sets) × \(reps) min" }
+        return "\(sets) \(sets == 1 ? "set" : "sets") of \(reps)\(timed ? " s" : "")"
     }
 
     // MARK: - Stretches and warm-ups
