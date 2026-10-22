@@ -42,6 +42,10 @@ final class LiveVoiceSession: ObservableObject {
     static var provider: Provider {
         Provider(rawValue: UserDefaults.standard.string(forKey: providerKey) ?? "") ?? .gemini
     }
+    /// Set while a count is running: the coach's audio is dropped (its mic
+    /// can be closed for a whole set, but the exercise intro still has to
+    /// play, so playback follows the count, not the mic).
+    var quietForCount = false
     /// The provider of the connection that's open now.
     private(set) var activeProvider: Provider = .gemini
     private var openAI: Bool { activeProvider == .openai }
@@ -767,7 +771,7 @@ final class LiveVoiceSession: ObservableObject {
     private func play(_ buffer: AVAudioPCMBuffer) {
         // You're counting a set (the mic to the coach is muted for it): the
         // coach stays quiet until it's logged, even audio already on its way.
-        if uplinkMuted || Date() < quietUntil { return }
+        if quietForCount || Date() < quietUntil { return }
         if !hub.engine.isRunning { try? hub.start() }
         state = .speaking
         uplink.coachSpeaking = true

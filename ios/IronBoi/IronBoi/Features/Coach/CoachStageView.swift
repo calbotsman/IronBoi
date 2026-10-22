@@ -344,6 +344,7 @@ struct CoachStageView: View {
             // shown instead (the voice never switches to the device's).
             voice.onUnspoken = { text in show(notice: text) }
             voice.allowsDeviceVoice = appModel.activeWorkout == nil
+            appModel.warmVoice()
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
             sayWelcomeIfNew()
@@ -1158,6 +1159,7 @@ struct CoachStageView: View {
     /// The first session is on offer any day; after that, rest days ask.
     private var startTitle: String {
         if appModel.isNewToTraining { return "Start your first session" }
+        if appModel.isRestDay, let run = appModel.todayRun { return "\(run.label) today · lift anyway?" }
         return appModel.isRestDay ? "Rest day · train anyway?" : "Start my workout"
     }
 
@@ -1171,7 +1173,8 @@ struct CoachStageView: View {
                 if appModel.isWorkoutBusy {
                     ProgressView().tint(MyoTheme.Colors.ink)
                 } else {
-                    Image(systemName: appModel.isRestDay && !appModel.isNewToTraining ? "moon.zzz.fill" : "play.fill")
+                    Image(systemName: appModel.isRestDay && !appModel.isNewToTraining
+                          ? (appModel.todayRun != nil ? "figure.run" : "moon.zzz.fill") : "play.fill")
                         .font(.footnote.weight(.bold))
                 }
                 Text(startTitle).font(.body.weight(.semibold))
@@ -1427,6 +1430,7 @@ struct CoachStageView: View {
                 // late, or in the wrong language. Live stays quiet for them
                 // and is told what was said, so the conversation keeps up.
                 voice.redirect = { [live] text in live.yieldTo(text); return false }
+                updateLiveUplink()
                 conversationActive = true
                 silentRestarts = []
                 voiceInput.toggle()
@@ -1481,7 +1485,7 @@ struct CoachStageView: View {
             for set in 1...max(1, exercise.targetSets) { lines.append("Set \(set) done.") }
             if timed, !ExerciseKnowledge.isMinutes(exercise.name) { lines.append("Go. \(ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps)) seconds.") }
             lines += ExerciseKnowledge.lookup(exercise.name).cues.map { cue in
-                "Next one: " + cue.prefix(1).lowercased() + cue.dropFirst().trimmingCharacters(in: .punctuationCharacters) + "."
+                "On the next set, " + cue.prefix(1).lowercased() + cue.dropFirst().trimmingCharacters(in: .punctuationCharacters) + "."
             }
             let short = Self.short(exercise.name).lowercased()
             lines.append("That's \(short) done.")
@@ -1564,6 +1568,26 @@ struct CoachStageView: View {
 
     private var currentExercise: ActiveWorkoutExercise? {
         currentExerciseIndex.flatMap { appModel.activeWorkout?.exercises[$0] }
+    }
+
+    /// The exercise "it" means in "I did it with 50": the current one if
+    /// you've done a set of it, else the last one you did sets of.
+    private var lastWorkedExerciseIndex: Int? {
+        guard let exercises = appModel.activeWorkout?.exercises else { return nil }
+        if let index = currentExerciseIndex, exercises[index].completedSets.contains(where: \.completed) { return index }
+        let before = currentExerciseIndex ?? exercises.count
+        return exercises.indices.last { $0 < before && exercises[$0].completedSets.contains(where: \.completed) }
+            ?? currentExerciseIndex
+    }
+
+    private func correctDoneWeight(_ index: Int, to pounds: Double) {
+        guard let exercise = appModel.activeWorkout?.exercises[index] else { return }
+        appModel.setDoneSetsWeight(exerciseIndex: index, weight: pounds)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        let done = exercise.completedSets.filter(\.completed).count
+        confirm(done > 0
+            ? "Got it. \(Self.short(exercise.name)) logged at \(LiveWorkoutCard.pounds(max(0, pounds))) pounds."
+            : "\(Self.short(exercise.name)) at \(LiveWorkoutCard.pounds(max(0, pounds))) pounds.")
     }
 
     /// The exercise being counted: the one whose set this count closed, or
@@ -1704,12 +1728,22 @@ struct CoachStageView: View {
                 // You didn't count — "set done", "two sets done".
                 // Sets still open (not targetSets − done: those can disagree
                 // after sets are ticked out of order and the count changed).
+                // "It was 2 sets at 10 with 50 pounds": the weight too.
+                let weight: Double? = {
+                    guard case .to(let pounds)? = WorkoutVoice.weightChange(in: text) else { return nil }
+                    return pounds
+                }()
                 let left = exercise.completedSets.filter { !$0.completed }.count
                 let count = max(0, min(logged.sets ?? left, left))
                 guard count > 0 else {
-                    confirm("\(Self.short(exercise.name)) is already done.")
+                    if let weight, let done = lastWorkedExerciseIndex {
+                        correctDoneWeight(done, to: weight)
+                    } else {
+                        confirm("\(Self.short(exercise.name)) is already done.")
+                    }
                     return
                 }
+                if let weight { appModel.setWorkoutExerciseWeight(exerciseIndex: index, weight: weight) }
                 var last: Int?
                 for _ in 0..<count {
                     last = appModel.completeNextSet(exerciseIndex: index, reps: logged.reps ?? exercise.targetReps)
@@ -1717,6 +1751,12 @@ struct CoachStageView: View {
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 let head = count == 1 ? "Set \(last ?? 1) done." : "\(count) sets logged."
                 confirm(count == 1 ? afterSet(head, exerciseIndex: index) : head + restLine(afterSetOn: index))
+                return
+            } else if short, case .to(let pounds)? = WorkoutVoice.weightChange(in: text, timed: currentExercise.map { ExerciseKnowledge.isTimed($0.name) } ?? false), WorkoutVoice.isPastTense(text),
+                      let done = lastWorkedExerciseIndex {
+                // "I did it with a 50 pound kettlebell": the sets you've done
+                // were at 50, so the log and the card say 50.
+                correctDoneWeight(done, to: pounds)
                 return
             } else if short, let change = WorkoutVoice.weightChange(in: text, timed: currentExercise.map { ExerciseKnowledge.isTimed($0.name) } ?? false),
                       let index = currentExerciseIndex,
@@ -1750,7 +1790,9 @@ struct CoachStageView: View {
             // Only long run-ons (music, people nearby) are dropped now;
             // anything you say to it gets through, "MYO" or not.
             // No hint for these: they're music or other people, not you.
-            if currentExerciseIndex != nil, !(addressed || justAsked), !short {
+            if currentExerciseIndex != nil, !addressed,
+               !short || !WorkoutVoice.worthSendingMidWorkout(text, justAsked: justAsked) {
+                if short { AudioHub.log("dropped mid-workout: \(text.prefix(60))") }
                 markRestartHandled()
                 resumeListening()
                 return
@@ -1812,9 +1854,10 @@ struct CoachStageView: View {
             // Every number, not just the first: the coach may have started
             // a late reply mid-count.
             live.hush()
-            live.setUplinkMuted(true)
         }
         repCount = count
+        // After the count moves, so the coach goes quiet from the first number.
+        updateLiveUplink()
         voiceInput.holdOpen = true
         // You're lifting again: the rest is over, quietly.
         if restEndsAt != nil { cancelRest() }
@@ -1860,7 +1903,7 @@ struct CoachStageView: View {
         repCount = 0
         countBase = 0
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        show(notice: "Other side")
+        show(notice: "Next side")
         closeCountTask?.cancel()
         closeCountTask = Task {
             try? await Task.sleep(nanoseconds: 30_000_000_000)
@@ -1869,11 +1912,12 @@ struct CoachStageView: View {
         // A fresh transcript, so the other side's "one" counts as one.
         markRestartHandled()
         voiceInput.stop()
-        if live.isActive || tips == .quiet || !speaksReplies {
-            // The live coach is held quiet for the whole set: a tone says it.
+        updateLiveUplink()
+        if tips == .quiet || !speaksReplies {
             resumeListening()
         } else {
-            voice.speak("Other side.", messageId: "local-\(UUID().uuidString)")
+            // In live voice this goes to the live coach, in its own voice.
+            voice.speak("Alright, next side.", messageId: "local-\(UUID().uuidString)")
         }
     }
 
@@ -1902,7 +1946,7 @@ struct CoachStageView: View {
         countBase = 0
         countedSet = nil
         voiceInput.holdOpen = false
-        if live.isActive { live.setUplinkMuted(false) }
+        updateLiveUplink()
         // A stray "one, two" that never became a set: drop what was heard so
         // it isn't sent to Coach as a message when the pause check fires.
         func discardHeard() {
@@ -1958,6 +2002,7 @@ struct CoachStageView: View {
     private func afterSet(_ head: String, exerciseIndex index: Int?) -> String {
         var line = head
         var question: String?
+        var tip: String?
         if let index, let exercise = appModel.activeWorkout?.exercises[index] {
             let reps = exercise.completedSets.last(where: \.completed)?.reps ?? exercise.targetReps
             let timed = ExerciseKnowledge.isTimed(exercise.name)
@@ -1971,10 +2016,14 @@ struct CoachStageView: View {
                                          targetSets: exercise.targetSets, reps: reps, target: exercise.targetReps,
                                          timed: timed, hype: tone == .hype, tipsFull: tips == .full) {
                 lastAdvice = (advice.kind, advice.text, index, Date())
-                if advice.asks { question = advice.text } else { line += " " + advice.text }
+                // A tip is for the next set, so it comes after the rest
+                // ("Rest sixty seconds. On the next set, …"); a question
+                // comes last, so it's what you answer.
+                if advice.asks { question = advice.text } else if advice.kind == .cue { tip = advice.text } else { line += " " + advice.text }
             }
         }
         line += restLine(afterSetOn: index)
+        if let tip { line += " " + tip }
         if let question {
             line += " " + question
             askedAt = Date()
@@ -2341,6 +2390,17 @@ struct CoachStageView: View {
         return "If you're in a rush, the one thing to do is a \(top.name.lowercased()), \(top.seconds) seconds\(top.eachSide ? " each side" : "")." + rest
     }
 
+    /// Live voice in a workout: the coach's mic is open while you rest and
+    /// closed during a set, so a count ("two" heard as "to") is never taken
+    /// as a question. "MYO, …" mid-set still reaches it (the phone passes
+    /// it on). Outside a workout it's always open.
+    private func updateLiveUplink() {
+        guard live.isActive else { return }
+        let inSet = appModel.activeWorkout != nil && currentExerciseIndex != nil && restEndsAt == nil
+        live.setUplinkMuted(inSet || repCount > 0 || holdEndsAt != nil)
+        live.quietForCount = repCount > 0
+    }
+
     // MARK: - Timed holds (planks, carries)
 
     /// "Go", "start", "ready" begin a hold; "done", "stop" end it early.
@@ -2493,6 +2553,7 @@ struct CoachStageView: View {
         // Rest mode: the card folds away so the clock is what you see.
         if workoutExpanded { withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { workoutExpanded = false } }
         RestActivity.shared.show(endsAt: ends, next: restNextLabel)
+        updateLiveUplink()
         restTask = Task {
             var warned = false
             while !Task.isCancelled, restEndsAt == ends {
@@ -2533,6 +2594,7 @@ struct CoachStageView: View {
         restTask = nil
         restEndsAt = nil
         RestActivity.shared.end()
+        updateLiveUplink()
     }
 
     /// "Skip rest" / "go" / "ready" ends it; "thirty more" / "add a minute"
@@ -2880,6 +2942,7 @@ struct CoachStageView: View {
         endLesson()
         cancelRest()
         cancelHold()
+        if live.isActive { live.setUplinkMuted(false) }
         swapChoice = nil
         let recap = appModel.consumeRecap()
         let opener = Self.finishLine(hype: tone == .hype, first: recap?.firstWorkout == true)

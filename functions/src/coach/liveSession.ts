@@ -125,6 +125,67 @@ export async function mintLiveToken(args: {
   return { token: body.name, expiresAt };
 }
 
+// --- OpenAI Realtime (IRONBOI_LIVE_PROVIDER=openai) -------------------------
+// The same brain and tools, on OpenAI's speech-to-speech model. The server
+// mints a short-lived client secret with the session locked in (model,
+// instructions, voice, tools); the phone connects straight to OpenAI.
+
+/** Which provider live voice uses: OpenAI when the operator says so. */
+export function liveProvider(env: NodeJS.ProcessEnv = process.env): "openai" | "gemini" {
+  return env.IRONBOI_LIVE_PROVIDER === "openai" ? "openai" : "gemini";
+}
+
+export const OPENAI_REALTIME_MODEL_DEFAULT = "gpt-realtime-2.1";
+export const OPENAI_TRANSCRIBE_MODEL_DEFAULT = "gpt-4o-mini-transcribe";
+
+/** Our eight coach voices (COACH_VOICES) as OpenAI's: same gender, closest feel. */
+export const OPENAI_VOICES: Record<string, string> = {
+  Sulafat: "marin", Laomedeia: "shimmer", Kore: "sage", Achernar: "coral",
+  Achird: "cedar", Puck: "verse", Orus: "ash", Algieba: "echo",
+};
+
+export function openAIRealtimeSession(args: { model: string; voice: string; instruction: string; transcribeModel?: string }) {
+  return {
+    type: "realtime",
+    model: args.model,
+    instructions: args.instruction,
+    audio: {
+      input: {
+        format: { type: "audio/pcm", rate: 24000 },
+        transcription: { model: args.transcribeModel ?? OPENAI_TRANSCRIBE_MODEL_DEFAULT },
+        // Talking over the coach stops it; a finished thought gets a reply.
+        turn_detection: { type: "semantic_vad", interrupt_response: true, create_response: true },
+      },
+      output: { format: { type: "audio/pcm", rate: 24000 }, voice: OPENAI_VOICES[args.voice] ?? "marin" },
+    },
+    tools: liveToolDeclarations().map((tool) => ({
+      type: "function",
+      name: tool.name,
+      description: tool.description,
+      parameters: "parameters" in tool && tool.parameters ? tool.parameters : { type: "object", properties: {} },
+    })),
+    tool_choice: "auto",
+  };
+}
+
+export async function mintOpenAIClientSecret(args: {
+  apiKey: string;
+  session: ReturnType<typeof openAIRealtimeSession>;
+  fetchImpl?: typeof fetch;
+}): Promise<{ token: string; expiresAt: string }> {
+  const response = await (args.fetchImpl ?? fetch)("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${args.apiKey}` },
+    body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: TOKEN_MINUTES * 60 }, session: args.session }),
+  });
+  const body = (await response.json().catch(() => ({}))) as { value?: string; expires_at?: number; error?: { code?: string; message?: string } };
+  if (!response.ok || !body.value) {
+    throw new Error(`openai_secret_mint_failed:${response.status}:${body.error?.code ?? body.error?.message?.slice(0, 80) ?? "unknown"}`);
+  }
+  const expiresAt = new Date((body.expires_at ?? Date.now() / 1000 + TOKEN_MINUTES * 60) * 1000).toISOString();
+  return { token: body.value, expiresAt };
+}
+
 /** Counts a mint against the day's cap; false when the cap is reached. */
 export async function takeLiveMint(
   db: Firestore,

@@ -29,6 +29,8 @@ import { writeGeneralCoachMessage } from "../journey/messages.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import { ALL_SCREEN_NOTES, MODERATE_NOTE, readHealthScreen, screenOutcome } from "./healthScreen.js";
 import { reviseDraftFromWords, revisionReply } from "./revise.js";
+import { type UnderstandAnswer, type Understood, worthUnderstanding } from "./understand.js";
+import { RunningSetup, applyRunning } from "../workouts/running.js";
 
 export const OnboardingAnswerRequest = z.object({
   messageId: z.string().min(1).optional(),
@@ -36,6 +38,9 @@ export const OnboardingAnswerRequest = z.object({
   timestamp: z.string().datetime(),
   inputMode: CoachInputMode.default("text"),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
+  // Which answer this text is for, when it isn't the current question:
+  // gear mentioned while answering something else, kept for the gear step.
+  field: z.enum(["goals", "activities", "trainingExperience", "equipment", "preferredDays", "ageYears", "injuriesOrLimitations"]).optional(),
 });
 
 export const AcceptProgramProposalRequest = z.object({
@@ -68,6 +73,7 @@ const REQUIRED_FIELDS = [
 
 const QUESTIONS: Record<string, string> = {
   goals: "What do you want from training right now?",
+  activities: "What kind of training do you like, or want to try?",
   trainingExperience: "How much have you trained before?",
   equipment: "Where will you train, and with what?",
   ageYears: "A bit about you: how old are you?",
@@ -93,6 +99,7 @@ export async function processOnboardingAnswer(
   userId: string,
   request: OnboardingAnswerRequest,
   defaultPlan: Record<string, PlannedWorkoutDayType>,
+  understand?: UnderstandAnswer,
 ) {
   const turnId = request.messageId ?? `onboarding_${Date.now()}`;
   const profileRef = db.doc(profilePath(userId));
@@ -104,14 +111,22 @@ export async function processOnboardingAnswer(
     && Object.keys(request.structuredAnswer ?? {}).length === 0
     && request.content.trim().length > 0;
   const revision = revising ? reviseDraftFromWords(readDraft(current.onboardingDraft), request.content) : null;
-  const draft = revision
-    ? normalizeDraft(revision.draft)
-    : applyAnswer(
-      readDraft(current.onboardingDraft),
-      current.onboardingStep,
-      request.content,
-      request.structuredAnswer,
-    );
+  const step = request.field ?? current.onboardingStep;
+  const before = readDraft(current.onboardingDraft);
+  let draft = revision ? normalizeDraft(revision.draft) : applyAnswer(before, step, request.content, request.structuredAnswer);
+  // Free talk, read for everything it says: any question it answers, and
+  // notes in their words. Taps and short answers don't need it.
+  const understood = !revision && understand && worthUnderstanding(request.content)
+    ? await understand({ question: QUESTIONS[typeof step === "string" ? step : ""] ?? "Tell me about you.", content: request.content })
+    : null;
+  if (understood) {
+    draft = mergeUnderstood(draft, before, understood, typeof step === "string" ? step : undefined);
+    safeLogger.info("Onboarding answer understood", {
+      event: "onboarding_understood",
+      userId,
+      outcome: Object.keys(understood).join(","),
+    });
+  }
   const missingFields = missingRequiredFields(draft);
   const nextStep = missingFields[0] ?? "proposal_ready";
   if (Array.isArray(draft.activities) && request.structuredAnswer?.activities !== undefined) {
@@ -402,6 +417,7 @@ function acceptedProfileUpdate(
     trainingExperience: profile.trainingExperience,
     injuriesOrLimitations: profile.injuriesOrLimitations,
     equipment: profile.equipment,
+    running: profile.running,
     schedule: profile.schedule,
     preferences: profile.preferences,
     dietaryConstraints: profile.dietaryConstraints,
@@ -451,6 +467,55 @@ function applyAnswer(
     }
   }
 
+  return normalizeDraft(next);
+}
+
+/**
+ * Folds a model read of the answer into the draft. The plain parse wins for
+ * the question being answered unless it found nothing (or only the
+ * general-fitness default for goals); other questions are filled only if
+ * still unanswered, so nothing said earlier is overwritten; what they do and
+ * the gear they have are added to; notes accumulate.
+ */
+export function mergeUnderstood(
+  draft: OnboardingDraft,
+  before: OnboardingDraft,
+  understood: Understood,
+  step: string | undefined,
+): OnboardingDraft {
+  const next = { ...draft };
+  const answeredNow = (field: string) => step === field && JSON.stringify(next[field]) !== JSON.stringify(before[field]);
+  const fill = (field: keyof Understood) => {
+    const value = understood[field];
+    if (value === undefined) return;
+    if (next[field] === undefined) next[field] = value;
+    else if (step === field && !answeredNow(field)) next[field] = value;
+  };
+  for (const field of ["trainingExperience", "preferredTime", "ageYears", "heightCm", "weightKg"] as const) fill(field);
+  if (understood.preferredDays && (next.preferredDays === undefined
+      || (Array.isArray(next.preferredDays) && next.preferredDays.length === 0)
+      || (step === "preferredDays" && !answeredNow("preferredDays")))) {
+    next.preferredDays = understood.preferredDays;
+  }
+  if (understood.goals) {
+    const own = Array.isArray(next.goals) ? (next.goals as string[]) : [];
+    const onlyDefault = own.length === 0 || (own.length === 1 && own[0] === "general_fitness");
+    if (step === "goals" || next.goals === undefined) {
+      next.goals = onlyDefault ? understood.goals : [...new Set([...own, ...understood.goals])];
+    }
+  }
+  for (const field of ["activities", "equipment"] as const) {
+    const value = understood[field];
+    if (!value) continue;
+    const own = Array.isArray(next[field]) ? (next[field] as string[]).filter((item) => item !== "none") : [];
+    const merged = [...new Set([...own, ...value])];
+    next[field] = merged.length > 1 ? merged.filter((item) => item !== "not_sure") : merged;
+  }
+  if (understood.running && next.running === undefined) next.running = understood.running;
+  if (understood.notes) {
+    const own = Array.isArray(next.aboutNotes) ? (next.aboutNotes as string[]) : [];
+    next.aboutNotes = [...new Set([...own, ...understood.notes])].slice(-10);
+  }
   return normalizeDraft(next);
 }
 
@@ -610,10 +675,11 @@ function buildProgramProposal(
     heightCm: draft.heightCm,
     weightKg: draft.weightKg,
     goals: draft.goals,
-    goalNotes: Array.isArray(draft.goals) ? (draft.goals as string[]).join(", ") : undefined,
+    goalNotes: goalNotes(draft),
     trainingExperience: draft.trainingExperience,
     injuriesOrLimitations: draft.injuriesOrLimitations ?? [],
     equipment: draft.equipment ?? [],
+    running: RunningSetup.safeParse(draft.running).success ? draft.running : undefined,
     schedule: {
       daysPerWeek: preferredDays.length || draft.daysPerWeek || 3,
       preferredDays,
@@ -648,6 +714,7 @@ function buildProgramProposal(
     {
       ...profile,
       trainingFocus: profile.preferences.trainingFocus,
+      running: profile.running,
       // A doctor's limit: the gentlest starting loads, whatever they said.
       trainingExperience: clearanceAdvised ? "new" : profile.trainingExperience,
     },
@@ -665,6 +732,14 @@ function buildProgramProposal(
     nutritionTargets: buildNutritionTargets(profile),
     createdAt: now,
   });
+}
+
+/** The goals, then what they told us in their own words, for the coach to read on every turn. */
+function goalNotes(draft: OnboardingDraft): string | undefined {
+  const goals = Array.isArray(draft.goals) ? (draft.goals as string[]).join(", ") : "";
+  const notes = Array.isArray(draft.aboutNotes) ? (draft.aboutNotes as string[]).join("; ") : "";
+  const text = [goals, notes && `In their words: ${notes}`].filter(Boolean).join(". ");
+  return text ? text.slice(0, 800) : undefined;
 }
 
 function questionForStep(step: string, draft: OnboardingDraft) {
@@ -719,16 +794,23 @@ export function buildWorkoutPlanFromProfile(
     equipment?: string[];
     trainingExperience?: z.infer<typeof UserHealthProfile>["trainingExperience"];
     goals?: readonly string[];
+    // Their runs go in the week, with the lifting fitted around them.
+    running?: unknown;
   },
   defaultPlan: Record<string, PlannedWorkoutDayType>,
   now: string,
 ) {
-  const days = selectPlanDays(
-    defaultPlan,
-    profile.schedule.daysPerWeek ?? 3,
-    profile.schedule.preferredDays,
-    profile.trainingFocus,
-    { equipment: profile.equipment, experience: profile.trainingExperience },
+  const running = RunningSetup.safeParse(profile.running);
+  // Runs first (their days are set), then fat-loss work around them.
+  const days = applyRunning(
+    selectPlanDays(
+      defaultPlan,
+      profile.schedule.daysPerWeek ?? 3,
+      profile.schedule.preferredDays,
+      profile.trainingFocus,
+      { equipment: profile.equipment, experience: profile.trainingExperience },
+    ),
+    running.success ? running.data : undefined,
   );
   return WorkoutPlan.parse({
     userId,
@@ -767,7 +849,9 @@ export function addFatLossWork(
   }
   // Rest days that sit between lifting days first, so cardio never lands
   // the day before a heavy session twice in a row.
-  const rest = WEEK_ORDER.filter((day) => (out[day]?.exercises.length ?? 0) === 0);
+  // A run day has no lifts but isn't a rest day: never put cardio on it.
+  const hasRuns = (day: string) => ((out[day] as { runs?: unknown[] } | undefined)?.runs?.length ?? 0) > 0;
+  const rest = WEEK_ORDER.filter((day) => (out[day]?.exercises.length ?? 0) === 0 && !hasRuns(day));
   const lifting = (day: string) => (out[day]?.exercises.length ?? 0) > 0;
   const between = rest.filter((day) => {
     const i = WEEK_ORDER.indexOf(day);

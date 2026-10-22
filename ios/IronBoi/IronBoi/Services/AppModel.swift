@@ -410,6 +410,16 @@ final class AppModel: NSObject, ObservableObject {
         )
     }
 
+    /// Wakes the voice server before the coach's first line, so that line
+    /// isn't 4 s late (a cold start). An empty request: it's turned away
+    /// before any speech is made, so it costs nothing.
+    private var voiceWarmedAt: Date?
+    func warmVoice() {
+        guard hasSession, voiceWarmedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true else { return }
+        voiceWarmedAt = Date()
+        Task { try? await callCallable("synthesizeSpeechCallable", data: ["text": "", "voice": CoachVoiceOption.current]) }
+    }
+
     /// One line's audio, and which engine actually read it (the server
     /// falls back to Cloud TTS if the live engine's voice fails).
     func synthesizeSpeech(_ text: String, engine: String) async throws -> (Data, String) {
@@ -523,7 +533,8 @@ final class AppModel: NSObject, ObservableObject {
     func sendOnboardingAnswer(
         _ content: String,
         inputMode: CoachInputMode,
-        structuredAnswer: [String: Any]? = nil
+        structuredAnswer: [String: Any]? = nil,
+        field: String? = nil
     ) async -> String? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || structuredAnswer?.isEmpty == false else { return nil }
@@ -538,13 +549,16 @@ final class AppModel: NSObject, ObservableObject {
         }
         do {
             let now = Self.isoString(from: Date())
-            let result: Reply = try await callCallable("sendOnboardingAnswer", data: [
+            var data: [String: Any] = [
                 "messageId": "ios_onboarding_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
                 "timestamp": now,
                 "inputMode": inputMode.rawValue,
                 "structuredAnswer": structuredAnswer ?? [:],
-            ])
+            ]
+            // Which answer the words are for, when it isn't the current question.
+            if let field { data["field"] = field }
+            let result: Reply = try await callCallable("sendOnboardingAnswer", data: data)
             return result.revision?.reply
         } catch {
             errorMessage = error.localizedDescription
@@ -683,6 +697,11 @@ final class AppModel: NSObject, ObservableObject {
     var todayIsStarter: Bool {
         guard let day = todayPlanDay else { return false }
         return isNewToTraining && !day.isAdjusted
+    }
+
+    /// Today's run, if the plan has one (lifting day or not).
+    var todayRun: PlannedRun? {
+        currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() }?.runs.first
     }
 
     /// There's a plan, and nothing in it today.
@@ -1066,6 +1085,22 @@ final class AppModel: NSObject, ObservableObject {
         let clamped = min(max(weight, 0), 2000)
         workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
             guard !set.completed else { return set }
+            var next = set
+            next.weight = clamped
+            return next
+        }
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// "I did it with 50": the sets already done were at this weight, and the
+    /// ones left are too.
+    func setDoneSetsWeight(exerciseIndex: Int, weight: Double) {
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex)
+        else { return }
+        let clamped = min(max(weight, 0), 2000)
+        workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
             var next = set
             next.weight = clamped
             return next
@@ -2187,7 +2222,16 @@ final class AppModel: NSObject, ObservableObject {
                 name: name,
                 muscles: rawDay["muscles"] as? [String] ?? [],
                 exercises: rawExercises.compactMap(makePlannedExercise),
-                isAdjusted: adjustedDayKeys.contains(dayKey)
+                isAdjusted: adjustedDayKeys.contains(dayKey),
+                runs: (rawDay["runs"] as? [[String: Any]] ?? []).compactMap { raw in
+                    guard let kind = raw["kind"] as? String else { return nil }
+                    return PlannedRun(
+                        kind: kind,
+                        distanceMi: makeDouble(from: raw["distanceMi"]),
+                        durationMin: (raw["durationMin"] as? NSNumber)?.intValue,
+                        note: raw["note"] as? String
+                    )
+                }
             )
         }
     }

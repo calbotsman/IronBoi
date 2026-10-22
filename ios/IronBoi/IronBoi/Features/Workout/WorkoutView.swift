@@ -320,15 +320,37 @@ private struct PlannedWorkoutDayCard: View {
                         .padding(.vertical, 4)
                     }
 
-                    Button(action: start) {
-                        Label(isBusy ? "Starting..." : "Start \(day.dayKey)", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
+                    ForEach(day.runs) { run in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: "figure.run")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(MyoTheme.Colors.ink)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(run.label)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MyoTheme.Colors.ink)
+                                if let note = run.note {
+                                    Text(note)
+                                        .font(.caption)
+                                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+                                }
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(MyoColor.Action.primary.color)
-                    .foregroundStyle(MyoColor.Text.primary.color)
-                    .disabled(isBusy)
-                    .padding(.top, 4)
+
+                    if !day.exercises.isEmpty {
+                        Button(action: start) {
+                            Label(isBusy ? "Starting..." : "Start \(day.dayKey)", systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(MyoColor.Action.primary.color)
+                        .foregroundStyle(MyoColor.Text.primary.color)
+                        .disabled(isBusy)
+                        .padding(.top, 4)
+                    }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -348,7 +370,10 @@ private struct PlannedWorkoutDayCard: View {
     }
 
     private var summaryText: String {
-        "\(day.exercises.count) exercises · \(day.totalSets) sets"
+        let lifting = day.exercises.isEmpty ? nil : "\(day.exercises.count) exercises · \(day.totalSets) sets"
+        let run = day.runs.first.map { lifting == nil ? $0.label : "+ " + $0.label.lowercased() }
+        let text = [lifting, run].compactMap { $0 }.joined(separator: " ")
+        return text.isEmpty ? "Rest" : text
     }
 
     private func targetText(for exercise: PlannedExercise) -> String {

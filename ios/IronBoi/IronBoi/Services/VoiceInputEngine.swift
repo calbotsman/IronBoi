@@ -457,7 +457,10 @@ final class VoiceInputEngine: ObservableObject {
         guard !holdOpen else { return }
         // Onboarding answers are lists and descriptions ("I have kettlebells…
         // dumbbells… a barbell for benching"): give them room.
-        let wait = Self.pauseDelay(after: transcript) + extraPause
+        // A finished sentence ("…a few years.") means they're done: only a
+        // little of the extra wait applies.
+        let finished = transcript.trimmingCharacters(in: .whitespaces).last.map { ".?!".contains($0) } ?? false
+        let wait = Self.pauseDelay(after: transcript) + (finished ? extraPause / 4 : extraPause)
         pauseTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: wait)
             guard let self, !Task.isCancelled, self.isListening else { return }

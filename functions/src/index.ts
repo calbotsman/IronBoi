@@ -97,6 +97,7 @@ import {
   liveBrainSetup,
   liveVoiceEnabled,
   mintLiveToken,
+  liveProvider,
   recordLiveTurn,
   runLiveTool,
   takeLiveMint,
@@ -159,6 +160,7 @@ import {
   buildWorkoutPlanFromProfile,
   processOnboardingAnswer,
 } from "./onboarding/flow.js";
+import { modelUnderstander } from "./onboarding/understand.js";
 
 const require = createRequire(import.meta.url);
 
@@ -289,6 +291,7 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
         ? (profileData.schedule.preferredDays as string[])
         : [],
     },
+    running: profileData.running,
   };
 
   const now = new Date().toISOString();
@@ -578,11 +581,14 @@ export const startLiveCoachSession = onCall(
     // The whole brain — profile, plan, recent workouts, memory facts, coach
     // notes, the shared conversation — locked into the session.
     const today = parsed.clientDate ?? new Date().toISOString().slice(0, 10);
-    if (parsed.provider === "openai") {
-      if (!liveOpenAIEnabled()) throw new HttpsError("failed-precondition", "live_openai_disabled");
+    // The phone's pick (Preferences → Voice engine), else the operator's
+    // default (IRONBOI_LIVE_PROVIDER).
+    const provider = parsed.provider ?? liveProvider();
+    if (provider === "openai") {
+      if (!liveOpenAIEnabled() && liveProvider() !== "openai") throw new HttpsError("failed-precondition", "live_openai_disabled");
       const openAIKey = openAIApiKey.value() || process.env.OPENAI_API_KEY;
       if (!openAIKey) throw new HttpsError("failed-precondition", "live_openai_not_configured");
-      const model = process.env.IRONBOI_LIVE_OPENAI_MODEL || OPENAI_REALTIME_MODEL_DEFAULT;
+      const model = process.env.IRONBOI_LIVE_OPENAI_MODEL || process.env.IRONBOI_OPENAI_REALTIME_MODEL || OPENAI_REALTIME_MODEL_DEFAULT;
       const instruction = await buildLiveSystemInstruction({ db, coach, userId, today });
       try {
         const { token, expiresAt } = await mintOpenAIRealtimeSecret({
@@ -969,11 +975,19 @@ export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
 // Same OnboardingAnswerRequest schema, processOnboardingAnswer core and
 // response shape as the retired sendOnboardingAnswerHttp. The parity audit
 // found no callable existed for this endpoint.
-export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
-  const userId = requireUserId(request.auth);
-  const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
-  return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
-});
+export const sendOnboardingAnswer = onCall(
+  { ...CALLABLE_OPTS, secrets: [geminiApiKey, openRouterApiKey] },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
+    // Free answers are read by the coach's model for everything they say.
+    const understand = modelUnderstander(selectCoachModelProvider({
+      geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
+    }));
+    return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN, understand);
+  },
+);
 
 // Same schema, core and response shape as the retired
 // acceptProgramProposalHttp. The parity audit found no callable existed for

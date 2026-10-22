@@ -358,7 +358,7 @@ enum WorkoutCoaching {
             if !lastSet, tipsFull, !muted.contains(.cue) {
                 let cues = ExerciseKnowledge.lookup(name).cues + (ExerciseMotion.match(name).map { [ExerciseLesson.cue(for: $0)] } ?? [])
                 if let cue = cues.first(where: { !said.contains($0) }) {
-                    options.append(Line(kind: .cue, text: "Next one: " + Self.lowerFirst(cue).trimmingCharacters(in: .punctuationCharacters) + ".", source: cue))
+                    options.append(Line(kind: .cue, text: "On the next set, " + Self.lowerFirst(cue).trimmingCharacters(in: .punctuationCharacters) + ".", source: cue))
                 }
             }
             if !muted.contains(.praise) {
