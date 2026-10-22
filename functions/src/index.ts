@@ -79,7 +79,14 @@ import { rolloverTrainingPrograms } from "./workouts/rollover.js";
 import { safeLogger } from "./logging/safeLogger.js";
 import { checkDailyTtsCap, recordTtsUsage } from "./usage/cap.js";
 import {
+  OPENAI_REALTIME_MODEL_DEFAULT,
+  liveOpenAIEnabled,
+  mintOpenAIRealtimeSecret,
+  openAISessionConfig,
+} from "./coach/liveOpenAI.js";
+import {
   CoachLiveToolRequest,
+  LIVE_HANDOVERS_PER_DAY_DEFAULT,
   LIVE_MINTS_PER_DAY_DEFAULT,
   LIVE_MODEL_DEFAULT,
   LIVE_VOICE_DEFAULT,
@@ -90,6 +97,7 @@ import {
   liveBrainSetup,
   liveVoiceEnabled,
   mintLiveToken,
+  liveProvider,
   recordLiveTurn,
   runLiveTool,
   takeLiveMint,
@@ -152,6 +160,7 @@ import {
   buildWorkoutPlanFromProfile,
   processOnboardingAnswer,
 } from "./onboarding/flow.js";
+import { modelUnderstander } from "./onboarding/understand.js";
 
 const require = createRequire(import.meta.url);
 
@@ -162,6 +171,7 @@ const coach = require("./coach/ironboi-coach.v0.json") as CoachConfig;
 const seed = require("./domain/ironlab-seed.json");
 const geminiApiKey = defineSecret("GEMINI_API_KEY");
 const openRouterApiKey = defineSecret("OPENROUTER_API_KEY");
+const openAIApiKey = defineSecret("OPENAI_API_KEY");
 
 // A malformed payload must surface as invalid-argument (not opaque
 // INTERNAL) and leave an operator log breadcrumb (issue paths, never
@@ -272,6 +282,7 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
     trainingFocus: focus.success ? focus.data : undefined,
     equipment: Array.isArray(profileData.equipment) ? (profileData.equipment as string[]) : undefined,
     trainingExperience: experience.success ? experience.data : undefined,
+    goals: Array.isArray(profileData.goals) ? (profileData.goals as string[]) : undefined,
     schedule: {
       daysPerWeek: typeof profileData.schedule?.daysPerWeek === "number"
         ? profileData.schedule.daysPerWeek
@@ -280,6 +291,7 @@ export async function handleRegenerateWorkoutPlan(userId: string) {
         ? (profileData.schedule.preferredDays as string[])
         : [],
     },
+    running: profileData.running,
   };
 
   const now = new Date().toISOString();
@@ -545,8 +557,10 @@ export const finishWorkoutSessionCallable = onCall(
 // Live voice (beta) — docs/design/live-voice-brain.md milestone 1. Mints a
 // single-use Gemini Live token with the coach's prompt locked in; the phone
 // connects straight to Gemini with it. Off unless IRONBOI_LIVE_VOICE_ENABLED.
+// minInstances: a warm instance makes a reconnect one round trip, not a
+// cold start — the difference between a blip and a gap. Set per project.
 export const startLiveCoachSession = onCall(
-  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey] },
+  { ...CALLABLE_OPTS, timeoutSeconds: 20, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey], minInstances: Number(process.env.IRONBOI_LIVE_MIN_INSTANCES) || 0 },
   async (request) => {
     const userId = requireUserId(request.auth);
     if (!liveVoiceEnabled()) throw new HttpsError("failed-precondition", "live_voice_disabled");
@@ -556,30 +570,53 @@ export const startLiveCoachSession = onCall(
       throw new HttpsError("permission-denied", "live_voice_requires_sign_in");
     }
     const parsed = parseCallablePayload(StartLiveCoachSessionRequest, request.data ?? {}, "startLiveCoachSession");
-    const cap = Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT;
-    if (!(await takeLiveMint(db, userId, cap))) {
+    const cap = parsed.handover
+      ? Number(process.env.IRONBOI_LIVE_HANDOVERS_PER_DAY) || LIVE_HANDOVERS_PER_DAY_DEFAULT
+      : Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT;
+    if (!(await takeLiveMint(db, userId, cap, new Date(), parsed.handover ? "liveHandovers" : "liveMints"))) {
       safeLogger.warn("Live voice daily cap reached", { event: "live_voice_cap_reached", userId });
       throw new HttpsError("resource-exhausted", "live_voice_daily_cap");
+    }
+    const voice = parsed.voice ?? (process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT);
+    // The whole brain — profile, plan, recent workouts, memory facts, coach
+    // notes, the shared conversation — locked into the session.
+    const today = parsed.clientDate ?? new Date().toISOString().slice(0, 10);
+    // The phone's pick (Preferences → Voice engine), else the operator's
+    // default (IRONBOI_LIVE_PROVIDER).
+    const provider = parsed.provider ?? liveProvider();
+    if (provider === "openai") {
+      if (!liveOpenAIEnabled() && liveProvider() !== "openai") throw new HttpsError("failed-precondition", "live_openai_disabled");
+      const openAIKey = openAIApiKey.value() || process.env.OPENAI_API_KEY;
+      if (!openAIKey) throw new HttpsError("failed-precondition", "live_openai_not_configured");
+      const model = process.env.IRONBOI_LIVE_OPENAI_MODEL || process.env.IRONBOI_OPENAI_REALTIME_MODEL || OPENAI_REALTIME_MODEL_DEFAULT;
+      const instruction = await buildLiveSystemInstruction({ db, coach, userId, today });
+      try {
+        const { token, expiresAt } = await mintOpenAIRealtimeSecret({
+          apiKey: openAIKey,
+          session: openAISessionConfig({ model, voice, instruction }),
+        });
+        safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId, outcome: "openai" });
+        return { token, model, voice, expiresAt, provider: "openai" };
+      } catch (error) {
+        safeLogger.error("Live voice mint failed", {
+          event: "live_voice_mint_failed",
+          userId,
+          errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+        });
+        throw new HttpsError("unavailable", "live_voice_unavailable");
+      }
     }
     const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
     if (!apiKey) throw new HttpsError("failed-precondition", "live_voice_not_configured");
     const model = process.env.IRONBOI_LIVE_MODEL || LIVE_MODEL_DEFAULT;
-    const voice = parsed.voice ?? (process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT);
-    // The whole brain — profile, plan, recent workouts, memory facts, coach
-    // notes, the shared conversation — locked into the session.
-    const instruction = await buildLiveSystemInstruction({
-      db,
-      coach,
-      userId,
-      today: parsed.clientDate ?? new Date().toISOString().slice(0, 10),
-    });
+    const instruction = await buildLiveSystemInstruction({ db, coach, userId, today });
     try {
       const { token, expiresAt } = await mintLiveToken({
         apiKey,
         setup: liveBrainSetup({ model, voice, instruction, resumeHandle: parsed.resumeHandle }),
       });
       safeLogger.info("Live voice session minted", { event: "live_voice_minted", userId, outcome: parsed.resumeHandle ? "resume" : "new" });
-      return { token, model, voice, expiresAt };
+      return { token, model, voice, expiresAt, provider: "gemini" };
     } catch (error) {
       safeLogger.error("Live voice mint failed", {
         event: "live_voice_mint_failed",
@@ -632,8 +669,10 @@ export const coachLiveToolCallable = onCall(
   },
 );
 
+// The engine keys: with live voice on, app lines are read in the live
+// engine's own voice (see SpeechEngine).
 export const synthesizeSpeechCallable = onCall(
-  { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB" },
+  { ...CALLABLE_OPTS, timeoutSeconds: 30, memory: "256MiB", secrets: [geminiApiKey, openAIApiKey] },
   async (request) => {
     const userId = requireUserId(request.auth);
     const signInProvider = (request.auth?.token as { firebase?: { sign_in_provider?: string } } | undefined)
@@ -661,7 +700,10 @@ export const synthesizeSpeechCallable = onCall(
       });
       throw new HttpsError("resource-exhausted", cap.reason);
     }
-    const speech = await synthesizeSpeech(parsed);
+    const speech = await synthesizeSpeech(parsed, fetch, {
+      gemini: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openai: openAIApiKey.value() || process.env.OPENAI_API_KEY,
+    });
     // Count only audio that was actually produced; a failed synthesis
     // costs nothing and should not eat the budget.
     await recordTtsUsage(db, userId, cap.dateKey, parsed.text.length);
@@ -933,11 +975,19 @@ export const sendCoachMessage = onCall(CALLABLE_OPTS, async (request) => {
 // Same OnboardingAnswerRequest schema, processOnboardingAnswer core and
 // response shape as the retired sendOnboardingAnswerHttp. The parity audit
 // found no callable existed for this endpoint.
-export const sendOnboardingAnswer = onCall(CALLABLE_OPTS, async (request) => {
-  const userId = requireUserId(request.auth);
-  const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
-  return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN);
-});
+export const sendOnboardingAnswer = onCall(
+  { ...CALLABLE_OPTS, secrets: [geminiApiKey, openRouterApiKey] },
+  async (request) => {
+    const userId = requireUserId(request.auth);
+    const parsed = parseCallablePayload(OnboardingAnswerRequest, request.data, "sendOnboardingAnswer");
+    // Free answers are read by the coach's model for everything they say.
+    const understand = modelUnderstander(selectCoachModelProvider({
+      geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
+      openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
+    }));
+    return processOnboardingAnswer(db, userId, parsed, seed.DEFAULT_PLAN, understand);
+  },
+);
 
 // Same schema, core and response shape as the retired
 // acceptProgramProposalHttp. The parity audit found no callable existed for

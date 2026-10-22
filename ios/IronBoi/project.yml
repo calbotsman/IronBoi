@@ -13,12 +13,16 @@ targets:
     platform: iOS
     sources:
       - path: IronBoi
+      # The lock-screen rest countdown's data, shared with the widget.
+      - path: RestWidget/RestActivityAttributes.swift
     info:
       path: IronBoi/Info.plist
       properties:
         # Coach keeps talking and listening with the screen off or the
         # phone in a pocket; the audio session carries the app.
         UIBackgroundModes: [audio]
+        # The rest countdown on the lock screen (RestWidget).
+        NSSupportsLiveActivities: true
     preBuildScripts:
       - name: "Select GoogleService-Info.plist for $CONFIGURATION"
         script: |
@@ -102,6 +106,7 @@ targets:
         outputFiles:
           - $(PROJECT_DIR)/IronBoi/GoogleService-Info.plist
     dependencies:
+      - target: RestWidget
       - package: Firebase
         product: FirebaseAppCheck
       - package: Firebase
@@ -123,7 +128,7 @@ targets:
         PRODUCT_NAME: IronBoi
         GENERATE_INFOPLIST_FILE: YES
         MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 56
+        CURRENT_PROJECT_VERSION: 70
         INFOPLIST_KEY_CFBundleDisplayName: MYO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
@@ -165,6 +170,31 @@ targets:
         # App Store. The Firebase AppAttestProvider reads this and routes
         # to Apple's matching attestation endpoint.
         com.apple.developer.devicecheck.appattest-environment: production
+
+  # The rest countdown on the lock screen and Dynamic Island.
+  RestWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: RestWidget
+    info:
+      path: RestWidget/Info.plist
+      properties:
+        CFBundleDisplayName: MYO Rest
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        DEVELOPMENT_TEAM: SGQ2WLB6M9
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: com.thecombinationrule.ironboi.RestWidget
+        PRODUCT_NAME: RestWidget
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 70
+        SWIFT_VERSION: 5.10
+        TARGETED_DEVICE_FAMILY: 1
+        SKIP_INSTALL: YES
 
 # A second scheme for tuning the blob's physics in the simulator: no backend,
 # no mic, the stunt reel on loop and the live tuner (DEBUG only). Pick

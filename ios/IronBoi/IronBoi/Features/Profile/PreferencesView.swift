@@ -4,9 +4,12 @@ import SwiftUI
 /// brick/ochre selection, sticky save bar. No stock Form chrome.
 /// Built to docs/design/myo-you-tab-layout-spec.md.
 struct PreferencesView: View {
-    /// Live voice (beta): talk to the coach over Gemini Live outside a
-    /// workout. Off by default; the regular coach is unchanged.
-    @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = false
+    /// Live voice: talk to the coach over Gemini Live. On by default (it's
+    /// the fast voice); off falls back to the regular coach.
+    @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = true
+    /// Gemini Live or OpenAI Realtime — the voice A/B.
+    @AppStorage(AudioHub.duckMusicKey) private var duckMusic = false
+    @AppStorage(LiveVoiceSession.providerKey) private var liveVoiceProvider = LiveVoiceSession.Provider.gemini.rawValue
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
     /// Training-day nudges — on the phone, not part of the saved profile.
@@ -26,6 +29,7 @@ struct PreferencesView: View {
     @State private var saveGeneration = 0
     @State private var contentVisible = false
     @State private var showDeleteAccountConfirm = false
+    @State private var showStartOverConfirm = false
     @State private var showDeleteAccountFinalConfirm = false
     @AppStorage(CoachVoiceOption.storageKey) private var voiceName = CoachVoiceOption.defaultName
     /// Plays a line when you try a voice.
@@ -381,7 +385,7 @@ struct PreferencesView: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(MyoColor.Text.secondary.color)
             CoachVoicePicker(name: $voiceName) { sample in
-                tryVoice.fetchAudio = { [appModel] text in try await appModel.synthesizeSpeech(text) }
+                tryVoice.fetchAudio = { [appModel] text, engine in try await appModel.synthesizeSpeech(text, engine: engine) }
                 tryVoice.speak(sample, messageId: "try-voice-\(UUID().uuidString)")
             }
             .padding(.bottom, MyoTheme.Spacing.xs)
@@ -394,11 +398,30 @@ struct PreferencesView: View {
                 .pickerStyle(.menu)
             }
 
-            MyoValueRow(label: "Live voice (beta)") {
-                Toggle("Live voice (beta)", isOn: $liveVoiceBeta).labelsHidden()
+            MyoValueRow(label: "Lower my music while coaching") {
+                Toggle("Lower my music while coaching", isOn: $duckMusic).labelsHidden()
+            }
+            Text("With headphones your music stays at full volume and the coach talks over it. Turn this on to lower it for the whole workout instead.")
+                .font(.caption)
+                .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+
+            MyoValueRow(label: "Live voice") {
+                Toggle("Live voice", isOn: $liveVoiceBeta).labelsHidden()
             }
             // Turning it on is the consent, so say what it does first.
-            Text("Talk in real time. While it's on, your voice goes straight from your phone to Google's Gemini to answer you; we don't keep the audio.")
+            if liveVoiceBeta {
+                MyoValueRow(label: "Voice engine") {
+                    Picker("Voice engine", selection: $liveVoiceProvider) {
+                        ForEach(LiveVoiceSession.Provider.allCases, id: \.rawValue) { provider in
+                            Text(provider.label).tag(provider.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 180)
+                }
+            }
+            Text("Talk in real time. While it's on (the default), your voice goes straight from your phone to the voice engine you pick (Google's Gemini or OpenAI) to answer you; we don't keep the audio.")
                 .font(.caption)
                 .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
@@ -572,6 +595,26 @@ struct PreferencesView: View {
 
             MyoHairline()
 
+            // Keeps the account, wipes everything the coach knows and the
+            // plan, and runs onboarding again from the first question.
+            Button {
+                showStartOverConfirm = true
+            } label: {
+                HStack {
+                    Text("Start over…")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(MyoTheme.Colors.ink)
+                    Spacer()
+                    Image(systemName: "arrow.counterclockwise")
+                        .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            MyoHairline()
+
             // Apple guideline 5.1.1(v): deletion must be discoverable. Two
             // steps so an accidental tap can't wipe anything.
             Button {
@@ -589,6 +632,24 @@ struct PreferencesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+        }
+        .alert("Start over?", isPresented: $showStartOverConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Start over", role: .destructive) {
+                Task {
+                    await appModel.resetMyData()
+                    // The phone's own memory of you goes too: the welcome,
+                    // the voice and style you picked, the tips already shown.
+                    for key in ["welcomeHeardId", "micPermissionExplained", "voiceIsolationTipsShown",
+                                CoachVoiceOption.storageKey, CoachVoiceOption.chosenKey,
+                                CoachingStyle.tipsKey, CoachingStyle.toneKey] {
+                        UserDefaults.standard.removeObject(forKey: key)
+                    }
+                    dismiss()
+                }
+            }
+        } message: {
+            Text("Keeps your account but wipes your plan, workouts, coach history and everything the coach remembers about you, then starts onboarding again.")
         }
         .alert("Delete account?", isPresented: $showDeleteAccountConfirm) {
             Button("Cancel", role: .cancel) {}

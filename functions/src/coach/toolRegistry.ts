@@ -221,7 +221,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
   {
     name: "update_training_setup",
     description:
-      "Change the person's standing setup — the things onboarding asked — when they tell you in this message that it has changed for good: their goal, experience, equipment, which days or how many days a week, session length, or when they like to train. Saves it and rebuilds their plan from it (adjustments already ahead, like an injury week, are kept). NOT for one-off or this-week changes (a short day, travel, a sore knee) — those are adapt_plan. Only fields they actually stated; omit the rest. Then say in one line what changed and which days they train now.",
+      "Change the person's standing setup — the things onboarding asked — when they tell you in this message that it has changed for good: their goal, experience, equipment, which days or how many days a week, session length, when they like to train, or their running. Saves it and rebuilds their plan from it (adjustments already ahead, like an injury week, are kept). NOT for one-off or this-week changes (a short day, travel, a sore knee) — those are adapt_plan. Only fields they actually stated; omit the rest. Then say in one line what changed and which days they train now.",
     parameters: {
       type: "object",
       properties: {
@@ -254,6 +254,17 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
         daysPerWeek: { type: "integer", minimum: 1, maximum: 7, description: "If they gave a count but not which days." },
         sessionLengthMin: { type: "integer", minimum: 15, maximum: 120 },
         preferredTime: { type: "string", description: "24h HH:MM, if they said when they train ('6am' → 06:00)." },
+        running: {
+          type: "object",
+          description: "They run, or want runs in their plan ('add my runs', 'I run 3 days a week, about 2 miles'). The runs go in the plan as real sessions and the lifting is fitted around them. Send everything they've said about their running now — it replaces how they ran before. Days if they named them, else runsPerWeek; distance or time if they said.",
+          properties: {
+            days: { type: "array", items: { type: "string", enum: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] } },
+            runsPerWeek: { type: "integer", minimum: 1, maximum: 7 },
+            milesPerRun: { type: "number", minimum: 0.25, maximum: 30, description: "Convert km to miles (1 km = 0.62 mi)." },
+            minutesPerRun: { type: "integer", minimum: 5, maximum: 240 },
+          },
+        },
+        stopRunning: { type: "boolean", description: "true only if they've stopped running and want the runs out of the plan." },
       },
     },
   },

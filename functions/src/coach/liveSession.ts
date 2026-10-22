@@ -29,11 +29,19 @@ export const StartLiveCoachSessionRequest = z.object({
   resumeHandle: z.string().min(1).max(4096).optional(),
   // The person's pick from COACH_VOICES, so live sounds like spoken replies.
   voice: CoachVoiceChoice,
+  // Which live voice model: Gemini Live (default) or OpenAI Realtime, for
+  // an A/B. OpenAI only where IRONBOI_LIVE_OPENAI_ENABLED is on.
+  provider: z.enum(["gemini", "openai"]).optional(),
+  // A seamless handover to a fresh connection mid-conversation: counted
+  // against its own, larger cap so a long workout never runs out.
+  handover: z.boolean().optional(),
 }).strict();
 
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";
 export const LIVE_VOICE_DEFAULT = "Kore";
 export const LIVE_MINTS_PER_DAY_DEFAULT = 40;
+/** Handovers (about one per 7.5 min of live talk) — roughly 25 hours a day. */
+export const LIVE_HANDOVERS_PER_DAY_DEFAULT = 200;
 const TOKEN_MINUTES = 15;
 const NEW_SESSION_SECONDS = 60;
 
@@ -74,6 +82,8 @@ export function liveSetup(args: { model: string; voice: string; prompt: string }
     model: `models/${args.model}`,
     generationConfig: {
       responseModalities: ["AUDIO"],
+      // Native-audio models pick their language themselves and don't take
+      // a languageCode; English is held by the prompt (LIVE_RULES).
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: args.voice } } },
     },
     systemInstruction: { parts: [{ text: args.prompt }] },
@@ -115,13 +125,80 @@ export async function mintLiveToken(args: {
   return { token: body.name, expiresAt };
 }
 
+// --- OpenAI Realtime (IRONBOI_LIVE_PROVIDER=openai) -------------------------
+// The same brain and tools, on OpenAI's speech-to-speech model. The server
+// mints a short-lived client secret with the session locked in (model,
+// instructions, voice, tools); the phone connects straight to OpenAI.
+
+/** Which provider live voice uses: OpenAI when the operator says so. */
+export function liveProvider(env: NodeJS.ProcessEnv = process.env): "openai" | "gemini" {
+  return env.IRONBOI_LIVE_PROVIDER === "openai" ? "openai" : "gemini";
+}
+
+export const OPENAI_REALTIME_MODEL_DEFAULT = "gpt-realtime-2.1";
+export const OPENAI_TRANSCRIBE_MODEL_DEFAULT = "gpt-4o-mini-transcribe";
+
+/** Our eight coach voices (COACH_VOICES) as OpenAI's: same gender, closest feel. */
+export const OPENAI_VOICES: Record<string, string> = {
+  Sulafat: "marin", Laomedeia: "shimmer", Kore: "sage", Achernar: "coral",
+  Achird: "cedar", Puck: "verse", Orus: "ash", Algieba: "echo",
+};
+
+export function openAIRealtimeSession(args: { model: string; voice: string; instruction: string; transcribeModel?: string }) {
+  return {
+    type: "realtime",
+    model: args.model,
+    instructions: args.instruction,
+    audio: {
+      input: {
+        format: { type: "audio/pcm", rate: 24000 },
+        transcription: { model: args.transcribeModel ?? OPENAI_TRANSCRIBE_MODEL_DEFAULT },
+        // Talking over the coach stops it; a finished thought gets a reply.
+        turn_detection: { type: "semantic_vad", interrupt_response: true, create_response: true },
+      },
+      output: { format: { type: "audio/pcm", rate: 24000 }, voice: OPENAI_VOICES[args.voice] ?? "marin" },
+    },
+    tools: liveToolDeclarations().map((tool) => ({
+      type: "function",
+      name: tool.name,
+      description: tool.description,
+      parameters: "parameters" in tool && tool.parameters ? tool.parameters : { type: "object", properties: {} },
+    })),
+    tool_choice: "auto",
+  };
+}
+
+export async function mintOpenAIClientSecret(args: {
+  apiKey: string;
+  session: ReturnType<typeof openAIRealtimeSession>;
+  fetchImpl?: typeof fetch;
+}): Promise<{ token: string; expiresAt: string }> {
+  const response = await (args.fetchImpl ?? fetch)("https://api.openai.com/v1/realtime/client_secrets", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${args.apiKey}` },
+    body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: TOKEN_MINUTES * 60 }, session: args.session }),
+  });
+  const body = (await response.json().catch(() => ({}))) as { value?: string; expires_at?: number; error?: { code?: string; message?: string } };
+  if (!response.ok || !body.value) {
+    throw new Error(`openai_secret_mint_failed:${response.status}:${body.error?.code ?? body.error?.message?.slice(0, 80) ?? "unknown"}`);
+  }
+  const expiresAt = new Date((body.expires_at ?? Date.now() / 1000 + TOKEN_MINUTES * 60) * 1000).toISOString();
+  return { token: body.value, expiresAt };
+}
+
 /** Counts a mint against the day's cap; false when the cap is reached. */
-export async function takeLiveMint(db: Firestore, userId: string, cap: number, now = new Date()): Promise<boolean> {
+export async function takeLiveMint(
+  db: Firestore,
+  userId: string,
+  cap: number,
+  now = new Date(),
+  counter: "liveMints" | "liveHandovers" = "liveMints",
+): Promise<boolean> {
   const ref = db.doc(usagePath(userId, `live-${todayUtcDateKey(now)}`));
   return db.runTransaction(async (tx) => {
-    const used = ((await tx.get(ref)).get("liveMints") as number | undefined) ?? 0;
+    const used = ((await tx.get(ref)).get(counter) as number | undefined) ?? 0;
     if (used >= cap) return false;
-    tx.set(ref, { liveMints: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    tx.set(ref, { [counter]: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
     return true;
   });
 }
@@ -207,6 +284,8 @@ const LIVE_RULES = [
   "- You are talking out loud, live. They can interrupt you; if they do, stop and listen. Keep replies to one to three spoken sentences unless they ask for more.",
   "- In live voice there is no <current_user_message> tag: the current message is whatever they're saying to you right now.",
   "- If they're counting reps, stay quiet. Never count for them.",
+  "- Always speak English. If what you hear sounds like another language, it's a mishearing in a noisy gym: answer in English, or ask them to say it again.",
+  "- The app says set results, rest times and the next exercise itself, in your voice, and tells you with an [app] line. Never repeat those; add something only if it's genuinely useful.",
   "- Speech gets misheard, especially in a gym. If a phrase doesn't make sense (\"leave a bench\" while they're on a row), take the closest sensible meaning given the exercise they're on and what was just said (\"lean on a bench\"), and answer that, naming your guess in passing. Only ask them to say it again if you truly can't tell.",
   "- Keep the thread: a follow-up (\"can I…\", \"what about…\", \"show me\") is about the exercise or topic you were just talking about.",
   "- When they ask you to show them, call show_exercise and talk them through it while it plays.",

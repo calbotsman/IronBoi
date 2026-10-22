@@ -372,9 +372,12 @@ final class AppModel: NSObject, ObservableObject {
     /// tools run with the text coach's gates.
     var liveBackend: LiveVoiceSession.Backend {
         LiveVoiceSession.Backend(
-            mint: { [weak self] handle in
+            mint: { [weak self] handle, handover in
                 guard let self else { throw CancellationError() }
                 var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
+                if handover { data["handover"] = true }
+                // Only sent for OpenAI: a server without the A/B rejects the field.
+                if LiveVoiceSession.provider == .openai { data["provider"] = "openai" }
                 if let handle { data["resumeHandle"] = handle }
                 return try await self.callCallable("startLiveCoachSession", data: data)
             },
@@ -407,13 +410,27 @@ final class AppModel: NSObject, ObservableObject {
         )
     }
 
-    func synthesizeSpeech(_ text: String) async throws -> Data {
-        struct Speech: Decodable { let audio: String }
+    /// Wakes the voice server before the coach's first line, so that line
+    /// isn't 4 s late (a cold start). An empty request: it's turned away
+    /// before any speech is made, so it costs nothing.
+    private var voiceWarmedAt: Date?
+    func warmVoice() {
+        guard hasSession, voiceWarmedAt.map({ Date().timeIntervalSince($0) > 600 }) ?? true else { return }
+        voiceWarmedAt = Date()
+        Task { try? await callCallable("synthesizeSpeechCallable", data: ["text": "", "voice": CoachVoiceOption.current]) }
+    }
+
+    /// One line's audio, and which engine actually read it (the server
+    /// falls back to Cloud TTS if the live engine's voice fails).
+    func synthesizeSpeech(_ text: String, engine: String) async throws -> (Data, String) {
+        struct Speech: Decodable { let audio: String; let engine: String? }
         let speech: Speech = try await callCallable("synthesizeSpeechCallable", data: [
             "text": text, "voice": CoachVoiceOption.current,
-        ])
+            // With live voice on, read in the live engine's own voice.
+            "engine": engine,
+        ], timeout: 10)
         guard let data = Data(base64Encoded: speech.audio) else { throw CocoaError(.coderReadCorrupt) }
-        return data
+        return (data, speech.engine ?? "chirp")
     }
 
     func sendCoachMessage(
@@ -511,29 +528,41 @@ final class AppModel: NSObject, ObservableObject {
         selectedTab = .coach
     }
 
+    /// Returns the coach's reply when the answer changed the drafted week.
+    @discardableResult
     func sendOnboardingAnswer(
         _ content: String,
         inputMode: CoachInputMode,
-        structuredAnswer: [String: Any]? = nil
-    ) async {
+        structuredAnswer: [String: Any]? = nil,
+        field: String? = nil
+    ) async -> String? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || structuredAnswer?.isEmpty == false else { return }
-        guard !isOnboardingBusy else { return }
+        guard !trimmed.isEmpty || structuredAnswer?.isEmpty == false else { return nil }
+        guard !isOnboardingBusy else { return nil }
 
         isOnboardingBusy = true
         defer { isOnboardingBusy = false }
 
+        struct Reply: Decodable {
+            struct Revision: Decodable { let reply: String }
+            let revision: Revision?
+        }
         do {
             let now = Self.isoString(from: Date())
-            try await callCallable("sendOnboardingAnswer", data: [
+            var data: [String: Any] = [
                 "messageId": "ios_onboarding_\(Int(Date().timeIntervalSince1970 * 1000))",
                 "content": trimmed,
                 "timestamp": now,
                 "inputMode": inputMode.rawValue,
                 "structuredAnswer": structuredAnswer ?? [:],
-            ])
+            ]
+            // Which answer the words are for, when it isn't the current question.
+            if let field { data["field"] = field }
+            let result: Reply = try await callCallable("sendOnboardingAnswer", data: data)
+            return result.revision?.reply
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
     }
 
@@ -650,6 +679,29 @@ final class AppModel: NSObject, ObservableObject {
     /// or nil on a rest day.
     var todayPlanDay: PlannedWorkoutDay? {
         currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() && !$0.exercises.isEmpty }
+    }
+
+    /// What today's session will actually be when you start it: the plan's
+    /// day — or, on a very first session, the shorter starter the server
+    /// trims it to (4 lifts, 2 sets each), so the preview never promises 4
+    /// sets and starts 2.
+    var todayPreviewDay: PlannedWorkoutDay? {
+        guard let day = todayPlanDay else { return nil }
+        guard todayIsStarter else { return day }
+        let starter = day.exercises.filter { $0.sets > 0 }.prefix(4)
+            .map { PlannedExercise(name: $0.name, sets: min($0.sets, 2), reps: $0.reps, weight: $0.weight) }
+        return PlannedWorkoutDay(dayKey: day.dayKey, name: day.name, muscles: day.muscles, exercises: Array(starter))
+    }
+
+    /// Today will start as the first-session starter (same rule as the server).
+    var todayIsStarter: Bool {
+        guard let day = todayPlanDay else { return false }
+        return isNewToTraining && !day.isAdjusted
+    }
+
+    /// Today's run, if the plan has one (lifting day or not).
+    var todayRun: PlannedRun? {
+        currentWorkoutPlan?.days.first { $0.dayKey == Self.currentDayKey() }?.runs.first
     }
 
     /// There's a plan, and nothing in it today.
@@ -812,6 +864,12 @@ final class AppModel: NSObject, ObservableObject {
         guard let workout = activeWorkout else { return ["ok": false, "error": "no_active_workout"] }
         guard let replacement = (args["replacementName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
               !replacement.isEmpty else { return ["ok": false, "error": "replacementName_required"] }
+        // "Different workout", "something else": not an exercise. Ask for
+        // a real one (find_exercise_swaps) rather than add a lift by that name.
+        if replacement.lowercased().range(of: #"^(a |an |another |some )?(different|other|new|alternative|something|anything)( else)?( workout| exercise| one| lift| move)?$"#,
+                                          options: .regularExpression) != nil {
+            return ["ok": false, "error": "not_an_exercise_name: call find_exercise_swaps and offer real options"]
+        }
         func key(_ s: String) -> String { s.lowercased().filter { $0.isLetter } }
         let named = (args["exerciseName"] as? String).map(key)
         let index = named.flatMap { want in
@@ -1027,6 +1085,22 @@ final class AppModel: NSObject, ObservableObject {
         let clamped = min(max(weight, 0), 2000)
         workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
             guard !set.completed else { return set }
+            var next = set
+            next.weight = clamped
+            return next
+        }
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// "I did it with 50": the sets already done were at this weight, and the
+    /// ones left are too.
+    func setDoneSetsWeight(exerciseIndex: Int, weight: Double) {
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex)
+        else { return }
+        let clamped = min(max(weight, 0), 2000)
+        workout.exercises[exerciseIndex].completedSets = workout.exercises[exerciseIndex].completedSets.map { set in
             var next = set
             next.weight = clamped
             return next
@@ -1317,7 +1391,7 @@ final class AppModel: NSObject, ObservableObject {
         let _: EmptyFunctionResponse = try await callCallable(name, data: data)
     }
 
-    private func callCallable<T: Decodable>(_ name: String, data: [String: Any]) async throws -> T {
+    private func callCallable<T: Decodable>(_ name: String, data: [String: Any], timeout: TimeInterval? = nil) async throws -> T {
         // Fail fast with a friendly message instead of an opaque
         // UNAUTHENTICATED from the backend. Also keeps `user` fresh.
         guard let currentUser = Auth.auth().currentUser else {
@@ -1327,7 +1401,9 @@ final class AppModel: NSObject, ObservableObject {
 
         // The SDK attaches the Auth ID token and App Check token itself —
         // this is the exact pattern deleteAccount has always used.
-        let result = try await callableFunctions.httpsCallable(name).call(data)
+        let callable = callableFunctions.httpsCallable(name)
+        if let timeout { callable.timeoutInterval = timeout }
+        let result = try await callable.call(data)
 
         // Callables surface the function's return value as
         // `HTTPSCallableResult.data` (an `Any` of JSON-compatible values).
@@ -1743,6 +1819,31 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
 
+    /// Something you told Coach about yourself mid-workout — "my knee
+    /// hurts", "stop telling me that", "use a deeper voice" — kept as a
+    /// confirmed fact, so every coach (regular and live) knows it next time.
+    /// Shows up in the memory screen, where you can remove it. Best-effort:
+    /// a failure here never interrupts the workout.
+    func rememberFromUser(factId: String, category: String, content: String) {
+        let fact = MemoryFact(id: factId, category: category, content: content, source: "user_stated",
+                              state: "confirmed", happenedOn: nil, until: nil,
+                              createdAt: Date(), expiresAt: nil)
+        memoryFacts = memoryFacts.filter { $0.id != factId } + [fact]
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        Task {
+            do {
+                try await callCallable("upsertMemoryFact", data: [
+                    "factId": factId, "category": category, "content": content,
+                    "source": "user_stated", "confidence": 1,
+                ])
+            } catch {
+                AudioHub.log("remember failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Soft-deletes a fact; Coach stops seeing it on the next reply.
     func deleteMemoryFact(_ factId: String) async -> Bool {
         await mutateMemoryFact(callable: "deleteMemoryFact", factId: factId) { _ in nil }
@@ -2121,7 +2222,16 @@ final class AppModel: NSObject, ObservableObject {
                 name: name,
                 muscles: rawDay["muscles"] as? [String] ?? [],
                 exercises: rawExercises.compactMap(makePlannedExercise),
-                isAdjusted: adjustedDayKeys.contains(dayKey)
+                isAdjusted: adjustedDayKeys.contains(dayKey),
+                runs: (rawDay["runs"] as? [[String: Any]] ?? []).compactMap { raw in
+                    guard let kind = raw["kind"] as? String else { return nil }
+                    return PlannedRun(
+                        kind: kind,
+                        distanceMi: makeDouble(from: raw["distanceMi"]),
+                        durationMin: (raw["durationMin"] as? NSNumber)?.intValue,
+                        note: raw["note"] as? String
+                    )
+                }
             )
         }
     }

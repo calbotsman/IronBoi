@@ -265,8 +265,12 @@ final class VoiceInputEngine: ObservableObject {
 
     /// The words a workout is made of, so the recogniser leans toward
     /// them: a count ("seven" over "heaven"), and the set being called.
-    private static let workoutWords: [String] = [
-        "MYO", "Coach", "set done", "sets done", "done", "reps",
+    /// Today's exercise names and the like, added to what the recogniser
+    /// listens for (set when a workout starts).
+    static var extraWords: [String] = []
+    private static var workoutWords: [String] { baseWords + extraWords }
+    private static let baseWords: [String] = [
+        "MYO", "Coach", "set done", "sets done", "done", "reps", "skip rest", "I can't", "too heavy", "seconds", "pounds", "go",
         "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
         "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
         "eighteen", "nineteen", "twenty",
@@ -453,7 +457,10 @@ final class VoiceInputEngine: ObservableObject {
         guard !holdOpen else { return }
         // Onboarding answers are lists and descriptions ("I have kettlebells…
         // dumbbells… a barbell for benching"): give them room.
-        let wait = Self.pauseDelay(after: transcript) + extraPause
+        // A finished sentence ("…a few years.") means they're done: only a
+        // little of the extra wait applies.
+        let finished = transcript.trimmingCharacters(in: .whitespaces).last.map { ".?!".contains($0) } ?? false
+        let wait = Self.pauseDelay(after: transcript) + (finished ? extraPause / 4 : extraPause)
         pauseTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: wait)
             guard let self, !Task.isCancelled, self.isListening else { return }

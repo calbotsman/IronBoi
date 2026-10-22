@@ -123,8 +123,14 @@ final class AudioHub {
         // .mixWithOthers added, so an equality test was always false and
         // re-set the category every time Coach spoke: the route flipped to
         // the earpiece and back mid-set, and words were lost in the flips.
-        if session.category != .playAndRecord || !session.categoryOptions.isSuperset(of: Self.categoryOptions) {
-            try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
+        let options = Self.categoryOptions(headphones: Self.headphones(in: session.currentRoute) || headphonesConnected)
+        // The ducking setting changed (headphones in or out): re-set, but only
+        // then — see categoryOptions.
+        let base = options.subtracting([.duckOthers, .mixWithOthers])
+        let duckChanged = session.categoryOptions.contains(.duckOthers) != options.contains(.duckOthers)
+        if session.category != .playAndRecord || !session.categoryOptions.isSuperset(of: base)
+            || (duckChanged && !sessionActive) {
+            try session.setCategory(.playAndRecord, mode: .default, options: options)
             Self.log("category set: options=\(session.categoryOptions.rawValue)")
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -134,6 +140,8 @@ final class AudioHub {
         if !configured {
             engine.attach(player)
             engine.connect(player, to: engine.mainMixerNode, format: Self.voiceFormat)
+            // Over full-volume music the coach was too loud: a touch lower.
+            player.volume = 0.8
             engine.attach(cuePlayer)
             engine.connect(cuePlayer, to: engine.mainMixerNode, format: Self.voiceFormat)
             configured = true
@@ -223,7 +231,17 @@ final class AudioHub {
     /// Coach speaks: iOS brings other audio back up only when an app
     /// releases its session, and that closes the mic. Raising it after
     /// every sentence meant a deaf mic after every sentence.
-    private static let categoryOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .duckOthers, .allowBluetoothA2DP]
+    ///
+    /// So with headphones the music isn't lowered at all (unless you turn
+    /// it on): it stays full and the coach talks over it, a touch quieter.
+    /// On the phone's speaker the music shares the speaker with the coach,
+    /// so it's lowered or you couldn't hear a word. Set when the session
+    /// starts, never mid-sentence (that flipped the route).
+    static let duckMusicKey = "duckMusicWithHeadphones"
+    private static func categoryOptions(headphones: Bool) -> AVAudioSession.CategoryOptions {
+        let duck = !headphones || UserDefaults.standard.bool(forKey: duckMusicKey)
+        return [.defaultToSpeaker, .allowBluetoothA2DP, duck ? .duckOthers : .mixWithOthers]
+    }
 
     /// Plays one buffer of Coach's voice; returns when it has been heard (or
     /// playback was stopped).
@@ -260,6 +278,32 @@ final class AudioHub {
         guard engine.isRunning, let buffer = chosen else { return }
         cuePlayer.scheduleBuffer(buffer, at: nil, options: .interrupts)
         if !cuePlayer.isPlaying { cuePlayer.play() }
+    }
+
+    /// A soft inhale: breathy noise, band-limited to where breath lives
+    /// (~400–2,500 Hz), swelling in and falling away over about a third of
+    /// a second. Quiet — felt more than heard — and a little different each
+    /// time, so it never sounds like a sample on loop.
+    static func breath(seconds: Double = .random(in: 0.28...0.42), gain: Float = .random(in: 0.035...0.055)) -> AVAudioPCMBuffer? {
+        let rate = voiceFormat.sampleRate
+        let n = Int(seconds * rate)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: voiceFormat, frameCapacity: AVAudioFrameCount(n)),
+              let out = buffer.floatChannelData?[0] else { return nil }
+        // One-pole low-pass at ~2.5 kHz minus one at ~400 Hz: a band-pass.
+        let hi = Float(1 - exp(-2 * .pi * 2_500 / rate)), lo = Float(1 - exp(-2 * .pi * 400 / rate))
+        var a: Float = 0, b: Float = 0
+        let peak = Double.random(in: 0.55...0.7)
+        for k in 0..<n {
+            let x = Float.random(in: -1...1)
+            a += hi * (x - a)
+            b += lo * (x - b)
+            let p = Double(k) / Double(n)
+            // Rises slowly (an inhale), then drops off as the words start.
+            let env = p < peak ? sin(.pi / 2 * p / peak) : cos(.pi / 2 * (p - peak) / (1 - peak))
+            out[k] = (a - b) * Float(env * env) * gain * 4
+        }
+        buffer.frameLength = AVAudioFrameCount(n)
+        return buffer
     }
 
     /// Sine notes in a row, each with a quick attack and an exponential

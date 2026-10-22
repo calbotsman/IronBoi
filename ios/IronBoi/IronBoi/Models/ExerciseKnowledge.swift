@@ -11,8 +11,19 @@ struct ExerciseKnowledge: Equatable {
     static let timed: Set<String> = ["Plank", "Side Plank", "Hollow Body Hold", "Wall Sit", "Superman Hold", "Sandbag Carry", "Farmer Carry", "Suitcase Carry"]
 
     /// A hold or a carry: "Plank", "Weighted Plank", "Farmer Carry".
+    /// Easy cardio a plan prescribes in MINUTES (reps = minutes): a fat-loss
+    /// plan's zone-2 days. Timed like a hold, just longer.
+    static let minutes: Set<String> = ["Zone 2 Walk/Jog", "Incline Walk"]
+
+    static func isMinutes(_ exerciseName: String) -> Bool { minutes.contains(exerciseName) }
+
+    /// How long one timed set lasts, in seconds.
+    static func seconds(_ exerciseName: String, target: Int) -> Int {
+        isMinutes(exerciseName) ? max(1, min(target, 90)) * 60 : max(5, min(target, 600))
+    }
+
     static func isTimed(_ exerciseName: String) -> Bool {
-        if timed.contains(exerciseName) { return true }
+        if timed.contains(exerciseName) || minutes.contains(exerciseName) { return true }
         let lower = exerciseName.lowercased()
         return timed.contains { lower.contains($0.lowercased()) }
     }

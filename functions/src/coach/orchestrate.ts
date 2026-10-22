@@ -29,6 +29,7 @@ import {
 import { executeTool } from "../tools/executor.js";
 import type { CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
 import { liveWorkoutRules } from "./liveWorkout.js";
+import { HONESTY_RETRY_NOTE, claimsPlanChange } from "./honesty.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
@@ -52,6 +53,9 @@ export const VOICE_MODE_RULES = [
   "- What they said came through speech recognition and may be misheard. If a phrase doesn't make sense (\"leave a bench\" during a row), answer the closest sensible meaning given the exercise they're on and the conversation (\"lean on a bench\"), naming your guess in passing. Ask them to repeat only if you truly can't tell.",
   "- Keep the thread: a short follow-up (\"can I…\", \"what about…\") is about what you were just discussing.",
   "- Tools and safety rules are unchanged: still use the tools, still ask red-flag questions about pain.",
+  "- Never start fresh with them. Preferences in <memory_facts> and <coach_notes> about how you coach and talk — things they asked you to stop saying, things they found helpful, the tone or voice they want, how they want something explained — are standing orders from them. Follow them from your first word, every session. Never make them say it twice.",
+  "- When they push back on how you said something (\"stop telling me that\", \"that's annoying\", \"say it simpler\", \"don't call me buddy\") or tell you what works (\"that's helpful\"), call remember_user_fact with what to change, in their words, then just do it. Same for an injury, a niggle, or an adjustment they need.",
+  "- Sound like a person, not a script: vary your wording and never say the same sentence twice in a session. Use contractions. Now and then open with a short natural beat (\"Okay,\" \"Right,\" \"Mm, good.\") and leave a pause before the part that matters. Praise only when it's earned and specific.",
 ].join("\n");
 
 /**
@@ -318,6 +322,9 @@ export async function orchestrateCoachTurn({
           sourceMessageId: messageId,
         })
       : undefined;
+    // Tools that did something this turn: a reply claiming a plan change
+    // with none of these is sent back (coach/honesty.ts).
+    const succeededTools = new Set<string>();
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
       ? async (toolName, toolArgs) => {
           try {
@@ -325,6 +332,7 @@ export async function orchestrateCoachTurn({
               authenticatedUserId: userId,
             });
             const record = toolResult as Record<string, unknown>;
+            if (record.ok !== false) succeededTools.add(toolName);
             if (toolName === "accept_plan_adjustment" && record.ok === true) {
               appliedPlanChange = true;
             }
@@ -381,6 +389,31 @@ export async function orchestrateCoachTurn({
           );
         },
       });
+      if (toolLoopEnabled && succeededTools.size === 0 && claimsPlanChange(result.content)) {
+        safeLogger.warn("Coach claimed a plan change no tool made", {
+          event: "coach_unbacked_plan_claim",
+          userId,
+          sessionId,
+          messageId,
+          turnId,
+        });
+        const first = result;
+        const retry = await provider.generateCoachReply({
+          system: `${system}\n\n${HONESTY_RETRY_NOTE}`,
+          userContent: `${userMessage}\n\n<your_draft_reply>${first.content}</your_draft_reply>`,
+          tools: COACH_TOOL_DECLARATIONS,
+          executeTool: executeCoachTool,
+          signal: modelAbort.signal,
+        });
+        result = {
+          ...retry,
+          usage: {
+            inputTokens: first.usage.inputTokens + retry.usage.inputTokens,
+            outputTokens: first.usage.outputTokens + retry.usage.outputTokens,
+          },
+          toolCalls: [...first.toolCalls, ...retry.toolCalls],
+        };
+      }
     } finally {
       clearTimeout(modelTimeoutHandle);
     }
