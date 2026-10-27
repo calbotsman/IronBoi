@@ -132,6 +132,7 @@ targets:
         # export-compliance question so it isn't asked on every upload.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSMicrophoneUsageDescription: MYO uses the microphone so you can speak to your coach.
+        INFOPLIST_KEY_NSHealthUpdateUsageDescription: MYO saves your finished workouts to Apple Health so they count toward your activity.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: MYO uses speech recognition to turn your voice into coach messages.
         SWIFT_VERSION: 5.10
         TARGETED_DEVICE_FAMILY: 1
@@ -165,6 +166,9 @@ targets:
         # App Store. The Firebase AppAttestProvider reads this and routes
         # to Apple's matching attestation endpoint.
         com.apple.developer.devicecheck.appattest-environment: production
+        # Write-only: finished workouts go to Apple Health (Services/HealthSync.swift).
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
 
 # A second scheme for tuning the blob's physics in the simulator: no backend,
 # no mic, the stunt reel on loop and the live tuner (DEBUG only). Pick
