@@ -1124,6 +1124,10 @@ final class AppModel: NSObject, ObservableObject {
             lastRecap = response.recap
             pendingEffortSessionId = activeWorkout.sessionId
             TrainingReminders.shared.markTrainedToday()
+            if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
+                let (id, name) = (activeWorkout.sessionId, activeWorkout.workoutName)
+                Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, start: start, end: end) }
+            }
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
             pendingSessionChanges = changes
             // Surface the rebaseline card. Nothing has been written yet —
