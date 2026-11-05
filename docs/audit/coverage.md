@@ -7,26 +7,32 @@ Status values: not started, in PR #N, merged (#N), dropped.
 
 | # | Idea | In plan? | Status | Note |
 |---|---|---|---|---|
-| I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | not started | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
-| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | not started | — |
-| I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | not started | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
-| I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | not started | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
-| I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | not started | **Plan gap.** |
+| I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | building (watch-app) | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
+| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods building (watch-app); Health reads **deferred** (Phase 4, unassigned) | — |
+| I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | building (atmosphere) | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
+| I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | building (atmosphere) | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
+| I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | building (atmosphere) | **Plan gap.** |
 | I6 | Rest by recovery ("your HR's back down, let's go") | Partly (§1 rules) | in PR #44 (prompt rule only) | The rule tells the coach to wait. The phone rest timer still says "Go" on its own clock. No HR-driven end of rest. |
-| I7 | Works without colour (brightness/contrast/grain; greyscale test) | **No** | not started | **Plan gap.** Goes with I4. |
+| I7 | Works without colour (brightness/contrast/grain; greyscale test) | **No** | building (atmosphere) | **Plan gap.** Goes with I4. |
 | I8 | Coach responds to HR, workout, music levels, talk style, frequency, kinds, weights, reps | Yes (§1) | in PR #44 (partial) | Sent: rest, sets, minutes, frequency, efforts, voice on/off, music playing. **Not sent:** music *levels* (voiceLevel/musicDip), training type mix, pace. See F3. |
-| I9 | "I'm not doing that, I'm going for a run": whole session replaced, logged as a run, from loose speech, no phrase rules | **No** | not started; **#41 works against it** | **Plan gap.** Merged #41 catches "I'm going for a run" with a regex and *adds* a 20-min Run to the end of the strength workout (F1). HealthSync (#39) logs every workout as strength or flexibility. |
-| I10 | Ask lightly, once ("kettlebell work after?") from the profile's training goals; drop it on "no" | **No** | not started | **Plan gap.** The nearest plan item is "no mobility in 14 days → mention once", and #44 dropped it. Nothing remembers "asked, said no". |
-| I11 | Instant start: phone caches a memory brief | **No** | not started | **Plan gap.** |
-| I12 | Brief rebuilt on the server after each workout or conversation | **No** | not started | **Plan gap.** |
-| I13 | Brief stays small (~1–2k words, safety/injuries always in) | **No** | not started | **Plan gap.** |
-| I14 | Deep recall on demand ("what did I bench last spring?") | **No** | not started | **Plan gap.** |
-| I15 | Social, opt-in (one onboarding question, off by default) | **No** | not started | **Plan gap.** |
-| I16 | Join by invite link, no feeds | **No** | not started | **Plan gap.** |
-| I17 | Coach brings friends in ("Sam trained this morning") | **No** | not started | **Plan gap.** |
-| I18 | Social prototype first | **No** | not started | **Plan gap.** |
+| I9 | "I'm not doing that, I'm going for a run": whole session replaced, logged as a run, from loose speech, no phrase rules | **No** | building (workout-replace); **#41 works against it** | **Plan gap.** Merged #41 catches "I'm going for a run" with a regex and *adds* a 20-min Run to the end of the strength workout (F1). HealthSync (#39) logs every workout as strength or flexibility. |
+| I10 | Ask lightly, once ("kettlebell work after?") from the profile's training goals; drop it on "no" | **No** | building (workout-replace) | **Plan gap.** The nearest plan item is "no mobility in 14 days → mention once", and #44 dropped it. Nothing remembers "asked, said no". |
+| I11 | Instant start: phone caches a memory brief | **No** | building (memory-brief) | **Plan gap.** |
+| I12 | Brief rebuilt on the server after each workout or conversation | **No** | building (memory-brief) | **Plan gap.** |
+| I13 | Brief stays small (~1–2k words, safety/injuries always in) | **No** | building (memory-brief) | **Plan gap.** |
+| I14 | Deep recall on demand ("what did I bench last spring?") | **No** | building (memory-brief); vector search **deferred** | **Plan gap.** |
+| I15 | Social, opt-in (one onboarding question, off by default) | **No** | **deferred** (unassigned) | **Plan gap.** |
+| I16 | Join by invite link, no feeds | **No** | **deferred** (unassigned) | **Plan gap.** |
+| I17 | Coach brings friends in ("Sam trained this morning") | **No** | **deferred** (unassigned) | **Plan gap.** |
+| I18 | Social prototype first | **No** | **deferred** (unassigned) | **Plan gap.** |
 
 **Ideas the plan silently leaves out:** I3 live stats pill, I4/I5/I7 HR atmosphere (colour, grain, MYO mirroring, colour-blind safe), I9 voice workout replacement, I10 ask-once suggestion, I11–I13 cached memory brief, I14 deep recall, I15–I18 opt-in social. None of these has a phase, an owner or an estimate.
+
+| I19 | Bank alternatives so swaps are instant (new, 2026-11-05) | No | building (workout-replace) | — |
+| I20 | Rep counter must count past target (new, 2026-11-05) | No | building (rep-overcount) | — |
+| I21 | Voice weight changes, total vs per-side (bug) | No | building (weight-fix) | — |
+
+**Deferred, not dropped:** Phase 4 recovery reads, social (I15–I18), deep-recall vector search.
 
 ## Plan items (`responsive-coach-plan.md`)
 
@@ -49,6 +55,6 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | P1.12 | `extend_rest` phone tool | in PR #44 | F9 |
 | P1.13 | Coach rules table | in PR #44 (partial) | HR, too-much, easy, welcome-back, voice-off and music rules done. Pace, mobility and tone rules not done. |
 | P1.14 | Evals per rule in `functions/src/evals` | **not started** | Only a unit test on prompt strings. |
-| P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | not started | `HeartRateHub` exists but has no producer (F4). |
-| P3 | BLE straps, AirPods HR | not started | — |
-| P4 | Recovery reads (resting HR, HRV, sleep) | not started | — |
+| P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | building (watch-app) | `HeartRateHub` exists but has no producer (F4). |
+| P3 | BLE straps, AirPods HR | building (watch-app, after P2) | — |
+| P4 | Recovery reads (resting HR, HRV, sleep) | **deferred** (unassigned) | — |

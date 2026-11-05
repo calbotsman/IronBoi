@@ -1,7 +1,7 @@
 # Watchdog findings
 
 *Updated 2026-11-05. Most severe first. CONFIRMED = read in the code. PLAUSIBLE = depends on runtime data or a device.*
-Audited: #39, #40, #41 (merged), #44 (open, conflicting with main; audited at the diff on the PR, head 3408ccd).
+Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable).
 
 ## High
 
@@ -23,7 +23,7 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 **F5. #44: the voice note leaves out rest elapsed, so device check #1 can't pass. CONFIRMED**
 `CoachContext.swift:71` (`voiceNote`) sends "resting (90 s planned)" but not seconds elapsed. Text turns get the elapsed time; live voice doesn't. Scenario: live voice, 40 s into rest, "how long should I rest?" The coach knows only the plan (90 s) and can't answer "50 more". The PR's first device checkbox expects the real rest numbers.
 
-**F6. #44 conflicts with main (#41 touched the same `liveWorkout.ts`, `CoachStageView.swift` and `AppModel.swift`).** Re-audit after the rebase. In particular, check that the cardio wording from #41 survives in `liveWorkoutRules`.
+**F6. #44 rebase: resolved.** At 86e8a6a it's mergeable, and #41's cardio wording survives in `liveWorkoutRules`. F3, F4 and F5 are unchanged by the rebase. Five build sessions branch from #44, so they inherit F3–F5 and F8–F9.
 
 ## Medium
 
