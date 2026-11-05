@@ -1,5 +1,6 @@
 import type { EffortRating, LiveCoachContext, LiveWorkoutState } from "../contracts/coach-agent.js";
-import { isCardioExercise, isTimedExercise } from "../workouts/exerciseCatalog.js";
+import { isCardioExercise, isTimedExercise, isUnilateralExercise } from "../workouts/exerciseCatalog.js";
+import { loadBasis, weightPhrase } from "../workouts/loadBasis.js";
 
 /** One line of plan text, safe to put in the prompt. */
 function clean(text: string): string {
@@ -15,7 +16,7 @@ function clean(text: string): string {
 export function liveWorkoutRules(state: LiveWorkoutState | undefined): string | null {
   if (!state) return null;
   const exercise = clean(state.exercise);
-  const weight = state.weightLb && state.weightLb > 0 ? ` at ${Math.round(state.weightLb)} lb` : "";
+  const weight = state.weightLb && state.weightLb > 0 ? ` at ${weightPhrase(state.weightLb, exercise)}` : "";
   const counted = state.repsCountedThisSet && state.repsCountedThisSet > 0
     ? ` They have counted ${state.repsCountedThisSet} reps of this set so far.`
     : "";
@@ -26,14 +27,19 @@ export function liveWorkoutRules(state: LiveWorkoutState | undefined): string | 
     : isTimedExercise(state.exercise)
       ? `${state.targetReps} seconds`
       : `${state.targetReps} reps`;
+  const eachSide = state.eachSide ?? isUnilateralExercise(state.exercise);
   const order = state.exercises.map((name, i) => `${i + 1}. ${clean(name)}`).join("; ");
   return [
     "<live_workout>",
     `The user is in the middle of a workout right now${state.workoutName ? ` (${clean(state.workoutName)})` : ""}.`,
     `Current exercise: ${exercise} — exercise ${state.exerciseNumber} of ${state.exercises.length}, set ${state.setNumber} of ${state.totalSets}, ${target}${weight}.${counted}`,
     `Today's exercises in order: ${order}.`,
+    ...(eachSide
+      ? [`${exercise} is done one side at a time: the ${isTimedExercise(state.exercise) ? "time" : "reps"} above are PER SIDE, and each set is a left and a right. The app counts and logs each side; "left side done", "switching sides" and "right side now" are handled by the app. Say targets as "${state.targetReps} each side".`]
+      : []),
     `"This", "this one", "it", "these" and "the exercise" mean ${exercise} unless they name another one. Never ask which exercise they mean when they could mean the current one.`,
     "If they ask to change how they do it (seated instead of standing, kneeling, incline, dumbbells instead of a barbell, a lighter weight), answer for the current exercise by name in one or two sentences, and name the changed version in full (for example \"Seated Dumbbell Shoulder Press\") so the app can show and log it.",
+    `Changing the weight (\"I'm going up\", \"bump it to 40\", \"add 5 pounds\", \"going heavier\"): call set_workout_weight; with no number, call it without one and ask \"Up to what?\". Never use adapt_plan for it. ${loadBasis(state.exercise) === "each" ? `${exercise} uses two weights: the app counts ONE of them, so say weights as "35 each", and ask "35 each hand?" only if it's unclear whether they meant each or total.` : "Say weights the way the app shows them."}`,
     "Adding to today's session — cardio (indoor cycling, a run, the rower) or another exercise — is done by the app the moment they say it (\"I'm adding 20 minutes on the bike\"); it adds the block and runs a timer for cardio. If such a request reaches you, never call adapt_plan or propose a plan change: say it's added if a [app] line says so, otherwise tell them to say it like \"add 20 minutes of indoor cycling\".",
     "</live_workout>",
   ].join("\n");

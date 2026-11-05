@@ -17,6 +17,9 @@ struct SetCount: Equatable {
     private(set) var count = 0
     /// An each-side lift: the first side's reps, while the other is counted.
     private(set) var firstSide: Int?
+    /// Which side that was, if they said ("left side done"); nil = taken
+    /// as the left.
+    private(set) var firstSideName: WorkoutVoice.Side?
     /// The slowest you've gone between two numbers this set (per rep, when
     /// the recogniser dropped a word and the count jumped).
     private(set) var slowestRep: TimeInterval = 0
@@ -62,6 +65,31 @@ struct SetCount: Equatable {
             return .switchSides
         }
         return .reachedTarget
+    }
+
+    /// They said a side is done ("left side done", "switching sides",
+    /// "right side now"): the other side counts from one, whatever the
+    /// count. False if this isn't a side switch (not each-side, nothing
+    /// counted yet, or already on the second side — then it only notes
+    /// which side the first was, if that wasn't known).
+    mutating func switchSides(finished: WorkoutVoice.Side?) -> Bool {
+        guard eachSide else { return false }
+        guard firstSide == nil, count > 0 else {
+            if firstSide != nil, firstSideName == nil { firstSideName = finished }
+            return false
+        }
+        firstSide = count
+        firstSideName = finished
+        count = 0
+        lastRepAt = nil
+        return true
+    }
+
+    /// The side being counted now.
+    var currentSide: WorkoutVoice.Side? {
+        guard eachSide else { return nil }
+        let first = firstSideName ?? .left
+        return firstSide == nil ? first : first.other
     }
 
     // MARK: - When the set is over
@@ -116,5 +144,13 @@ struct SetCount: Equatable {
             reps = count
         }
         return reps >= min(Self.fewestToLog, target) ? reps : nil
+    }
+
+    /// An each-side lift's two sides for the log (`repsToLog` is the
+    /// fewer); one side only if the other wasn't counted. Nil otherwise.
+    var sidesToLog: (left: Int?, right: Int?)? {
+        guard let side = firstSide else { return nil }
+        let both = WorkoutVoice.sides(first: side, second: count, firstName: firstSideName)
+        return (both.left, both.right)
     }
 }

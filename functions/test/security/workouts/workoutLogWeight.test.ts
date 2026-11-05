@@ -143,6 +143,29 @@ describe("finishWorkoutSession records what was actually lifted", () => {
     expect(block.sets).toEqual([{ reps: 1080, durationSec: 1080 }]);
   });
 
+  it("logs both sides of a one-side-at-a-time set", async () => {
+    // "Left side done … right side": a single-arm row set is a left and a
+    // right; the log keeps both, and reps is the fewer.
+    const started = await startSession();
+    const result = (await finishWorkoutSession(db, USER_ID, {
+      sessionId: started.sessionId,
+      completedAt: "2026-07-28T18:00:00.000Z",
+      exercises: [
+        {
+          exerciseIndex: 0,
+          name: "Single-arm DB Row",
+          targetSets: 1,
+          targetReps: 10,
+          targetWeight: 30,
+          exerciseDone: true,
+          eachSide: true,
+          completedSets: [{ setIndex: 0, completed: true, reps: 9, weight: 30, leftReps: 10, rightReps: 9 }],
+        },
+      ],
+    })) as { workoutLog: { exercises: { sets: Record<string, number>[] }[] } };
+    expect(result.workoutLog.exercises[0].sets[0]).toMatchObject({ reps: 9, leftReps: 10, rightReps: 9 });
+  });
+
   it("logs only completed sets", async () => {
     const result = (await finishWith([
       { completed: true, weight: 135, reps: 8 },

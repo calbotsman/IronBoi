@@ -31,6 +31,7 @@ import type { CoachTips, CoachTone, LiveCoachContext, LiveWorkoutState } from ".
 import { liveContextRules, liveWorkoutRules } from "./liveWorkout.js";
 import { isCardioExercise } from "../workouts/exerciseCatalog.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
+import { SET_WORKOUT_WEIGHT, runSetWorkoutWeight } from "./workoutWeightTool.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
@@ -330,6 +331,12 @@ export async function orchestrateCoachTurn({
       : undefined;
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
       ? async (toolName, toolArgs) => {
+          if (toolName === SET_WORKOUT_WEIGHT.name) {
+            const { result, action } = runSetWorkoutWeight(toolArgs, liveWorkout);
+            // Same channel as replace_session: the phone applies it once.
+            if (action) clientActions.push(action);
+            return result;
+          }
           try {
             const toolResult = await executeTool(toolRegistry, toolName, toolArgs, {
               authenticatedUserId: userId,
@@ -386,7 +393,9 @@ export async function orchestrateCoachTurn({
         // Phase 1.1 — userContent on the wire is the XML-tagged userMessage,
         // not the raw user turn. The boundary contract is in `system`.
         userContent: userMessage,
-        tools: toolLoopEnabled ? COACH_TOOL_DECLARATIONS : undefined,
+        tools: toolLoopEnabled
+          ? (liveWorkout ? [...COACH_TOOL_DECLARATIONS, SET_WORKOUT_WEIGHT] : COACH_TOOL_DECLARATIONS)
+          : undefined,
         executeTool: executeCoachTool,
         signal: modelAbort.signal,
         onText: async (partialContent) => {

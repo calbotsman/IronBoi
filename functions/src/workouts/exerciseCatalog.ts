@@ -67,6 +67,10 @@ export type CatalogEntry = {
   // plank 4x60 is four 60-second holds). Kept in step with the app's own
   // list (ios Models/ExerciseKnowledge.swift ExerciseKnowledge.timed).
   timed?: true;
+  // Done one side at a time, and the plan's reps are per side: a set is a
+  // left and a right, counted and logged separately. Kept in step with the
+  // app's ExerciseKnowledge entries (`unilateral: true`; a test checks).
+  unilateral?: true;
 };
 
 // Display muscle names are kept human ("Upper chest", "Front delts") because
@@ -134,7 +138,7 @@ const ENTRIES: CatalogEntry[] = [
   { name: "Dumbbell Shoulder Press", primary: ["Front delts", "Side delts"], secondary: ["Triceps"], equipment: ["dumbbell"], pattern: "vertical_push", loadClass: "moderate" },
   { name: "Arnold Press", primary: ["Front delts", "Side delts"], secondary: ["Rear delts", "Triceps"], equipment: ["dumbbell"], pattern: "vertical_push", loadClass: "moderate" },
   { name: "Lateral Raises", primary: ["Side delts"], secondary: ["Rear delts"], equipment: ["dumbbell"], pattern: "isolation_shoulder", loadClass: "light" },
-  { name: "KB Clean & Press", primary: ["Front delts", "Side delts"], secondary: ["Traps", "Triceps", "Glutes"], equipment: ["kettlebell"], pattern: "vertical_push", loadClass: "moderate" },
+  { name: "KB Clean & Press", primary: ["Front delts", "Side delts"], secondary: ["Traps", "Triceps", "Glutes"], equipment: ["kettlebell"], pattern: "vertical_push", loadClass: "moderate", unilateral: true },
   { name: "Heavy Club Mill", primary: ["Side delts", "Rear delts"], secondary: ["Lats", "Core"], equipment: ["club"], pattern: "isolation_shoulder", loadClass: "light" },
   { name: "Heavy Club Shield Cast", primary: ["Front delts", "Chest"], secondary: ["Core", "Triceps"], equipment: ["club"], pattern: "isolation_shoulder", loadClass: "light" },
   { name: "Skull Crushers", primary: ["Triceps"], secondary: [], equipment: ["barbell", "bench"], pattern: "isolation_arm", loadClass: "light" },
@@ -144,8 +148,8 @@ const ENTRIES: CatalogEntry[] = [
   { name: "Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Erectors"], equipment: ["barbell"], pattern: "hinge", loadClass: "heavy" },
   { name: "Bent-over Barbell Row", primary: ["Lats", "Mid back"], secondary: ["Biceps", "Rear delts"], equipment: ["barbell"], pattern: "horizontal_pull", loadClass: "heavy" },
   { name: "Inverted Row", primary: ["Lats", "Mid back"], secondary: ["Biceps", "Rear delts"], equipment: ["none"], pattern: "horizontal_pull", loadClass: "bodyweight" },
-  { name: "Single-arm DB Row", primary: ["Lats"], secondary: ["Biceps", "Mid back"], equipment: ["dumbbell", "bench"], pattern: "horizontal_pull", loadClass: "moderate" },
-  { name: "KB Single-arm Row", primary: ["Lats"], secondary: ["Biceps", "Rear delts"], equipment: ["kettlebell"], pattern: "horizontal_pull", loadClass: "moderate" },
+  { name: "Single-arm DB Row", primary: ["Lats"], secondary: ["Biceps", "Mid back"], equipment: ["dumbbell", "bench"], pattern: "horizontal_pull", loadClass: "moderate", unilateral: true },
+  { name: "KB Single-arm Row", primary: ["Lats"], secondary: ["Biceps", "Rear delts"], equipment: ["kettlebell"], pattern: "horizontal_pull", loadClass: "moderate", unilateral: true },
   { name: "KB Halo", primary: ["Side delts", "Rear delts"], secondary: ["Core", "Traps"], equipment: ["kettlebell"], pattern: "isolation_shoulder", loadClass: "light" },
   { name: "Sandbag Carry", primary: ["Traps", "Core"], secondary: ["Biceps", "Lats"], equipment: ["sandbag"], pattern: "carry", loadClass: "heavy", timed: true },
   { name: "Hammer Curls", primary: ["Biceps"], secondary: ["Brachialis", "Forearms"], equipment: ["dumbbell"], pattern: "isolation_arm", loadClass: "light" },
@@ -154,8 +158,8 @@ const ENTRIES: CatalogEntry[] = [
   { name: "KB Curl", primary: ["Biceps"], secondary: ["Forearms"], equipment: ["kettlebell"], pattern: "isolation_arm", loadClass: "light" },
   // --- Legs -------------------------------------------------------------
   { name: "Barbell Back Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Erectors"], equipment: ["barbell"], pattern: "squat", loadClass: "heavy" },
-  { name: "Walking Lunges", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], pattern: "lunge", loadClass: "bodyweight" },
-  { name: "Bulgarian Split Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings"], equipment: ["bench"], pattern: "lunge", loadClass: "light" },
+  { name: "Walking Lunges", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], pattern: "lunge", loadClass: "bodyweight", unilateral: true },
+  { name: "Bulgarian Split Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings"], equipment: ["bench"], pattern: "lunge", loadClass: "light", unilateral: true },
   { name: "KB Goblet Squat", primary: ["Quads", "Glutes"], secondary: ["Core", "Adductors"], equipment: ["kettlebell"], pattern: "squat", loadClass: "moderate" },
   { name: "Hip Thrust", primary: ["Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["barbell", "bench"], pattern: "hinge", loadClass: "heavy" },
   { name: "KB Swing", primary: ["Hamstrings", "Glutes"], secondary: ["Core", "Lats"], equipment: ["kettlebell"], pattern: "hinge", loadClass: "moderate" },
@@ -188,25 +192,25 @@ const ENTRIES: CatalogEntry[] = [
   { name: "Back Extension", primary: ["Erectors"], secondary: ["Glutes", "Hamstrings"], equipment: ["bench"], pattern: "hinge", loadClass: "bodyweight" },
   { name: "Good Morning", primary: ["Erectors", "Hamstrings"], secondary: ["Glutes"], equipment: ["barbell"], pattern: "hinge", loadClass: "moderate" },
   { name: "Dumbbell Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Erectors"], equipment: ["dumbbell"], pattern: "hinge", loadClass: "moderate" },
-  { name: "Single-leg Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Core", "Erectors"], equipment: ["none"], pattern: "hinge", loadClass: "bodyweight" },
+  { name: "Single-leg Romanian Deadlift", primary: ["Hamstrings", "Glutes"], secondary: ["Core", "Erectors"], equipment: ["none"], pattern: "hinge", loadClass: "bodyweight", unilateral: true },
   { name: "Glute Bridge", primary: ["Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], pattern: "hinge", loadClass: "bodyweight" },
   { name: "Nordic Hamstring Curl", primary: ["Hamstrings"], secondary: ["Glutes", "Core"], equipment: ["none"], pattern: "hinge", loadClass: "bodyweight" },
   { name: "Bodyweight Squat", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], pattern: "squat", loadClass: "bodyweight" },
   { name: "Dumbbell Goblet Squat", primary: ["Quads", "Glutes"], secondary: ["Core", "Adductors"], equipment: ["dumbbell"], pattern: "squat", loadClass: "moderate" },
-  { name: "Reverse Lunge", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], pattern: "lunge", loadClass: "bodyweight" },
-  { name: "Step-ups", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Calves"], equipment: ["bench"], pattern: "lunge", loadClass: "bodyweight" },
+  { name: "Reverse Lunge", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Core"], equipment: ["none"], pattern: "lunge", loadClass: "bodyweight", unilateral: true },
+  { name: "Step-ups", primary: ["Quads", "Glutes"], secondary: ["Hamstrings", "Calves"], equipment: ["bench"], pattern: "lunge", loadClass: "bodyweight", unilateral: true },
   { name: "Wall Sit", primary: ["Quads"], secondary: ["Glutes", "Core"], equipment: ["none"], pattern: "squat", loadClass: "bodyweight", timed: true },
-  { name: "Single-leg Calf Raise", primary: ["Calves"], secondary: [], equipment: ["none"], pattern: "isolation_calf", loadClass: "bodyweight" },
+  { name: "Single-leg Calf Raise", primary: ["Calves"], secondary: [], equipment: ["none"], pattern: "isolation_calf", loadClass: "bodyweight", unilateral: true },
   { name: "Dead Bug", primary: ["Core"], secondary: ["Hip flexors"], equipment: ["none"], pattern: "core", loadClass: "bodyweight" },
   { name: "Hollow Body Hold", primary: ["Core"], secondary: ["Hip flexors"], equipment: ["none"], pattern: "core", loadClass: "bodyweight", timed: true },
-  { name: "Side Plank", primary: ["Core"], secondary: ["Side delts", "Glutes"], equipment: ["none"], pattern: "core", loadClass: "bodyweight", timed: true },
-  { name: "Bird Dog", primary: ["Core"], secondary: ["Erectors", "Glutes"], equipment: ["none"], pattern: "core", loadClass: "bodyweight" },
+  { name: "Side Plank", primary: ["Core"], secondary: ["Side delts", "Glutes"], equipment: ["none"], pattern: "core", loadClass: "bodyweight", timed: true, unilateral: true },
+  { name: "Bird Dog", primary: ["Core"], secondary: ["Erectors", "Glutes"], equipment: ["none"], pattern: "core", loadClass: "bodyweight", unilateral: true },
   { name: "Mountain Climbers", primary: ["Core"], secondary: ["Quads", "Front delts"], equipment: ["none"], pattern: "conditioning", loadClass: "bodyweight" },
   { name: "Burpees", primary: ["Quads", "Chest"], secondary: ["Core", "Front delts"], equipment: ["none"], pattern: "conditioning", loadClass: "bodyweight" },
   { name: "Jump Rope", primary: ["Calves", "Quads"], secondary: ["Core"], equipment: ["none"], pattern: "conditioning", loadClass: "bodyweight" },
   { name: "Incline Walk", primary: ["Quads", "Glutes"], secondary: ["Calves"], equipment: ["none"], pattern: "conditioning", loadClass: "bodyweight" },
   { name: "Farmer Carry", primary: ["Traps", "Core"], secondary: ["Forearms"], equipment: ["dumbbell"], pattern: "carry", loadClass: "heavy", timed: true },
-  { name: "Suitcase Carry", primary: ["Core", "Traps"], secondary: ["Forearms"], equipment: ["kettlebell"], pattern: "carry", loadClass: "moderate", timed: true },
+  { name: "Suitcase Carry", primary: ["Core", "Traps"], secondary: ["Forearms"], equipment: ["kettlebell"], pattern: "carry", loadClass: "moderate", timed: true, unilateral: true },
   // A yoga session is one timed block ("doing yoga instead"); MYO doesn't build flows.
   { name: "Yoga Flow", primary: ["Core"], secondary: ["Hamstrings", "Hip flexors"], equipment: ["none"], pattern: "mobility", loadClass: "bodyweight", timed: true },
 ];
@@ -276,6 +280,19 @@ const NOT_CARDIO = new RegExp(NOT_CARDIO_PATTERN, "i");
 /** A cardio block ("Indoor Cycling", "Run", "Rowing"), done for minutes. */
 export function isCardioExercise(name: unknown): boolean {
   return typeof name === "string" && CARDIO.test(name) && !NOT_CARDIO.test(name);
+}
+
+// Lifts outside the catalog that are done one side at a time, by name. Same
+// string as the app's ExerciseKnowledge.unilateralPattern (a test checks).
+export const UNILATERAL_PATTERN =
+  "\\b(single|one)[- ]?(arm|leg|side)\\b|\\b(each|per) (side|arm|leg)\\b|\\bunilateral\\b|\\bsplit squat|\\bbulgarian\\b|\\bstep[- ]?ups?\\b|\\bsuitcase\\b|\\bside plank\\b|\\bpistol\\b|\\bcossack\\b";
+const UNILATERAL = new RegExp(UNILATERAL_PATTERN, "i");
+
+/** One side at a time, reps per side: the catalog's flag, else the name. */
+export function isUnilateralExercise(name: unknown): boolean {
+  if (typeof name !== "string") return false;
+  const entry = ENTRIES.find((e) => e.name === name);
+  return entry ? entry.unilateral === true : UNILATERAL.test(name);
 }
 
 export function lookupExercise(name: string): CatalogEntry | undefined {

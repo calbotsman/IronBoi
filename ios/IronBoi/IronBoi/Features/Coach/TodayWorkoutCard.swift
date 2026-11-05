@@ -151,7 +151,7 @@ struct TodayWorkoutCard: View {
                 Text("\(exercise.sets) × \(exercise.reps)")
                     .font(.system(.body, design: .monospaced).weight(.semibold))
                     .foregroundStyle(MyoColor.Text.primary.color)
-                Text(exercise.weight > 0 ? "\(Self.pounds(exercise.weight)) lb" : "bodyweight")
+                Text(exercise.weight > 0 ? WeightLoad.label(exercise.weight, for: exercise.name) : "bodyweight")
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(MyoColor.Text.tertiary.color)
             }
@@ -207,10 +207,6 @@ struct TodayWorkoutCard: View {
             }
         }
         .padding(MyoTheme.Spacing.lg)
-    }
-
-    private static func pounds(_ weight: Double) -> String {
-        weight.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(weight)) : String(format: "%.1f", weight)
     }
 }
 

@@ -93,12 +93,18 @@ struct SessionReplacement: Codable, Equatable {
 /// A change only the phone can make, carried on a coach reply by the text
 /// pipeline (orchestrate.ts `clientActions`). Applied once.
 struct CoachClientAction: Equatable {
-    enum ActionType: String { case replaceSession = "replace_session", addSessionAddOn = "add_session_add_on" }
+    enum ActionType: String {
+        case replaceSession = "replace_session", addSessionAddOn = "add_session_add_on"
+        /// The coach's set_workout_weight (functions/src/coach/workoutWeightTool.ts).
+        case setWeight = "set_weight", askWeight = "ask_weight"
+    }
     let type: ActionType
     var kind: SessionKind?
     var minutes: Int?
     var alternativeId: String?
     var offeredAddOn = false
+    /// For setWeight / askWeight: which lift and what to do.
+    var weight: CoachWorkoutAction?
 
     init?(_ raw: [String: Any]) {
         guard let type = (raw["type"] as? String).flatMap(ActionType.init(rawValue:)) else { return nil }
@@ -108,6 +114,10 @@ struct CoachClientAction: Equatable {
         alternativeId = raw["alternativeId"] as? String
         offeredAddOn = raw["offeredAddOn"] as? Bool ?? false
         if type == .replaceSession, kind == nil { return nil }
+        if type == .setWeight || type == .askWeight {
+            guard let weight = CoachWorkoutAction(raw) else { return nil }
+            self.weight = weight
+        }
     }
 }
 

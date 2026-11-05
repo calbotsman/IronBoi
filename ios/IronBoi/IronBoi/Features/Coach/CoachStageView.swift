@@ -121,6 +121,9 @@ struct CoachStageView: View {
     /// One side of an each-side lift counted to target: its reps, while the
     /// other side is counted from one.
     private var firstSide: Int? { setCount?.firstSide }
+    /// A weight read as something other than said ("80" holding 35s → 40
+    /// each), asked back as "Right?": a "no" puts it as said.
+    @State private var weightCheck: (exercise: Int, request: WeightRequest, at: Date)?
     /// The count reached before the current transcript began; counting
     /// carries across the recognizer's restarts.
     @State private var countBase = 0
@@ -1378,9 +1381,10 @@ struct CoachStageView: View {
         guard let state = appModel.liveWorkoutState(), let exercise = state["exercise"] as? String else { return nil }
         let set = state["setNumber"] as? Int ?? 1, sets = state["totalSets"] as? Int ?? 1
         let reps = state["targetReps"] as? Int ?? 0
-        let weight = (state["weightLb"] as? Double).map { " at \(LiveWorkoutCard.pounds($0)) lb" } ?? ""
+        let weight = (state["weightLb"] as? Double).map { " at \(WeightLoad.label($0, for: exercise))" } ?? ""
         let order = state["exerciseNumber"] as? Int ?? 1, count = (state["exercises"] as? [String])?.count ?? 1
-        return "Now: \(exercise), set \(set) of \(sets), \(reps) reps\(weight) (exercise \(order) of \(count))."
+        let side = state["eachSide"] as? Bool == true ? " each side" : ""
+        return "Now: \(exercise), set \(set) of \(sets), \(reps) reps\(side)\(weight) (exercise \(order) of \(count))."
     }
 
     // MARK: - Workout voice
@@ -1441,6 +1445,36 @@ struct CoachStageView: View {
             answerSkipRestDay(yes)
             return
         }
+        // "40 each hand, 80 total. Right?" — "no" means the number as said.
+        if let check = weightCheck {
+            weightCheck = nil
+            if Date().timeIntervalSince(check.at) < 20, WeightLoad.request(in: text) == nil,
+               let yes = Self.yesOrNo(text) {
+                if yes {
+                    confirm("Got it.")
+                } else if let exercises = appModel.activeWorkout?.exercises, exercises.indices.contains(check.exercise),
+                          let fixed = appModel.applyWeightRequest(
+                            WeightRequest(change: check.request.change, stated: nil), exerciseIndex: check.exercise, guess: false) {
+                    let name = exercises[check.exercise].name
+                    confirm(WeightLoad.confirmation(fixed, exercise: name, short: Self.short(name)))
+                }
+                return
+            }
+        }
+        // Coach asked "up to what?": a bare number now is the weight, not a
+        // count ("forty", "35 each").
+        if let asked = appModel.weightQuestion, appModel.activeWorkout != nil, repCount == 0 {
+            if Date().timeIntervalSince(asked.at) > 45 {
+                appModel.weightQuestion = nil
+            } else if text.split(separator: " ").count <= 6,
+                      let value = WeightLoad.firstNumber(in: text.lowercased()), value >= 2.5,
+                      let index = appModel.workoutExerciseIndex(named: asked.exerciseName) {
+                appModel.weightQuestion = nil
+                applyWeight(WeightLoad.request(in: text) ?? WeightRequest(change: .to(value), stated: nil),
+                            exerciseIndex: index)
+                return
+            }
+        }
         if !appModel.pendingSessionChanges.isEmpty, let keep = Self.yesOrNo(text) {
             if keep {
                 confirm("Done. I'll send it over to update your plan.")
@@ -1486,6 +1520,22 @@ struct CoachStageView: View {
                 resumeListening()
                 return
             }
+            // One-side-at-a-time lift: "left side done", "switching sides",
+            // "right side now". Before "done", which would end the set.
+            // Only mid-set: at rest "the left one" is just talk.
+            if var tally = setCount, tally.eachSide, let change = WorkoutVoice.sideSwitch(in: text) {
+                let switched = tally.switchSides(finished: change.finished)
+                setCount = tally
+                if switched {
+                    switchSides()
+                } else {
+                    // Already on the second side (switched at the target):
+                    // that only told us which side the first one was.
+                    markRestartHandled()
+                    resumeListening()
+                }
+                return
+            }
             if repCount > 0 {
                 // Mid-count: "set done" (tapped, typed or said) closes the
                 // set at the count so far. A question or a request closes
@@ -1507,6 +1557,20 @@ struct CoachStageView: View {
                     return
                 }
             }
+            // Sides said, not counted: "10 left, 9 right", "set done, 10
+            // each side". Logs the next set with both sides.
+            if short, repCount == 0, firstSide == nil, let index = currentExerciseIndex, let exercise = currentExercise,
+               WorkoutVoice.isEachSide(exercise), let said = WorkoutVoice.sideReps(in: text),
+               said.left != said.right || WorkoutVoice.setsLogged(in: text) != nil,
+               let set = appModel.completeNextSet(exerciseIndex: index, reps: min(said.left, said.right)) {
+                appModel.recordSides(exerciseIndex: index, setNumber: set, left: said.left, right: said.right)
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                let head = said.left == said.right
+                    ? "Set \(set) done, \(said.left) each side."
+                    : "Set \(set): \(said.left) left, \(said.right) right."
+                confirm(setDoneLine(head, exerciseIndex: index))
+                return
+            }
             if short, let logged = WorkoutVoice.setsLogged(in: text), let index = currentExerciseIndex,
                       let exercise = currentExercise {
                 // You didn't count — "set done", "two sets done".
@@ -1526,17 +1590,11 @@ struct CoachStageView: View {
                 let head = count == 1 ? "Set \(last ?? 1) done." : "\(count) sets logged."
                 confirm(setDoneLine(head, exerciseIndex: index))
                 return
-            } else if short, let change = WorkoutVoice.weightChange(in: text), let index = currentExerciseIndex,
-                      let exercise = currentExercise {
-                let now = appModel.workingWeight(for: exercise)
-                let next: Double
-                switch change {
-                case .to(let pounds): next = pounds
-                case .by(let delta): next = now + delta
-                }
-                appModel.setWorkoutExerciseWeight(exerciseIndex: index, weight: next)
-                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                confirm("\(Self.short(exercise.name)) at \(LiveWorkoutCard.pounds(max(0, next))) pounds.")
+            } else if short, let request = WeightLoad.request(in: text), let index = currentExerciseIndex {
+                // An exact weight phrase ("bump it to 40", "add 5 pounds").
+                // Looser ones ("I'm going up") go to Coach, whose
+                // set_workout_weight tool lands in AppModel+WorkoutWeight.
+                applyWeight(request, exerciseIndex: index)
                 return
             }
             // "Can I do these seated?" — the lift you're on changes position
@@ -1567,6 +1625,19 @@ struct CoachStageView: View {
         send(text, spoken: !typedTurn)
     }
 
+    /// Sets the weight for the sets left and says it back in the lift's
+    /// convention ("Arnold Press: 35 pounds each hand."), checking only
+    /// when a two-dumbbell number reads like a total.
+    private func applyWeight(_ request: WeightRequest, exerciseIndex index: Int) {
+        guard let exercises = appModel.activeWorkout?.exercises, exercises.indices.contains(index),
+              let result = appModel.applyWeightRequest(request, exerciseIndex: index, guess: true) else { return }
+        let name = exercises[index].name
+        AudioHub.log("weight: \(name) \(request.change) → \(result.pounds) check=\(result.check)")
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        weightCheck = result.check ? (index, request, Date()) : nil
+        confirm(WeightLoad.confirmation(result, exercise: name, short: Self.short(name)))
+    }
+
     private static let addressPattern = #"^\W*(hey |hi |ok |okay |yo )?(myo|my o|my oh|mayo|mio|meo|miyo|maya|mya|mia|myah|meya|maia|coach)\b[\s,.!?]*"#
 
     /// Starts with MYO's name (as the recognizer tends to hear it) or "coach".
@@ -1594,6 +1665,14 @@ struct CoachStageView: View {
               let index = setCount?.exercise ?? currentExerciseIndex,
               let exercise = appModel.activeWorkout?.exercises[index] else { return }
 
+        // "Left side done", "switching sides": the other side starts (this
+        // must come before "done", which would end the whole set).
+        if var tally = setCount, tally.firstSide == nil, let change = WorkoutVoice.sideSwitch(in: transcript),
+           tally.switchSides(finished: change.finished) {
+            setCount = tally
+            switchSides()
+            return
+        }
         if repCount > 0, WorkoutVoice.saysSetDone(transcript) {
             finishCount()
             return
@@ -1602,7 +1681,7 @@ struct CoachStageView: View {
         guard WorkoutVoice.looksLikeCounting(transcript, running: repCount > 0) else { return }
         let heard = WorkoutVoice.repCount(in: transcript, from: countBase)
         var tally = setCount
-            ?? SetCount(exercise: index, target: exercise.targetReps, eachSide: WorkoutVoice.isEachSide(exercise.name))
+            ?? SetCount(exercise: index, target: exercise.targetReps, eachSide: WorkoutVoice.isEachSide(exercise))
         let step = tally.advance(to: heard, at: Date())
         guard step != .ignored else { return }
         AudioHub.log("count \(repCount) → \(heard) (heard: \(transcript.suffix(40)))")
@@ -1667,7 +1746,9 @@ struct CoachStageView: View {
     private func switchSides() {
         countBase = 0
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        show(notice: "Other side")
+        // "Right side." once they've said which side they did; else "Other side."
+        let cue = setCount?.firstSideName.map { "\($0.other.rawValue.capitalized) side." } ?? "Other side."
+        show(notice: String(cue.dropLast()))
         closeCount(after: setCount?.quietWindow ?? SetCount.quietBetweenSides)
         // A fresh transcript, so the other side's "one" counts as one.
         markRestartHandled()
@@ -1676,7 +1757,7 @@ struct CoachStageView: View {
             // The live coach is held quiet for the whole set: a tone says it.
             resumeListening()
         } else {
-            voice.speak("Other side.", messageId: "local-\(UUID().uuidString)")
+            voice.speak(cue, messageId: "local-\(UUID().uuidString)")
         }
     }
 
@@ -1707,8 +1788,18 @@ struct CoachStageView: View {
         }
         let target = finished.target
         let countedIndex: Int? = finished.exercise
+        let sides = finished.sidesToLog
         let head: String
-        if finalCount > target {
+        if let sides, let index = countedIndex, let left = sides.left, let right = sides.right {
+            appModel.recordSides(exerciseIndex: index, setNumber: setNumber, left: left, right: right)
+            head = left == right
+                ? "Set \(setNumber) done, \(left) each side."
+                : "Set \(setNumber): \(left) left, \(right) right."
+        } else if let sides, let index = countedIndex {
+            // One side only: log it as that side, and say so.
+            appModel.recordSides(exerciseIndex: index, setNumber: setNumber, left: sides.left, right: sides.right)
+            head = "Set \(setNumber), \(finalCount) on the \(sides.left != nil ? "left" : "right") only."
+        } else if finalCount > target {
             head = "Set \(setNumber) done. \(finalCount) reps, \(finalCount - target) over."
         } else if finalCount < target {
             head = "Set \(setNumber), \(finalCount) reps."
@@ -1982,10 +2073,12 @@ struct CoachStageView: View {
             // Changing the current lift introduces it (see onChange).
             appModel.focusExercise(index)
             resumeListening()
-        case .targets(let index, let sets, let reps):
+        case .targets(let index, let sets, let reps, let eachSide):
             appModel.setWorkoutTargets(index, sets: sets, reps: reps)
+            if eachSide { appModel.setEachSide(index, true) }
             if let updated = appModel.activeWorkout?.exercises[index] {
-                confirm("\(Self.short(updated.name)): \(updated.targetSets) sets of \(updated.targetReps).")
+                let side = WorkoutVoice.isEachSide(updated) ? " each side" : ""
+                confirm("\(Self.short(updated.name)): \(updated.targetSets) sets of \(updated.targetReps)\(side).")
             }
         case .finish where !appModel.activeWorkoutHasProgress:
             // Nothing logged: ending would record an empty workout.
@@ -2439,9 +2532,9 @@ struct CoachStageView: View {
         var cues: [ExerciseLesson.BodyCue] = []
         if !teach {
             let weight = appModel.workingWeight(for: exercise)
-            let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
+            let load = weight > 0 ? " at \(WeightLoad.spoken(weight, for: exercise.name))" : ""
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
-            let side = WorkoutVoice.isEachSide(exercise.name) ? " each side" : ""
+            let side = WorkoutVoice.isEachSide(exercise) ? " each side" : ""
             if ExerciseKnowledge.isCardio(exercise.name) {
                 let length = ExerciseKnowledge.spokenDuration(seconds: exercise.targetReps * max(1, exercise.targetSets))
                 lines.append("\(lead), \(exercise.name). \(length). Say go when you start, and done when you're finished.")
