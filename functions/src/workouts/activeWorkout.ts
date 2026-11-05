@@ -26,7 +26,7 @@ import {
 } from "../journey/recap.js";
 import { writeGeneralCoachMessage } from "../journey/messages.js";
 import { safeLogger } from "../logging/safeLogger.js";
-import { normalizeExerciseKey } from "./exerciseCatalog.js";
+import { isTimedExercise, normalizeExerciseKey } from "./exerciseCatalog.js";
 import {
   baselineDocFor,
   baselineRefFor,
@@ -239,9 +239,13 @@ export async function finishWorkoutSession(
             set.weight && set.weight > 0
               ? Math.round(set.weight * POUNDS_TO_KG * 10) / 10
               : undefined;
+          const reps = set.reps ?? exercise.targetReps;
           return {
-            reps: set.reps ?? exercise.targetReps,
+            reps,
             ...(loadKg !== undefined ? { loadKg } : {}),
+            // A hold, a carry or a cardio block is done for time: its reps
+            // are seconds, so the log says so too ("Indoor Cycling", 1200 s).
+            ...(isTimedExercise(exercise.name) ? { durationSec: reps } : {}),
             ...(exercise.notes !== undefined ? { notes: exercise.notes } : {}),
           };
         }),
