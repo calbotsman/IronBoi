@@ -8,7 +8,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | # | Idea | In plan? | Status | Note |
 |---|---|---|---|---|
 | I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | in PR #48 (F30–F32); calories streamed but not shown | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
-| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods in PR #52 (F33–F35); Health reads **in progress** (Phase 4, recovery-reads) | — |
+| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods in PR #52 (F33–F35); Health reads in PR #60 (F45–F47) | — |
 | I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | in PR #49 (F13–F15) | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
 | I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | in PR #49 (F13, F15) | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
 | I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | in PR #49 (F13, F15) | **Plan gap.** |
@@ -21,10 +21,10 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | I12 | Brief rebuilt on the server after each workout or conversation | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
 | I13 | Brief stays small (~1–2k words, safety/injuries always in) | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
 | I14 | Deep recall on demand ("what did I bench last spring?") | **No** | in PR #50 (workout logs only; F19); conversations + vector search **deferred** (structured queries first, per #50) | **Plan gap.** |
-| I15 | Social, opt-in (one onboarding question, off by default) | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
-| I16 | Join by invite link, no feeds | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
-| I17 | Coach brings friends in ("Sam trained this morning") | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
-| I18 | Social prototype first | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
+| I15 | Social, opt-in (one onboarding question, off by default) | **No** | in PR #59 (behind a flag; F48–F52) | **Plan gap.** |
+| I16 | Join by invite link, no feeds | **No** | in PR #59 (behind a flag; F48–F52) | **Plan gap.** |
+| I17 | Coach brings friends in ("Sam trained this morning") | **No** | in PR #59 (behind a flag; F48–F52) | **Plan gap.** |
+| I18 | Social prototype first | **No** | in PR #59 (behind a flag; F48–F52) | **Plan gap.** |
 
 **Ideas the plan silently leaves out:** I3 live stats pill, I4/I5/I7 HR atmosphere (colour, grain, MYO mirroring, colour-blind safe), I9 voice workout replacement, I10 ask-once suggestion, I11–I13 cached memory brief, I14 deep recall, I15–I18 opt-in social. None of these has a phase, an owner or an estimate.
 
@@ -58,7 +58,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | P1.14 | Evals per rule in `functions/src/evals` | **not started** | Only a unit test on prompt strings. |
 | P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | in PR #48 | Real HR feed + trend/recovery now computed (resolves F4). F30–F32. |
 | P3 | BLE straps, AirPods HR | in PR #52 | — |
-| P4 | Recovery reads (resting HR, HRV, sleep), baselines, "lighter today?" | **in progress** (recovery-reads) | — |
+| P4 | Recovery reads (resting HR, HRV, sleep), baselines, "lighter today?" | in PR #60 | F45 (privacy policy) must be fixed before merge |
 
 ## Not an idea, but tracked
 
@@ -81,6 +81,9 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | #52 | Straps / AirPods | yes | no (0/10) | F33 now gated on `HealthSync.enabled` on main (partly fixed); F34, F35 |
 | #54 | F40 plist fix | yes | build-verified | — |
 | #55 | F42 iOS 26 mirroring launch crash | yes | sim build only; needs a 26.6 device launch | — |
+| #57 | CI launch guard | no (merge when green) | n/a | F43 (CI builds with Xcode 16.4), F44 |
+| #59 | Social prototype | no (merge flag-off) | no | F48–F52 before the flag goes on |
+| #60 | Recovery reads | no (merge after F45) | no | F45–F47 |
 | #38 | OpenAI Realtime live voice | yes; functions deployed to ironboi-staging | no | B1–B3 fixed |
 | #53 | Live voice reliability | yes | no | B4–B6, F27, F28 fixed |
 
