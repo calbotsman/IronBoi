@@ -49,11 +49,23 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
     /// Call from `App.init`. The mirroring handler must be in place before
     /// the Watch starts mirroring, including when iOS launches the app in
     /// the background for a mirrored session (no UI, no AppModel yet).
+    ///
+    /// Never reads the property back: on Josh's iPhone (iOS 26.6) the
+    /// getter isn't there — `-[HKHealthStore workoutSessionMirroringStartHandler]`
+    /// was an unrecognized selector and the app aborted at launch
+    /// (2026-11-05 crash log). A flag tracks it, and the setter is checked
+    /// before use, so a device without it simply has no Watch mirroring.
+    private var mirroringHandlerInstalled = false
     func installMirroringHandler() {
-        guard HKHealthStore.isHealthDataAvailable(), store.workoutSessionMirroringStartHandler == nil else { return }
+        guard HKHealthStore.isHealthDataAvailable(), !mirroringHandlerInstalled else { return }
+        guard store.responds(to: NSSelectorFromString("setWorkoutSessionMirroringStartHandler:")) else {
+            AudioHub.log("watch: this iOS has no workout mirroring handler")
+            return
+        }
         store.workoutSessionMirroringStartHandler = { session in
             Task { @MainActor in WatchWorkoutLink.shared.attach(session) }
         }
+        mirroringHandlerInstalled = true
     }
 
     /// Call when the app model starts: Set done and End need it, and the
