@@ -42,6 +42,10 @@ print(rt["identifier"], phones[-1], rt["name"].replace(" ", "_"))
 [ -n "${DEVTYPE:-}" ] || { echo "::error::no usable iOS simulator runtime${RUNTIME:+ ($RUNTIME)}"; exit 1; }
 echo "Runtime: $RUNTIME_NAME ($RUNTIME), device: $DEVTYPE"
 
+# simctl can hang (seen locally: launch never returns on a wedged
+# CoreSimulator); give each call a deadline. macOS has no `timeout`.
+deadline() { local secs=$1; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
+
 UDID=$(xcrun simctl create "MYO smoke" "$DEVTYPE" "$RUNTIME")
 LOG=$(mktemp -t myo-smoke-log)
 STREAM_PID=""
@@ -53,21 +57,23 @@ cleanup() {
 trap cleanup EXIT
 
 xcrun simctl boot "$UDID"
-xcrun simctl bootstatus "$UDID" -b >/dev/null
+deadline 300 xcrun simctl bootstatus "$UDID" -b >/dev/null \
+  || { echo "::error::simulator did not finish booting in 300s"; exit 1; }
 
 # Crash reports for simulator apps land on the host.
 REPORTS="$HOME/Library/Logs/DiagnosticReports"
 mkdir -p "$REPORTS"
 MARK=$(mktemp -t myo-smoke-mark)
 
-xcrun simctl install "$UDID" "$APP"
+deadline 180 xcrun simctl install "$UDID" "$APP"
 xcrun simctl spawn "$UDID" log stream --style compact --level debug \
   --predicate "process == \"$EXE\"" >"$LOG" 2>&1 &
 STREAM_PID=$!
 sleep 1
 
 OUT=$(SIMCTL_CHILD_MYO_NO_MIC=1 SIMCTL_CHILD_MYO_PREVIEW=1 \
-  xcrun simctl launch "$UDID" "$BUNDLE_ID")
+  deadline 120 xcrun simctl launch "$UDID" "$BUNDLE_ID") \
+  || { echo "::error::simctl launch failed or hung (120s)"; exit 1; }
 PID="${OUT##*: }"
 echo "Launched $BUNDLE_ID (pid $PID); waiting ${WAIT}s"
 sleep "$WAIT"

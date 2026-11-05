@@ -98,7 +98,7 @@ jobs:
     # macos-15 required: the project is objectVersion 77 (Xcode 16.3+ format);
     # macos-14's Xcode 15 cannot open it.
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
