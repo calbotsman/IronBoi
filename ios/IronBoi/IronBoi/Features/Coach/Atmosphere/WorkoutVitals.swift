@@ -32,7 +32,8 @@ final class WorkoutVitals: ObservableObject {
     }
 
     @Published private(set) var heart: Heart?
-    /// Rounded to whole kcal, so the pill redraws once per calorie, not per tick.
+    /// Rounded to whole kcal, so the pill redraws once per calorie, not per
+    /// tick. Only counted while there's heart rate; nil until then.
     @Published private(set) var kcal: Int?
     @Published private(set) var context: Context?
     /// Bumped once per rest when you're recovered; the screen says so.

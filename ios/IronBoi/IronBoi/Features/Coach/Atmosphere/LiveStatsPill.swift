@@ -5,6 +5,8 @@ import SwiftUI
 /// folds to a dot; tap the dot to bring it back. Remembered across workouts.
 struct LiveStatsPill: View {
     @ObservedObject var vitals: WorkoutVitals
+    /// You're recovered (once per rest): the screen says it out loud.
+    var onRecovered: () -> Void = {}
     @AppStorage("workoutStatsPillShown") private var shown = true
     /// Recovered while folded away: open for a few seconds to say so.
     @State private var peeking = false
@@ -27,6 +29,7 @@ struct LiveStatsPill: View {
         }
         .animation(.spring(response: 0.36, dampingFraction: 0.8), value: open)
         .onChange(of: vitals.recoveredCount) { _, _ in
+            onRecovered()
             guard !shown else { return }
             peeking = true
             Task {

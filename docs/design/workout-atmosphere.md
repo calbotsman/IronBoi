@@ -43,7 +43,8 @@ Every step that adds colour also changes brightness and contrast, and grain
 density changes as well, so calm and pumped differ without hue. See
 "Greyscale check" below. The glow follows the coach colour you picked.
 
-Under Reduce Motion the grain freezes. The colour still follows effort.
+Under Reduce Motion the grain freezes and the pass redraws once a second.
+The colour still follows effort.
 
 ## MYO
 
@@ -67,10 +68,11 @@ with no HR. Swipe it up or left and it folds to a heart dot; tap the dot to
 bring it back. The choice is saved (`workoutStatsPillShown`). If it's folded
 when you recover, it opens for 5 s.
 
-Calories come from heart rate (Keytel et al. 2005). With an unstated sex it
-uses the mean of the male and female formulas, and never goes below 1.3 MET.
-With no HR it uses 3.5 MET (Compendium 02054, resistance training). Either
-needs your weight; without it the pill shows no calories at all.
+Calories come from heart rate only (Keytel et al. 2005), the same kind of
+estimate a watch makes. With an unstated sex it uses the mean of the male and
+female formulas, and never goes below 1.3 MET. It needs a fresh heart rate,
+your weight and your age; without them the pill shows no calories at all.
+There is no time-based guess.
 
 ## Rest by recovery
 
@@ -81,6 +83,17 @@ also says "Heart rate's back down. You're recovered." when voice is on, tips
 aren't quiet, and nobody is talking. It uses the shared `CoachVoice`, so the
 stage's echo test covers it. With no HR it never fires; the rest timer is
 still the timer.
+
+## Heart-rate source
+
+The only thing that publishes into `HeartRateHub` today is the DEBUG
+simulator. Once a real source lands (the Watch app, #48), everything here
+uses it with no further wiring. Until then a Release build uses the
+workout-state fallback, and the HR parts (zone time, calories, recovery) stay
+hidden.
+
+Recovery only shows and says "recovered". It doesn't end or shorten the
+rest: the timer stays yours, and Coach doesn't move it on you.
 
 ## Seeing it without a Watch
 
@@ -107,7 +120,8 @@ iPhone, and this was built and checked in the simulator only. The estimate:
   orb's own shader, which already runs at 60 fps over the same area and does
   far more per pixel, stays the dominant cost.
 - On the CPU: one `EffortSignal` read a frame (a lock and an `exp`), and a
-  1 Hz `WorkoutVitals` tick.
+  1 Hz `WorkoutVitals` tick. `CoachView` holds `vitals` without observing
+  it, so only the pill redraws on a tick, not the whole stage.
 
 To confirm on a device, run Instruments (Metal System Trace, or the Animation
 Hitches template) on Josh's phone with the IronBoi Heart scheme, and compare

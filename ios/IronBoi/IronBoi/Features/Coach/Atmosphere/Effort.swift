@@ -80,37 +80,27 @@ enum EffortTarget {
 }
 
 /// Calories from heart rate (Keytel et al. 2005, J Sports Sci 23:289),
-/// or, with no heart rate, from the activity's MET value. Either needs
-/// your weight; nil without it rather than a guess at a body.
+/// the same kind of estimate a watch makes. Nil without a fresh heart rate,
+/// your weight and age: no flat guess from time alone.
 enum CalorieEstimate {
-    /// Compendium of Physical Activities 2011, code 02054: resistance
-    /// (weight) training, multiple exercises, 8–15 reps — 3.5 MET.
-    static let strengthMET = 3.5
-
     /// kcal per minute.
     static func perMinute(bpm: Int?, weightKg: Double?, ageYears: Int?, sex: UserSex?) -> Double? {
-        guard let weightKg, (25...300).contains(weightKg) else { return nil }
-        if let bpm, let age = ageYears, (10...100).contains(age) {
-            let hr = Double(bpm), w = weightKg, a = Double(age)
-            // kJ/min → kcal/min. Without a stated male or female, the mean of the two.
-            let male = (-55.0969 + 0.6309 * hr + 0.1988 * w + 0.2017 * a) / 4.184
-            let female = (-20.4022 + 0.4472 * hr - 0.1263 * w + 0.074 * a) / 4.184
-            let kcal: Double
-            switch sex {
-            case .male: kcal = male
-            case .female: kcal = female
-            default: kcal = (male + female) / 2
-            }
-            // The formula runs negative near resting heart rate, where it
-            // wasn't fitted; never below sitting still (~1.3 MET).
-            return max(kcal, metPerMinute(1.3, weightKg: w))
+        guard let bpm, let weightKg, (25...300).contains(weightKg),
+              let age = ageYears, (10...100).contains(age) else { return nil }
+        let hr = Double(bpm), w = weightKg, a = Double(age)
+        // kJ/min → kcal/min. Without a stated male or female, the mean of the two.
+        let male = (-55.0969 + 0.6309 * hr + 0.1988 * w + 0.2017 * a) / 4.184
+        let female = (-20.4022 + 0.4472 * hr - 0.1263 * w + 0.074 * a) / 4.184
+        let kcal: Double
+        switch sex {
+        case .male: kcal = male
+        case .female: kcal = female
+        default: kcal = (male + female) / 2
         }
-        return metPerMinute(strengthMET, weightKg: weightKg)
-    }
-
-    /// kcal/min = MET × 3.5 × kg / 200.
-    static func metPerMinute(_ met: Double, weightKg: Double) -> Double {
-        met * 3.5 * weightKg / 200
+        // The formula runs negative near resting heart rate, where it
+        // wasn't fitted; never below sitting still (~1.3 MET: kcal/min =
+        // MET × 3.5 × kg / 200).
+        return max(kcal, 1.3 * 3.5 * w / 200)
     }
 }
 

@@ -7,8 +7,10 @@ struct CoachView: View {
     @StateObject private var bodyDirector = BodyDirector()
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
     @State private var showKeyboard = false
-    /// Heart rate, calories, recovery: the workout screen's atmosphere and stats pill.
-    @StateObject private var vitals = WorkoutVitals()
+    /// Heart rate, calories, recovery: the workout screen's atmosphere and
+    /// stats pill. Held, not observed: it publishes every second, and only
+    /// the pill should redraw for that, not the whole coach screen.
+    @State private var vitals = WorkoutVitals()
     @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
     #if DEBUG
     @State private var heartSim = HeartRateSimulator()
@@ -40,7 +42,7 @@ struct CoachView: View {
                     }
                     .overlay(alignment: .topLeading) {
                         if appModel.activeWorkout != nil {
-                            LiveStatsPill(vitals: vitals)
+                            LiveStatsPill(vitals: vitals, onRecovered: sayRecovered)
                                 .padding(.leading, MyoTheme.Spacing.md)
                                 .padding(.top, 5)
                                 .transition(.opacity)
@@ -66,7 +68,6 @@ struct CoachView: View {
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                 } while !Task.isCancelled && appModel.activeWorkout != nil
             }
-            .onChange(of: vitals.recoveredCount) { _, _ in sayRecovered() }
             #if DEBUG
             // MYO_HR_SIM with the preview: straight into a workout, so the
             // atmosphere can be seen without starting one by hand.
