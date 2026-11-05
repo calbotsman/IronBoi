@@ -56,7 +56,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | P1.12 | `extend_rest` phone tool | in PR #44 | F9 |
 | P1.13 | Coach rules table | in PR #44 (partial) | HR, too-much, easy, welcome-back, voice-off and music rules done. Pace, mobility and tone rules not done. |
 | P1.14 | Evals per rule in `functions/src/evals` | **not started** | Only a unit test on prompt strings. |
-| P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | building (watch-app) | `HeartRateHub` exists but has no producer (F4). |
+| P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | in PR #48 | Real HR feed + trend/recovery now computed (resolves F4). F30–F32. |
 | P3 | BLE straps, AirPods HR | in PR #52 | — |
 | P4 | Recovery reads (resting HR, HRV, sleep) | **deferred** (unassigned) | — |
 
