@@ -1,3 +1,4 @@
+import { claimFriendNudge, friendNudgeRules } from "../social/store.js";
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { safeLogger } from "../logging/safeLogger.js";
@@ -274,6 +275,9 @@ export async function orchestrateCoachTurn({
       userContent,
       { toolsEnabled: toolLoopEnabled },
     );
+    // Social prototype: at most one friend line per day, only with both
+    // sides' consent; null (and no prompt change) when the flag is off.
+    const friendNudge = friendNudgeRules(await claimFriendNudge(db, userId, contextBundle.today));
     const spoken = inputMode === "live_voice" || inputMode === "dictation";
     const styleRules = coachStyleRules(coachTips, coachTone);
     const system = [
@@ -282,6 +286,7 @@ export async function orchestrateCoachTurn({
       inputMode ? BODY_RULES : null,
       styleRules,
       liveWorkoutRules(liveWorkout),
+      friendNudge,
       liveContextRules(liveContext, {
         inWorkout: Boolean(liveWorkout),
         onCardio: liveWorkout ? isCardioExercise(liveWorkout.exercise) : false,

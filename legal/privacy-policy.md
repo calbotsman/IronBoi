@@ -1,5 +1,7 @@
 # MYO Privacy Policy
 
+<!-- LEGAL REVIEW NEEDED (2026-11-05): "Train with friends" text added for the social prototype (rows in §1, §2, §3, §6). The feature ships behind a flag that is off; have this reviewed before turning it on for testers. -->
+
 **Effective date:** 2026-06-02
 **Last updated:** 2026-11-05
 
@@ -12,7 +14,7 @@ If you have questions about this policy or your data, contact us at **support@th
 ## 1. The short version
 
 - We collect only the data we need to coach you. No advertising, no data brokers, no cross-app tracking.
-- Your data lives in your own private corner of Google Firebase. Other users cannot read it.
+- Your data lives in your own private corner of Google Firebase. Other users cannot read it. The one exception is opt-in: if you turn on **Train with friends**, friends you invite see your first name, whether you trained today and your weekly streak — nothing else.
 - You can delete your account and all your data from the app at any time: **Account menu → Delete Account…**.
 - We do not sell your data to anyone.
 - We will tell you within 60 days if a security incident affects your data (FTC Health Breach Notification Rule).
@@ -33,6 +35,7 @@ The rest of this document spells out the details.
 | **Voice audio** | You talk to the coach: either a voice conversation (the microphone stays open from when you start it until you end it) or dictating a single message | Convert speech to text using Apple's speech recognition — on your iPhone when it supports on-device recognition, otherwise on Apple's servers under Apple's privacy policy. **The audio itself is never sent to our servers** — only the transcribed text. We do not keep audio. The one exception is live voice, below, which is on unless you turn it off. |
 | **Live voice audio (on by default)** | You talk to the coach with **You → Your coach → Live voice** on (it is on by default; turn it off there) | Lets the coach listen and answer in real time. While a live conversation is open, your microphone audio streams **directly from your iPhone to the live voice service** — **OpenAI's Realtime API** or **Google's Gemini Live API**, whichever the app is set to use (You → Your coach → Voice engine) — without passing through our servers, and that service returns the coach's spoken reply. It also sends back a text transcript of both sides, which we save in your coach conversation like any other message. We do not record or keep the audio. During a workout, rep counting stays on your phone and the audio stream pauses while you count. Turn the switch off and nothing is streamed. |
 | **Coach's spoken replies** | The coach reads its replies aloud in a voice conversation | The **text of each spoken reply** (the coach's words, which can include what you asked about) is sent to a text-to-speech service to produce the audio you hear: Google Cloud Text-to-Speech, or — with live voice on, so the app's own lines sound like the live coach — Google's Gemini speech model or OpenAI's speech API. Google Cloud's data-processing terms (https://cloud.google.com/terms/data-processing-addendum), which do not allow Google to use it to train models. |
+| **Train with friends (off unless you turn it on)** | You answer yes to "Train with friends?" or turn it on in **You → Friends**, then invite a friend by link or code and they accept | Friends you have connected with can see **only** your first name, whether you trained today, and your weekly streak — never your workouts, weights, body measurements, injuries, health data or conversations. The coach may mention, at most once a day, that a friend trained today. We keep a record of your consent. Turning it off (or "Leave" on one friend) removes the connection for both of you and deletes what was shared. |
 | **Usage counters** | App activity (number of messages, token counts per day) | Enforce per-user daily caps so one account can't run up an enormous bill or be abused. |
 | **Audit log** | Server-side, every consent change, memory write, health-ingest, and spend-cap hit | Internal records of what changed and when. The actual content of what changed is never logged — only a one-way hash. |
 
@@ -50,6 +53,7 @@ Two things stay on your phone and never reach us: a workout you have started but
 - **To run the coaching feature.** Every chat turn sends what you wrote plus your profile, recent workouts, and confirmed memory facts to a third-party large language model so it can produce a reply. Today that request goes through OpenRouter, which forwards it to Google's Gemini model. Neither is permitted to use your content to train their models.
 - **To talk in real time (live voice).** On by default, and you can turn it off: while a live conversation is open your voice streams from your iPhone straight to OpenAI's Realtime API or Google's Gemini Live API (whichever the app is set to use), and the transcript is saved to your conversation.
 - **To speak replies aloud.** In a voice conversation, the text of each coach reply is sent to Google Cloud Text-to-Speech — or, with live voice on, to Google's Gemini speech model or OpenAI's speech API — which returns the audio. If the voice service is unavailable or you reach the daily voice limit, your iPhone's built-in voice reads the reply instead and nothing leaves the device.
+- **To train with friends (only if you turn it on).** When you finish a workout we update what your connected friends can see: your first name, the day you last trained, and your weekly streak. The coach can see the same three things about friends who also turned it on, and may mention one of them at most once a day ("Sam trained today, your turn"). Nothing about bodies, weights, injuries or health is ever shared.
 - **To save your progress.** Workouts, daily checks, and your custom plan are stored so you can see them across devices and sessions.
 - **To enforce safety limits.** Per-user daily caps on messages, model tokens, and spoken-reply characters prevent abuse. Hitting a cap is recorded in your audit log.
 - **To tell whether MYO is working.** Once a day we count, across all users, things like how many people finished a first workout or trained twice in a week. The result is totals only, with no names or account IDs, and nothing new is collected to make it. Training-day reminders, if you turn them on, are scheduled on your iPhone; nothing about them is sent to us.
@@ -91,6 +95,7 @@ Two paths:
    - Wipe everything under `users/{your_uid}/` (profile, memory, workouts, daily checks, coach history, audit log)
    - Revoke all your sign-in sessions so any other devices can't keep using your account
    - Write a tombstone at `deletedAccounts/{your_uid}` with the deletion timestamp
+   - If you used Train with friends: remove every friend connection (for both people), any open invite, and what your friends could see
 
 2. **Email.** Send a deletion request from the email address associated with your account to support@thecombinationrule.com. We will process it within 30 days.
 

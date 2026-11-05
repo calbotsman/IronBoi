@@ -46,6 +46,7 @@
 		4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD07E5325615931462D65FF0 /* AmbientLife.swift */; };
 		517EC3482C4841986CFB46AD /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC8A7F0156E886437433E203 /* ConversationView.swift */; };
 		51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */; };
+		523E0F7E706974926F4127E2 /* SocialModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF21C4A6159F14E9C412345F /* SocialModel.swift */; };
 		526DA344085E2FB0CF1E223A /* CoachContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7475AB77513A49C9F500062D /* CoachContext.swift */; };
 		56407351422DBC9891A5C08B /* OneBodyMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */; };
 		572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */; };
@@ -70,6 +71,7 @@
 		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
 		7CE0660BBEDC99B11BB65681 /* MemoryFact.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */; };
 		7E148C16912BB7F38AACD81D /* RestActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F10C35335B09DF5C8E78766 /* RestActivity.swift */; };
+		7F3EF412FD0C82A8B4C41E6E /* SocialCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 266544BE7FF9263E496FF3EB /* SocialCard.swift */; };
 		7F4F9205CA0F79F743E265AE /* ExerciseMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */; };
 		7FFE32B5ACB8BB3E25F08D85 /* LiveWorkoutCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 451607DCC308F24BECF26C07 /* LiveWorkoutCard.swift */; };
 		8075B31225F93AF14C6E1298 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 3498C0CA8F27CBCC0994E1E2 /* FirebaseAuth */; };
@@ -186,6 +188,7 @@
 		1EB7EFEA476C2D70BA6DBCAE /* MYOWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MYOWatch.entitlements; sourceTree = "<group>"; };
 		213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Staging.plist"; sourceTree = "<group>"; };
 		241473A5576E7F94D3F1BA1E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		266544BE7FF9263E496FF3EB /* SocialCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialCard.swift; sourceTree = "<group>"; };
 		28819CABD07D045A8D3B68B8 /* AfterWorkoutCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AfterWorkoutCards.swift; sourceTree = "<group>"; };
 		2C07DF5449417A159375AD4C /* AppModel+Watch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Watch.swift"; sourceTree = "<group>"; };
 		2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeightFollowUpCard.swift; sourceTree = "<group>"; };
@@ -263,6 +266,7 @@
 		DAE7937F1EE073A0A0F01714 /* SessionChangesCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionChangesCard.swift; sourceTree = "<group>"; };
 		DD07E5325615931462D65FF0 /* AmbientLife.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientLife.swift; sourceTree = "<group>"; };
 		DF08E19B82B68A9F1800268E /* EffortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EffortTests.swift; sourceTree = "<group>"; };
+		DF21C4A6159F14E9C412345F /* SocialModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocialModel.swift; sourceTree = "<group>"; };
 		DFD8A357D155B142359BC4D9 /* Atmosphere.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Atmosphere.metal; sourceTree = "<group>"; };
 		E2AFA564B12B423FC0836691 /* AppModel+WorkoutWeight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+WorkoutWeight.swift"; sourceTree = "<group>"; };
 		EDC6CE12E7E58F297DFC0194 /* SetupCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupCard.swift; sourceTree = "<group>"; };
@@ -347,6 +351,7 @@
 				308987A1BEE7DAF86C626E66 /* MemoryReviewView.swift */,
 				0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */,
 				EDC6CE12E7E58F297DFC0194 /* SetupCard.swift */,
+				266544BE7FF9263E496FF3EB /* SocialCard.swift */,
 			);
 			path = Profile;
 			sourceTree = "<group>";
@@ -402,6 +407,7 @@
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				D355FB209189C5896724E2A4 /* PhoneWorkoutSession.swift */,
 				4F10C35335B09DF5C8E78766 /* RestActivity.swift */,
+				DF21C4A6159F14E9C412345F /* SocialModel.swift */,
 				5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */,
 				F6A47FA7EDB3DBFD24E70FCB /* VoiceCache.swift */,
 				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
@@ -797,6 +803,8 @@
 				97122EBA819A4AC4B8DD976A /* SessionChangesCard.swift in Sources */,
 				1DC4693D65CE2DB9F8BFE4A3 /* SetCount.swift in Sources */,
 				CA375C8D58B1B03F67C2B93A /* SetupCard.swift in Sources */,
+				7F3EF412FD0C82A8B4C41E6E /* SocialCard.swift in Sources */,
+				523E0F7E706974926F4127E2 /* SocialModel.swift in Sources */,
 				162BA5E9F7C261336EA5EB6F /* SoundMixControls.swift in Sources */,
 				93823C8AD336191A109929C7 /* TimerPanel.swift in Sources */,
 				CA7B04CE776DDFAEB4EF2343 /* TodayWorkoutCard.swift in Sources */,

@@ -138,3 +138,32 @@ export function progressSummaryPath(userId: string) {
 export function memoryBriefPath(userId: string) {
   return `${userRoot(userId)}/derivedSummaries/memory_brief`;
 }
+
+// Social prototype (social/store.ts, behind IRONBOI_SOCIAL_ENABLED). These
+// live OUTSIDE users/ because each one is read by, or about, two people:
+//   socialInvites/{code}       server-only; who invited, when it expires
+//   socialConnections/{pairId} one doc per mutual pair, pairId = sorted uids
+//   socialActivity/{userId}    the ONLY thing a friend may read: first name,
+//                              last day trained, weekly streak. Nothing about
+//                              bodies, weights, injuries or health.
+// users/{uid}/socialState/nudge records the last day the coach mentioned a
+// friend (at most once a day).
+export function socialInvitePath(code: string) {
+  return `socialInvites/${code}`;
+}
+
+export function socialPairId(a: string, b: string) {
+  return a < b ? `${a}_${b}` : `${b}_${a}`;
+}
+
+export function socialConnectionPath(a: string, b: string) {
+  return `socialConnections/${socialPairId(a, b)}`;
+}
+
+export function socialActivityPath(userId: string) {
+  return `socialActivity/${userId}`;
+}
+
+export function socialNudgeStatePath(userId: string) {
+  return `${userRoot(userId)}/socialState/nudge`;
+}
