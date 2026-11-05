@@ -22,6 +22,9 @@ struct IronBoiApp: App {
         AppCheck.setAppCheckProviderFactory(IronBoiAppCheckProviderFactory())
         #endif
         FirebaseApp.configure()
+        // Before anything else can miss it: a Watch workout mirrored to this
+        // phone may be what launched the app.
+        WatchWorkoutLink.shared.installMirroringHandler()
     }
 
     var body: some Scene {

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0649233C75E1DBC6749C2FA6 /* AppModel+Watch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C07DF5449417A159375AD4C /* AppModel+Watch.swift */; };
 		0752C42577AF71BE965F924A /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DECCF4FA552889A83248A3 /* WorkoutModels.swift */; };
 		08454E67831E64CF5B0DA3AD /* DossierComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C5EE0407EB961F5B79622A /* DossierComponents.swift */; };
 		0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5041EB6152324AB118525DA6 /* IronBoiApp.swift */; };
@@ -28,6 +29,7 @@
 		302EFB0F1A9C9E4BFC2C13F6 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B95702D3FB16E882BF8E3F9 /* FlowLayout.swift */; };
 		31D9F65E51B20F61260F722A /* HealthSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C698900CF6774CF078D13616 /* HealthSync.swift */; };
 		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
+		3E01D4D5C03D8368CF4038FC /* WatchViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E065A9C8694D5D93A3F0B13 /* WatchViews.swift */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
 		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
 		424EB0211AEF2CF1F109FC9D /* WorkoutAtmosphere.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3507DAE6C985C908B6C22EC6 /* WorkoutAtmosphere.swift */; };
@@ -40,6 +42,7 @@
 		56407351422DBC9891A5C08B /* OneBodyMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */; };
 		572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */; };
 		5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 241473A5576E7F94D3F1BA1E /* README.md */; };
+		5C65D49F49125E6CE3EDC74A /* WatchMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2F3AA8A5075B9B87679253 /* WatchMessages.swift */; };
 		5D0502F7A2D1A4FB76B5FB5C /* AnalyzerRecognition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */; };
 		5E959043BE8381E22181D226 /* RecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F433BDABFADDC8C6D06785F7 /* RecordView.swift */; };
 		5E98F19676BE3E591B1B881B /* TypeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6486137A4FFFD180E600A3 /* TypeBar.swift */; };
@@ -47,6 +50,7 @@
 		61E1E1D39DFC85D4D67F6108 /* CoachView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8251B627C5781604E47176FE /* CoachView.swift */; };
 		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
 		6A4164630BA54C06E707A4CB /* OrbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF82FC6D6FEC44A6DBE3C92F /* OrbView.swift */; };
+		6DB49F0BFC0DB1170FA7DD83 /* MYOWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEAE0D8CCD1BA65F8D855558 /* MYOWatchApp.swift */; };
 		6F05B9718C79D1C4CEFB54C5 /* EffortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF08E19B82B68A9F1800268E /* EffortTests.swift */; };
 		772BF83112E39339AC2E9561 /* CoachStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD792AC9EF71C813B550654E /* CoachStageView.swift */; };
 		774C91A01115DF4BCCE7B596 /* SetCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */; };
@@ -68,6 +72,8 @@
 		971478636E13DB8A91D04639 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */; };
 		9958D935D8CDAD73CED74B68 /* LiveStatsPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C542D53F30A1976AE920F6 /* LiveStatsPill.swift */; };
 		9979632C954BC2B951AC4F48 /* Effort.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17AEFB741E9613F5DA794D5 /* Effort.swift */; };
+		9A6633D967F94EEE73E44768 /* WatchMessages.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2F3AA8A5075B9B87679253 /* WatchMessages.swift */; };
+		A4630ABB8889CE86DD9C0881 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7F85ADB4B6951E8042F8DE17 /* Assets.xcassets */; };
 		AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */ = {isa = PBXBuildFile; fileRef = D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */; };
 		AB88E520959883D65800468A /* MemoryReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 308987A1BEE7DAF86C626E66 /* MemoryReviewView.swift */; };
 		ACD5F19BBA05A59B6A96D94A /* ExerciseLesson.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5993F87772C62C53440A56 /* ExerciseLesson.swift */; };
@@ -75,19 +81,48 @@
 		CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */; };
 		CA375C8D58B1B03F67C2B93A /* SetupCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC6CE12E7E58F297DFC0194 /* SetupCard.swift */; };
 		CA7B04CE776DDFAEB4EF2343 /* TodayWorkoutCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349CFA8575361D4715FDABD9 /* TodayWorkoutCard.swift */; };
+		CBD4AA38E1D8DE71B3DBDADE /* HeartZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1588FF5ABB8A4406698E4F5A /* HeartZones.swift */; };
 		D07A64B261D1D0F982E2EFF3 /* ExerciseKnowledge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */; };
 		D3854D70B9EB19EBEC73B394 /* AfterWorkoutCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28819CABD07D045A8D3B68B8 /* AfterWorkoutCards.swift */; };
 		D6444B3E1D84C06921141B78 /* GoogleService-Info-Staging.plist in Resources */ = {isa = PBXBuildFile; fileRef = 213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */; };
+		D6E220C671AAFCB8B5F3D232 /* WatchWorkoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA46FC99CC577A73006B0CD /* WatchWorkoutManager.swift */; };
 		DDE287948E75C936D7F8D05A /* PlanReviewCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */; };
 		DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */; };
 		E2611A41CD0A45F47F8F3234 /* CoachMix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040387C0316794F5C15D9648 /* CoachMix.swift */; };
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
+		E9B29F8FE79E94BC90A2A3FE /* WatchWorkoutLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49F537763E309EA90847347 /* WatchWorkoutLink.swift */; };
 		EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
 		EB61595884711817A062E761 /* SetCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEEA001FBB612929063F327B /* SetCount.swift */; };
 		EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */; };
 		EECFA673703A34EBBCC48022 /* MoveLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */; };
+		F2DC0ABA179AB96A355EECF4 /* MYOWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 7F8422FF7929970FA81E0EEF /* MYOWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FA5ED921350DA344444F6C3A /* HeartZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1588FF5ABB8A4406698E4F5A /* HeartZones.swift */; };
 		FDD604BD9D20821E55E595E7 /* WorkoutVitals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33C02B148BE62268E0264A53 /* WorkoutVitals.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		78122A84CC716C4863241412 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 91C623868F830B518E6AB77D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BD5A2B2B77AFD646B84529AF;
+			remoteInfo = MYOWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		3A978DDF29A7DBA225A1D087 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				F2DC0ABA179AB96A355EECF4 /* MYOWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		01163A8F8C0914CB146F028C /* SoundMixControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundMixControls.swift; sourceTree = "<group>"; };
@@ -99,10 +134,13 @@
 		0D5993F87772C62C53440A56 /* ExerciseLesson.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseLesson.swift; sourceTree = "<group>"; };
 		0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesView.swift; sourceTree = "<group>"; };
 		14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyzerRecognition.swift; sourceTree = "<group>"; };
+		1588FF5ABB8A4406698E4F5A /* HeartZones.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeartZones.swift; sourceTree = "<group>"; };
 		1B95702D3FB16E882BF8E3F9 /* FlowLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowLayout.swift; sourceTree = "<group>"; };
+		1EB7EFEA476C2D70BA6DBCAE /* MYOWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MYOWatch.entitlements; sourceTree = "<group>"; };
 		213F5D2E3D2DAFFAC3C5EABE /* GoogleService-Info-Staging.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Staging.plist"; sourceTree = "<group>"; };
 		241473A5576E7F94D3F1BA1E /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		28819CABD07D045A8D3B68B8 /* AfterWorkoutCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AfterWorkoutCards.swift; sourceTree = "<group>"; };
+		2C07DF5449417A159375AD4C /* AppModel+Watch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Watch.swift"; sourceTree = "<group>"; };
 		2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeightFollowUpCard.swift; sourceTree = "<group>"; };
 		308987A1BEE7DAF86C626E66 /* MemoryReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryReviewView.swift; sourceTree = "<group>"; };
 		33C02B148BE62268E0264A53 /* WorkoutVitals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutVitals.swift; sourceTree = "<group>"; };
@@ -114,12 +152,14 @@
 		42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
 		444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSequence.swift; sourceTree = "<group>"; };
 		451607DCC308F24BECF26C07 /* LiveWorkoutCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveWorkoutCard.swift; sourceTree = "<group>"; };
+		46C03B903D50AEADE7C694E6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		5041EB6152324AB118525DA6 /* IronBoiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IronBoiApp.swift; sourceTree = "<group>"; };
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
 		5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingReminders.swift; sourceTree = "<group>"; };
 		56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbPhysics.swift; sourceTree = "<group>"; };
 		57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBriefCache.swift; sourceTree = "<group>"; };
 		58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneBodyMotion.swift; sourceTree = "<group>"; };
+		5E065A9C8694D5D93A3F0B13 /* WatchViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchViews.swift; sourceTree = "<group>"; };
 		5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
 		67C542D53F30A1976AE920F6 /* LiveStatsPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStatsPill.swift; sourceTree = "<group>"; };
@@ -134,6 +174,8 @@
 		7701CCF07727848BE39DE49A /* AudioHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioHub.swift; sourceTree = "<group>"; };
 		77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseMotion.swift; sourceTree = "<group>"; };
 		7879883696E212221E0C2A4C /* SessionAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAlternatives.swift; sourceTree = "<group>"; };
+		7F8422FF7929970FA81E0EEF /* MYOWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MYOWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F85ADB4B6951E8042F8DE17 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8251B627C5781604E47176FE /* CoachView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
 		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
@@ -143,7 +185,9 @@
 		A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryFact.swift; sourceTree = "<group>"; };
 		A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetCountTests.swift; sourceTree = "<group>"; };
 		A4734F76A950FA7C6ECA47EC /* WorkoutLogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLogModels.swift; sourceTree = "<group>"; };
+		A49F537763E309EA90847347 /* WatchWorkoutLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWorkoutLink.swift; sourceTree = "<group>"; };
 		A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanReviewCard.swift; sourceTree = "<group>"; };
+		AA2F3AA8A5075B9B87679253 /* WatchMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMessages.swift; sourceTree = "<group>"; };
 		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AC8A7F0156E886437433E203 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
@@ -165,6 +209,8 @@
 		F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCheckProviderFactory.swift; sourceTree = "<group>"; };
 		FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachVoice.swift; sourceTree = "<group>"; };
 		FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutVoice.swift; sourceTree = "<group>"; };
+		FEA46FC99CC577A73006B0CD /* WatchWorkoutManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWorkoutManager.swift; sourceTree = "<group>"; };
+		FEAE0D8CCD1BA65F8D855558 /* MYOWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MYOWatchApp.swift; sourceTree = "<group>"; };
 		FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -184,6 +230,19 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		08475EB15172D34A77D90D70 /* MYOWatch */ = {
+			isa = PBXGroup;
+			children = (
+				7F85ADB4B6951E8042F8DE17 /* Assets.xcassets */,
+				46C03B903D50AEADE7C694E6 /* Info.plist */,
+				1EB7EFEA476C2D70BA6DBCAE /* MYOWatch.entitlements */,
+				FEAE0D8CCD1BA65F8D855558 /* MYOWatchApp.swift */,
+				5E065A9C8694D5D93A3F0B13 /* WatchViews.swift */,
+				FEA46FC99CC577A73006B0CD /* WatchWorkoutManager.swift */,
+			);
+			path = MYOWatch;
+			sourceTree = "<group>";
+		};
 		19CFD00FAA0244356AEB5FAB /* Features */ = {
 			isa = PBXGroup;
 			children = (
@@ -260,6 +319,7 @@
 				14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */,
 				F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */,
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
+				2C07DF5449417A159375AD4C /* AppModel+Watch.swift */,
 				7701CCF07727848BE39DE49A /* AudioHub.swift */,
 				7475AB77513A49C9F500062D /* CoachContext.swift */,
 				040387C0316794F5C15D9648 /* CoachMix.swift */,
@@ -270,6 +330,7 @@
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */,
 				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
+				A49F537763E309EA90847347 /* WatchWorkoutLink.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -323,6 +384,15 @@
 			path = Orb;
 			sourceTree = "<group>";
 		};
+		9829792B2D2F2BC92F5615E7 /* MYOShared */ = {
+			isa = PBXGroup;
+			children = (
+				1588FF5ABB8A4406698E4F5A /* HeartZones.swift */,
+				AA2F3AA8A5075B9B87679253 /* WatchMessages.swift */,
+			);
+			path = MYOShared;
+			sourceTree = "<group>";
+		};
 		B058F2785C85B6410DB9C733 /* Firebase */ = {
 			isa = PBXGroup;
 			children = (
@@ -338,6 +408,8 @@
 			children = (
 				329346F30DA766EAE94903E2 /* IronBoi */,
 				2A8B0CD30537FE7CAA28853A /* IronBoiTests */,
+				9829792B2D2F2BC92F5615E7 /* MYOShared */,
+				08475EB15172D34A77D90D70 /* MYOWatch */,
 				FFB9F988DF3FA230536009A2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -382,6 +454,7 @@
 			children = (
 				8932D2CF267BB36314E83C02 /* IronBoi.app */,
 				6CB267883F8AE6525B619F90 /* IronBoiTests.xctest */,
+				7F8422FF7929970FA81E0EEF /* MYOWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -414,10 +487,12 @@
 				77A7C5F14639844B81178345 /* Sources */,
 				0346E1F963A6A68EE66D5E2F /* Resources */,
 				299051222659FE63A5EADF20 /* Frameworks */,
+				3A978DDF29A7DBA225A1D087 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				41BE87A20B2933D691E1E45C /* PBXTargetDependency */,
 			);
 			name = IronBoi;
 			packageProductDependencies = (
@@ -431,6 +506,24 @@
 			productReference = 8932D2CF267BB36314E83C02 /* IronBoi.app */;
 			productType = "com.apple.product-type.application";
 		};
+		BD5A2B2B77AFD646B84529AF /* MYOWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8C61690B497EA255915665EF /* Build configuration list for PBXNativeTarget "MYOWatch" */;
+			buildPhases = (
+				BFF45C937734CB236DE8C1BB /* Sources */,
+				37F00200DCE9680C5CB48E05 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MYOWatch;
+			packageProductDependencies = (
+			);
+			productName = MYOWatch;
+			productReference = 7F8422FF7929970FA81E0EEF /* MYOWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -441,6 +534,10 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					BB82AD0B7ABFF8997691B12E = {
+						DevelopmentTeam = SGQ2WLB6M9;
+						ProvisioningStyle = Automatic;
+					};
+					BD5A2B2B77AFD646B84529AF = {
 						DevelopmentTeam = SGQ2WLB6M9;
 						ProvisioningStyle = Automatic;
 					};
@@ -465,6 +562,7 @@
 			targets = (
 				BB82AD0B7ABFF8997691B12E /* IronBoi */,
 				0991E539C590285FFDEC0731 /* IronBoiTests */,
+				BD5A2B2B77AFD646B84529AF /* MYOWatch */,
 			);
 		};
 /* End PBXProject section */
@@ -480,6 +578,14 @@
 				243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */,
 				B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */,
 				5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		37F00200DCE9680C5CB48E05 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A4630ABB8889CE86DD9C0881 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -519,6 +625,7 @@
 				4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */,
 				5D0502F7A2D1A4FB76B5FB5C /* AnalyzerRecognition.swift in Sources */,
 				40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */,
+				0649233C75E1DBC6749C2FA6 /* AppModel+Watch.swift in Sources */,
 				8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */,
 				4E928C3BF29B14439260571F /* Atmosphere.metal in Sources */,
 				8C5D909199B021D18EB0BF09 /* AudioHub.swift in Sources */,
@@ -540,6 +647,7 @@
 				2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */,
 				31D9F65E51B20F61260F722A /* HealthSync.swift in Sources */,
 				2C70161B8D3374BC258764A1 /* HeartRateSimulator.swift in Sources */,
+				FA5ED921350DA344444F6C3A /* HeartZones.swift in Sources */,
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
 				9958D935D8CDAD73CED74B68 /* LiveStatsPill.swift in Sources */,
 				DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */,
@@ -571,6 +679,8 @@
 				5E98F19676BE3E591B1B881B /* TypeBar.swift in Sources */,
 				971478636E13DB8A91D04639 /* UserProfile.swift in Sources */,
 				672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */,
+				5C65D49F49125E6CE3EDC74A /* WatchMessages.swift in Sources */,
+				E9B29F8FE79E94BC90A2A3FE /* WatchWorkoutLink.swift in Sources */,
 				572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */,
 				424EB0211AEF2CF1F109FC9D /* WorkoutAtmosphere.swift in Sources */,
 				25B2EAE2F402BA9568A459D1 /* WorkoutEdits.swift in Sources */,
@@ -579,6 +689,18 @@
 				3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */,
 				FDD604BD9D20821E55E595E7 /* WorkoutVitals.swift in Sources */,
 				51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BFF45C937734CB236DE8C1BB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CBD4AA38E1D8DE71B3DBDADE /* HeartZones.swift in Sources */,
+				6DB49F0BFC0DB1170FA7DD83 /* MYOWatchApp.swift in Sources */,
+				9A6633D967F94EEE73E44768 /* WatchMessages.swift in Sources */,
+				3E01D4D5C03D8368CF4038FC /* WatchViews.swift in Sources */,
+				D6E220C671AAFCB8B5F3D232 /* WatchWorkoutManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -595,6 +717,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		41BE87A20B2933D691E1E45C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BD5A2B2B77AFD646B84529AF /* MYOWatch */;
+			targetProxy = 78122A84CC716C4863241412 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		0428A7769B45F11E10F96361 /* Debug */ = {
@@ -631,6 +761,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 56;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -649,14 +780,15 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Debug;
 		};
@@ -711,6 +843,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 56;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -723,15 +856,35 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
 			};
 			name = Release;
+		};
+		A25653C2EC976B80C71614B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MYOWatch/MYOWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SGQ2WLB6M9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MYOWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.ironboi.watchkitapp;
+				PRODUCT_NAME = MYOWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Debug;
 		};
 		C9801A01B2FA8A3AC57F2502 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -740,13 +893,13 @@
 				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 56;
 				DEVELOPMENT_TEAM = SGQ2WLB6M9;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = IronBoi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-staging.cloudfunctions.net";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "MYO reads your heart rate and active energy during workouts so your coach can pace your rests.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MYO saves your finished workouts to Apple Health so they count toward your activity.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
@@ -757,7 +910,6 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.ironboi;
 				PRODUCT_NAME = IronBoi;
 				SDKROOT = iphoneos;
@@ -765,6 +917,25 @@
 				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
+		};
+		E9730AAD6313EA6DEDF337FC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MYOWatch/MYOWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = SGQ2WLB6M9;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MYOWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.ironboi.watchkitapp;
+				PRODUCT_NAME = MYOWatch;
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.0;
+			};
+			name = Release;
 		};
 		F476E5F4ADFBA65B2828C0F5 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -790,13 +961,13 @@
 				CODE_SIGN_ENTITLEMENTS = IronBoi/IronBoi.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 56;
 				DEVELOPMENT_TEAM = SGQ2WLB6M9;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = IronBoi/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-prod.cloudfunctions.net";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "MYO reads your heart rate and active energy during workouts so your coach can pace your rests.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MYO saves your finished workouts to Apple Health so they count toward your activity.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
@@ -807,7 +978,6 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.ironboi;
 				PRODUCT_NAME = IronBoi;
 				SDKROOT = iphoneos;
@@ -824,6 +994,15 @@
 			buildConfigurations = (
 				0428A7769B45F11E10F96361 /* Debug */,
 				57A815B96DC8CB7050E156C4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8C61690B497EA255915665EF /* Build configuration list for PBXNativeTarget "MYOWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A25653C2EC976B80C71614B5 /* Debug */,
+				E9730AAD6313EA6DEDF337FC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

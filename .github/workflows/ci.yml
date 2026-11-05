@@ -115,6 +115,12 @@ jobs:
       - name: Ensure Metal toolchain
         run: xcrun metal --version >/dev/null 2>&1 || xcodebuild -downloadComponent MetalToolchain
 
+      # The iPhone app embeds the MYO Watch app (ios/IronBoi/MYOWatch), so
+      # both builds need the watchOS simulator platform. Runner images
+      # usually ship it; download it only when it's missing.
+      - name: Ensure watchOS platform
+        run: xcrun simctl list runtimes | grep -q watchOS || xcodebuild -downloadPlatform watchOS
+
       - name: Build (Debug, iOS Simulator)
         run: >-
           xcodebuild
@@ -136,3 +142,13 @@ jobs:
             -destination "id=$SIM" \
             test \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Build Watch app (Debug, watchOS Simulator)
+        run: >-
+          xcodebuild
+          -project ios/IronBoi/IronBoi.xcodeproj
+          -scheme MYOWatch
+          -destination 'generic/platform=watchOS Simulator'
+          -configuration Debug
+          build
+          CODE_SIGNING_ALLOWED=NO
