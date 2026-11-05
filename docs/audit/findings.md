@@ -39,7 +39,7 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 
 ## Re-audit: #38 (5ab9ff2 + ef2ad16) and #53 (87a8224)
 
-**Verdict: safe to merge once iOS CI is green** (it was pending at audit time). Merge #38 first: it carries the launch-crash fix that main needs now (F42).
+**Verdict: safe to merge once iOS CI is green** (it was pending at audit time). The launch-crash fix (F42) is now on main via #55, so #38 and #53 can merge in either order.
 
 - **B1 fixed.** `takeLiveMint` decides handover server-side from the user's last mint (`isHandover`: ≥ 60 s since the last mint and within 15 min for Gemini / 65 min for OpenAI). The client flag is advisory. Anonymous uids always get Gemini, whose token locks the session. The ability of a signed-in client to `session.update` its own OpenAI session is recorded as an accepted limit (`liveOpenAI.ts:9-14`).
 - **B2 fixed.** Realtime tools run from `response.done`, and only when status is `completed`; cancelled-response calls are dropped and logged. `response.create` waits while a response is active (`requestOpenAIResponse`).
@@ -52,7 +52,7 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 - **Latency measurement, disputed:** "speech end" is still the last mic buffer above ~−40 dBFS (`:1392`). With voice processing on that's reasonable; with music on the speaker (VP off) it can be kept fresh by music, so the logged latency is a **lower bound**. Not blocking. Read it alongside the server's VAD (`input_audio_buffer.speech_stopped` on OpenAI) if the numbers look too good.
 - Open, minor: L2 (half-duplex with music on speaker) is unchanged; there's no iOS test of OpenAI event handling; no real OpenAI device session has been run yet.
 
-**F42. Launch crash on main (iOS 26.x): `HKHealthStore.workoutSessionMirroringStartHandler` getter. CONFIRMED, critical**
+**F42. Launch crash on main (iOS 26.x): `HKHealthStore.workoutSessionMirroringStartHandler` getter. RESOLVED on main by #55 (48127ef)**: verified main no longer reads the getter (flag plus `responds(to:)` setter check, `WatchWorkoutLink.swift:58-68`). A device launch on 26.6 is still to be confirmed.
 Main (`20e701b`) `WatchWorkoutLink.swift:53`: `store.workoutSessionMirroringStartHandler == nil` runs in `App.init`. The 26.2 SDK header declares it read/write (`HKHealthStore.h:286`), but the iOS 26.3 simulator's HealthKit binary contains only the `setWorkoutSessionMirroringStartHandler:` selector, not the getter. The read is an unrecognized selector, so the app aborts at launch (Josh's 26.6 crash log, 14:07). The header-vs-runtime mismatch is why the #48 audit's "API exists" check passed. **Fix ef2ad16 is correct:** it never reads the property, tracks installation with a flag, and checks `responds(to: setWorkoutSessionMirroringStartHandler:)`. It's only on #38/#53, so **main still crashes until it's cherry-picked or #38 merges.**
 
 **F41. CI never launches the app. CONFIRMED, high (process)**
