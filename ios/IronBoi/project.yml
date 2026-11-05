@@ -186,6 +186,8 @@ targets:
     sources:
       - path: IronBoiTests
       - path: IronBoi/Features/Coach/SetCount.swift
+      - path: IronBoi/Features/Coach/Atmosphere/Effort.swift
+      - path: IronBoi/Models/UserProfile.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
