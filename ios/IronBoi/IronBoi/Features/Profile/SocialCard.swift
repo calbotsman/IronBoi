@@ -41,7 +41,7 @@ struct SocialCard: View {
                     Text("Train with friends")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(MyoTheme.Colors.ink)
-                    Text("Friends you invite see if you trained today and your streak. Nothing else.")
+                    Text("Friends you invite see your first name, whether you trained today, and your weekly streak. Nothing else.")
                         .myoStyle(.body)
                         .foregroundStyle(MyoColor.Text.secondary.color)
                         .fixedSize(horizontal: false, vertical: true)
@@ -109,7 +109,7 @@ struct SocialCard: View {
                 .font(.body.monospaced())
             Button("Join") { Task { await social.accept(code); code = "" } }
                 .fontWeight(.semibold)
-                .disabled(code.trimmingCharacters(in: .whitespaces).count < 8 || social.busy)
+                .disabled(code.filter { $0.isLetter || $0.isNumber }.count < 12 || social.busy)
         }
         .frame(minHeight: 44)
 

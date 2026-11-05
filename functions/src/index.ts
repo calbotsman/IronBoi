@@ -15,6 +15,7 @@ import {
   listSocialFriends,
   publishSocialActivity,
   removeSocialData,
+  removeSocialDataBestEffort,
   requireSocialEnabled,
 } from "./social/store.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -367,9 +368,10 @@ export const deleteAccount = onCall(
       actor: "user",
     });
 
-    // Social data lives outside users/{uid} (friends read it): connections
-    // both ways, open invites, the shared activity doc.
-    await removeSocialData(db, userId);
+    // Social data lives outside users/{uid}: connections both ways, open
+    // invites, the activity doc. Best-effort and isolated — it must never
+    // stop an account being deleted (flag on or off).
+    await removeSocialDataBestEffort(db, userId, (error) => logSocialCleanupFailure(userId, "delete_account", error));
 
     // Recursive delete of all user-scoped data.
     await deleteDocumentTree(db.doc(userRoot(userId)));
@@ -405,7 +407,7 @@ export const getCoachBootstrap = onCall(CALLABLE_OPTS, async (request) => {
 export const resetMyData = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   // Start over wipes consent records, so social sharing must go with them.
-  await removeSocialData(db, userId);
+  await removeSocialDataBestEffort(db, userId, (error) => logSocialCleanupFailure(userId, "reset", error));
   await deleteDocumentTree(db.doc(userRoot(userId)), RESET_KEEPS);
   return { ok: true, userId };
 });
@@ -997,13 +999,26 @@ export const revokeConsent = onCall(CALLABLE_OPTS, async (request) => {
 
 // Social prototype (social/store.ts). Every callable refuses unless
 // IRONBOI_SOCIAL_ENABLED=true; the app hides social behind its own flag too.
-export const createSocialInviteCallable = onCall(CALLABLE_OPTS, async (request) => {
+// App Check is ALWAYS enforced here (not tied to IRONBOI_ENFORCE_APP_CHECK):
+// invite codes are bearer secrets. Register App Attest before turning the
+// flag on — see docs/product/social-prototype.md.
+const SOCIAL_CALLABLE_OPTS = { ...CALLABLE_OPTS, enforceAppCheck: true } as const;
+
+function logSocialCleanupFailure(userId: string, path: string, error: unknown) {
+  safeLogger.warn("Social cleanup failed", {
+    event: "social_cleanup_failed",
+    userId,
+    path,
+    errorCode: error instanceof Error ? error.name : "unknown_error",
+  });
+}
+export const createSocialInviteCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   requireSocialEnabled();
   return { ok: true as const, ...(await createSocialInvite(db, userId)) };
 });
 
-export const acceptSocialInviteCallable = onCall(CALLABLE_OPTS, async (request) => {
+export const acceptSocialInviteCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   requireSocialEnabled();
   const result = await acceptSocialInvite(db, userId, (request.data as { code?: unknown } | null)?.code);
@@ -1011,7 +1026,7 @@ export const acceptSocialInviteCallable = onCall(CALLABLE_OPTS, async (request) 
   return { ok: true as const, ...result };
 });
 
-export const leaveSocialConnectionCallable = onCall(CALLABLE_OPTS, async (request) => {
+export const leaveSocialConnectionCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   requireSocialEnabled();
   const result = await leaveSocialConnection(db, userId, (request.data as { friendId?: unknown } | null)?.friendId);
@@ -1019,7 +1034,7 @@ export const leaveSocialConnectionCallable = onCall(CALLABLE_OPTS, async (reques
   return result;
 });
 
-export const getSocialFriendsCallable = onCall(CALLABLE_OPTS, async (request) => {
+export const getSocialFriendsCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
   requireSocialEnabled();
   const today = z.object({ today: z.string().date() }).parse(request.data ?? {}).today;

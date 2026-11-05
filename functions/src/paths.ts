@@ -143,9 +143,9 @@ export function memoryBriefPath(userId: string) {
 // live OUTSIDE users/ because each one is read by, or about, two people:
 //   socialInvites/{code}       server-only; who invited, when it expires
 //   socialConnections/{pairId} one doc per mutual pair, pairId = sorted uids
-//   socialActivity/{userId}    the ONLY thing a friend may read: first name,
-//                              last day trained, weekly streak. Nothing about
-//                              bodies, weights, injuries or health.
+//   socialActivity/{userId}    owner-readable only: first name, last day
+//                              trained, weekly streak. Friends get "trained
+//                              today" yes/no + streak through a callable.
 // users/{uid}/socialState/nudge records the last day the coach mentioned a
 // friend (at most once a day).
 export function socialInvitePath(code: string) {
@@ -166,4 +166,8 @@ export function socialActivityPath(userId: string) {
 
 export function socialNudgeStatePath(userId: string) {
   return `${userRoot(userId)}/socialState/nudge`;
+}
+
+export function socialAcceptLimitPath(userId: string) {
+  return `${userRoot(userId)}/socialState/acceptLimit`;
 }

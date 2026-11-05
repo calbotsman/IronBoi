@@ -151,7 +151,11 @@ final class SocialModel: ObservableObject {
             await loadFriends()
         } catch {
             let message = (error as NSError).localizedDescription
-            if message.contains("expired") {
+            if message.contains("too_many_invite_attempts") {
+                note = "Too many tries today. Try again tomorrow."
+            } else if message.contains("too_many_friends") {
+                note = "One of you already has 20 friends."
+            } else if message.contains("expired") {
                 note = "That invite has expired. Ask for a new one."
             } else if message.contains("yours") {
                 note = "That's your own invite — send it to a friend."

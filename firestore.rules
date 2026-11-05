@@ -190,7 +190,13 @@ service cloud.firestore {
 
       match /consentRecords/{recordId} {
         allow read: if owns(userId);
+        // Social consent goes through recordConsent / revokeConsent only, so
+        // turning it off always runs the cleanup (connections both ways,
+        // shared activity, invites). A direct write would skip it.
         allow write: if owns(userId)
+          && recordId != "social_activity_v1"
+          && (resource == null || resource.data.get("category", "") != "social_activity")
+          && request.resource.data.get("category", "") != "social_activity"
           && request.resource.data.userId == userId
           && onlyKeys([
             "userId", "recordId", "category", "purpose", "granted",
@@ -214,25 +220,13 @@ service cloud.firestore {
     }
 
     // Social prototype (functions/src/social/store.ts). All server-written.
-    // A friend may read exactly one doc about you — socialActivity/{you} —
-    // and only while a connection exists AND the doc holds nothing beyond
-    // the shared fields (defence in depth: if a bug ever wrote more, the
-    // read fails instead of leaking it). Your own data under users/{you}
-    // stays owner-only; a connection opens nothing there.
-    function socialPairId(a, b) {
-      return a < b ? a + "_" + b : b + "_" + a;
-    }
-
-    function connectedTo(otherId) {
-      return signedIn()
-        && request.auth.uid != otherId
-        && exists(/databases/$(database)/documents/socialConnections/$(socialPairId(request.auth.uid, otherId)));
-    }
-
+    // Friends never read Firestore directly: the getSocialFriends callable
+    // returns name, trained-today yes/no and streak after re-checking both
+    // people's consent. socialActivity/{uid} holds the date "today" is
+    // computed from, so only its owner may read it. A connection opens
+    // nothing under users/{uid}.
     match /socialActivity/{userId} {
-      allow read: if owns(userId)
-        || (connectedTo(userId)
-          && resource.data.keys().hasOnly(["userId", "firstName", "trainedOn", "streakWeeks", "updatedAt"]));
+      allow read: if owns(userId);
       allow write: if false;
     }
 

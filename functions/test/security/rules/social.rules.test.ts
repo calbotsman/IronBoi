@@ -1,5 +1,7 @@
-// Social prototype rules: a friend can read ONLY socialActivity/{friend},
-// only while connected, and only when the doc holds the shared fields.
+// Social prototype rules: friends get nothing from Firestore directly (the
+// callable re-checks consent and returns yes/no + streak); clients can't
+// write any social doc, nor their social consent record (so revoking always
+// runs the cleanup).
 import { collection, deleteDoc, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { afterAll, beforeEach, describe, it } from "vitest";
 import {
@@ -15,12 +17,10 @@ import { USER_A, USER_B, baseProfile } from "../fixtures/users.js";
 
 const USER_C = "test-user-c";
 const pair = [USER_A, USER_B].sort().join("_");
-const activity = (userId: string, extra: Record<string, unknown> = {}) => ({
-  userId,
+const activity = (_userId: string, extra: Record<string, unknown> = {}) => ({
   firstName: "Sam",
   trainedOn: "2026-11-05",
   streakWeeks: 3,
-  updatedAt: "2026-11-05T09:00:00.000Z",
   ...extra,
 });
 
@@ -49,9 +49,9 @@ describe("social rules", () => {
     await cleanupTestEnv();
   });
 
-  it("connected_friend_can_read_shared_activity", async () => {
+  it("connected_friend_cannot_read_activity_directly", async () => {
     await seed();
-    await assertSucceeds(getDoc(doc(await authedDb(USER_A), `socialActivity/${USER_B}`)));
+    await assertFails(getDoc(doc(await authedDb(USER_A), `socialActivity/${USER_B}`)));
   });
 
   it("owner_can_read_own_activity", async () => {
@@ -74,12 +74,33 @@ describe("social rules", () => {
     await assertFails(getDoc(doc(await unauthedDb(), `socialActivity/${USER_B}`)));
   });
 
-  it("friend_read_denied_when_doc_holds_any_field_beyond_the_shared_set", async () => {
-    for (const extra of [{ weightKg: 80 }, { injuries: ["knee"] }, { restingHeartRate: 52 }, { lastWorkout: {} }]) {
+  it("friend_read_denied_whatever_the_doc_holds", async () => {
+    for (const extra of [{}, { weightKg: 80 }, { injuries: ["knee"] }]) {
       await clearFirestore();
       await seed({ bExtra: extra });
       await assertFails(getDoc(doc(await authedDb(USER_A), `socialActivity/${USER_B}`)));
     }
+  });
+
+  it("client_cannot_write_social_consent_directly", async () => {
+    const db = await authedDb(USER_A);
+    const record = {
+      userId: USER_A,
+      recordId: "social_activity_v1",
+      category: "social_activity",
+      purpose: "x",
+      granted: false,
+      scope: { read: true, write: false, share: true, retrieval: false },
+      policyVersion: "v",
+    };
+    await assertFails(setDoc(doc(db, `users/${USER_A}/consentRecords/social_activity_v1`), record));
+    // Same category under another id is refused too.
+    await assertFails(setDoc(doc(db, `users/${USER_A}/consentRecords/other`), { ...record, recordId: "other" }));
+    // And an existing social record can't be overwritten into something else.
+    await withAdminDb(async (admin) => setDoc(doc(admin, `users/${USER_A}/consentRecords/legacy`), { ...record, recordId: "legacy", granted: true }));
+    await assertFails(setDoc(doc(db, `users/${USER_A}/consentRecords/legacy`), { ...record, recordId: "legacy", category: "profile" }));
+    // Other consent categories still work as before.
+    await assertSucceeds(setDoc(doc(db, `users/${USER_A}/consentRecords/p1`), { ...record, recordId: "p1", category: "profile" }));
   });
 
   it("friend_cannot_list_activity_collection", async () => {
@@ -122,11 +143,5 @@ describe("social rules", () => {
     await seed();
     await assertFails(getDoc(doc(await authedDb(USER_B), "socialInvites/ABCDEFGH")));
     await assertFails(getDoc(doc(await authedDb(USER_A), "socialInvites/ABCDEFGH")));
-  });
-
-  it("after_leave_the_friend_loses_access", async () => {
-    await seed();
-    await withAdminDb(async (admin) => deleteDoc(doc(admin, `socialConnections/${pair}`)));
-    await assertFails(getDoc(doc(await authedDb(USER_A), `socialActivity/${USER_B}`)));
   });
 });

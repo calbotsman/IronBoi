@@ -1,4 +1,4 @@
-import { claimFriendNudge, friendNudgeRules } from "../social/store.js";
+import { friendNudgeRules, markLiveFriendNudgeIfMentioned, peekFriendNudge } from "../social/store.js";
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { z } from "zod";
@@ -363,7 +363,7 @@ export async function buildLiveSystemInstruction(args: {
     today: args.today,
   });
   const assembled = assembleCoachPrompt(args.coach, bundle, "", { toolsEnabled: true, memoryBrief });
-  const friendNudge = friendNudgeRules(await claimFriendNudge(args.db, args.userId, args.today, args.env));
+  const friendNudge = friendNudgeRules(await peekFriendNudge(args.db, args.userId, args.today, args.env));
   const data = assembled.userMessage.split("<current_user_message>")[0].trim();
   return [
     assembled.system,
@@ -438,6 +438,10 @@ export async function recordLiveTurn(args: {
       riskLevel: severe ? "high" : "low",
       serverCreatedAt: Timestamp.fromMillis(stamp + 1),
     });
+  }
+  // Social: the day's friend mention is used once the coach has said it.
+  if (coachText && !severe) {
+    await markLiveFriendNudgeIfMentioned(db, userId, turn.clientDate ?? new Date(stamp).toISOString().slice(0, 10), coachText);
   }
   if (args.provider && !severe) {
     const context = await loadCoachContext(db, userId, LIVE_SESSION_ID).catch(() => null);

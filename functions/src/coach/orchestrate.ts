@@ -1,4 +1,4 @@
-import { claimFriendNudge, friendNudgeRules } from "../social/store.js";
+import { friendNudgeRules, markFriendNudgeUsed, peekFriendNudge } from "../social/store.js";
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
 import { safeLogger } from "../logging/safeLogger.js";
@@ -277,7 +277,9 @@ export async function orchestrateCoachTurn({
     );
     // Social prototype: at most one friend line per day, only with both
     // sides' consent; null (and no prompt change) when the flag is off.
-    const friendNudge = friendNudgeRules(await claimFriendNudge(db, userId, contextBundle.today));
+    // Marked used only after a delivered reply actually mentions the friend.
+    const friendNudgeData = await peekFriendNudge(db, userId, contextBundle.today);
+    const friendNudge = friendNudgeRules(friendNudgeData);
     const spoken = inputMode === "live_voice" || inputMode === "dictation";
     const styleRules = coachStyleRules(coachTips, coachTone);
     const system = [
@@ -509,6 +511,7 @@ export async function orchestrateCoachTurn({
       },
       { merge: true },
     );
+    await markFriendNudgeUsed(db, userId, contextBundle.today, content, friendNudgeData);
     // The coach's running notes are refreshed after the turn is fully
     // over (below, after the proposal card is published) — never before:
     // a quick "yes" must find the card already live.
