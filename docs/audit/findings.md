@@ -39,7 +39,7 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 
 ## Process
 
-**F40. Main's committed Xcode project doesn't bundle GoogleService-Info.plist, so a build from it crashes at launch. CONFIRMED, high**
+**F40. Main's committed Xcode project didn't bundle GoogleService-Info.plist, so builds crashed at launch. RESOLVED on main by #54** (the plist is now an `optional: true`, `buildPhase: resources` source and is excluded from the folder glob; main's pbxproj has the reference again). Open PRs still without it, as of 2026-11-05 (none rebased onto #54 yet): **#44, #48, #49, #50, #51**. #38, #46, #47, #52 and #53 have the pbxproj entry but not the project.yml fix. Every open PR must rebase onto main and **regenerate with xcodegen**, not hand-merge the pbxproj, so the entry survives.
 Reported: a device build from live-voice-fix's worktree aborted in `FirebaseApp.configure()` (`IronBoiApp.swift:24`) with no GoogleService-Info.plist in the bundle.
 Root cause: the plist is gitignored and is written by the `Select GoogleService-Info.plist` pre-build script (`project.yml:22-103`). XcodeGen only adds files that exist *when it runs*. Commit **29a375a** ("chore: regenerate Xcode project", merged with #40) was generated in a worktree without the file, and it **removed** the `GoogleService-Info.plist in Resources` entry from `project.pbxproj`. Since then, main, #44, #48, #49, #50, #51 and #53 all lack it (0 references). #46, #47 and #52 happen to have it back (regenerated where the file existed), so whichever merges last decides. CI is green because it only builds; nothing launches the app.
 Fix (proposed, for the owning session):
