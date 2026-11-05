@@ -13,6 +13,7 @@
 		1015F45B673FF88BCFA8C97E /* TrainingReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */; };
 		12EBE51165738CD08093CB14 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5FCFEBC0D756CC3AF9E87B /* FirebaseAppCheck */; };
 		162BA5E9F7C261336EA5EB6F /* SoundMixControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01163A8F8C0914CB146F028C /* SoundMixControls.swift */; };
+		1DC4693D65CE2DB9F8BFE4A3 /* SetCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEEA001FBB612929063F327B /* SetCount.swift */; };
 		1F427C3553FD7EDA6A281A8A /* PaperBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0454D8621A0D45798905DF73 /* PaperBackground.swift */; };
 		2127E711F8AEF1AE4EA68A3B /* OnboardingStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 412AB8D23DE585A4011E7CDC /* OnboardingStageView.swift */; };
 		22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F0D64010B5E7F28BB39D6C8 /* PreferencesView.swift */; };
@@ -40,6 +41,7 @@
 		672838B8196B78641E6C38AB /* VoiceInputEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */; };
 		6A4164630BA54C06E707A4CB /* OrbView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF82FC6D6FEC44A6DBE3C92F /* OrbView.swift */; };
 		772BF83112E39339AC2E9561 /* CoachStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD792AC9EF71C813B550654E /* CoachStageView.swift */; };
+		774C91A01115DF4BCCE7B596 /* SetCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */; };
 		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
 		7CE0660BBEDC99B11BB65681 /* MemoryFact.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */; };
 		7F4F9205CA0F79F743E265AE /* ExerciseMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */; };
@@ -71,6 +73,7 @@
 		E2611A41CD0A45F47F8F3234 /* CoachMix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040387C0316794F5C15D9648 /* CoachMix.swift */; };
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
 		EA110D2CEDED62D17D391248 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9891FC07CE2B39134434A9 /* FirebaseFunctions */; };
+		EB61595884711817A062E761 /* SetCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEEA001FBB612929063F327B /* SetCount.swift */; };
 		EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */; };
 		EECFA673703A34EBBCC48022 /* MoveLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */; };
 /* End PBXBuildFile section */
@@ -106,6 +109,7 @@
 		5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
 		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
+		6CB267883F8AE6525B619F90 /* IronBoiTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IronBoiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveLibrary.swift; sourceTree = "<group>"; };
 		73C5EE0407EB961F5B79622A /* DossierComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DossierComponents.swift; sourceTree = "<group>"; };
 		7471B86DB66DD6B54955497F /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
@@ -120,6 +124,7 @@
 		92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeLife.swift; sourceTree = "<group>"; };
 		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
 		A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryFact.swift; sourceTree = "<group>"; };
+		A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetCountTests.swift; sourceTree = "<group>"; };
 		A4734F76A950FA7C6ECA47EC /* WorkoutLogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLogModels.swift; sourceTree = "<group>"; };
 		A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanReviewCard.swift; sourceTree = "<group>"; };
 		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -129,6 +134,7 @@
 		C698900CF6774CF078D13616 /* HealthSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthSync.swift; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		CD792AC9EF71C813B550654E /* CoachStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachStageView.swift; sourceTree = "<group>"; };
+		CEEA001FBB612929063F327B /* SetCount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetCount.swift; sourceTree = "<group>"; };
 		D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Prod.plist"; sourceTree = "<group>"; };
 		D8BC768A7E4EB1E601050122 /* Gear.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gear.swift; sourceTree = "<group>"; };
 		DAE7937F1EE073A0A0F01714 /* SessionChangesCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionChangesCard.swift; sourceTree = "<group>"; };
@@ -188,6 +194,14 @@
 			path = Profile;
 			sourceTree = "<group>";
 		};
+		2A8B0CD30537FE7CAA28853A /* IronBoiTests */ = {
+			isa = PBXGroup;
+			children = (
+				A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */,
+			);
+			path = IronBoiTests;
+			sourceTree = "<group>";
+		};
 		329346F30DA766EAE94903E2 /* IronBoi */ = {
 			isa = PBXGroup;
 			children = (
@@ -244,6 +258,7 @@
 				451607DCC308F24BECF26C07 /* LiveWorkoutCard.swift */,
 				A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */,
 				DAE7937F1EE073A0A0F01714 /* SessionChangesCard.swift */,
+				CEEA001FBB612929063F327B /* SetCount.swift */,
 				01163A8F8C0914CB146F028C /* SoundMixControls.swift */,
 				349CFA8575361D4715FDABD9 /* TodayWorkoutCard.swift */,
 				8E6486137A4FFFD180E600A3 /* TypeBar.swift */,
@@ -286,6 +301,7 @@
 			isa = PBXGroup;
 			children = (
 				329346F30DA766EAE94903E2 /* IronBoi */,
+				2A8B0CD30537FE7CAA28853A /* IronBoiTests */,
 				FFB9F988DF3FA230536009A2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -328,6 +344,7 @@
 			isa = PBXGroup;
 			children = (
 				8932D2CF267BB36314E83C02 /* IronBoi.app */,
+				6CB267883F8AE6525B619F90 /* IronBoiTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -335,6 +352,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		0991E539C590285FFDEC0731 /* IronBoiTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D37C11E4BBC409843484332A /* Build configuration list for PBXNativeTarget "IronBoiTests" */;
+			buildPhases = (
+				DA9065DA64E1672E53C461BD /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = IronBoiTests;
+			packageProductDependencies = (
+			);
+			productName = IronBoiTests;
+			productReference = 6CB267883F8AE6525B619F90 /* IronBoiTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		BB82AD0B7ABFF8997691B12E /* IronBoi */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 905B861087323AF22003A7CB /* Build configuration list for PBXNativeTarget "IronBoi" */;
@@ -393,6 +427,7 @@
 			projectRoot = "";
 			targets = (
 				BB82AD0B7ABFF8997691B12E /* IronBoi */,
+				0991E539C590285FFDEC0731 /* IronBoiTests */,
 			);
 		};
 /* End PBXProject section */
@@ -485,6 +520,7 @@
 				22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */,
 				5E959043BE8381E22181D226 /* RecordView.swift in Sources */,
 				97122EBA819A4AC4B8DD976A /* SessionChangesCard.swift in Sources */,
+				1DC4693D65CE2DB9F8BFE4A3 /* SetCount.swift in Sources */,
 				CA375C8D58B1B03F67C2B93A /* SetupCard.swift in Sources */,
 				162BA5E9F7C261336EA5EB6F /* SoundMixControls.swift in Sources */,
 				CA7B04CE776DDFAEB4EF2343 /* TodayWorkoutCard.swift in Sources */,
@@ -498,6 +534,15 @@
 				0752C42577AF71BE965F924A /* WorkoutModels.swift in Sources */,
 				3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */,
 				51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DA9065DA64E1672E53C461BD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EB61595884711817A062E761 /* SetCount.swift in Sources */,
+				774C91A01115DF4BCCE7B596 /* SetCountTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -566,6 +611,23 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		2184F8EA368F8AAA113D8BBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.IronBoiTests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		57A815B96DC8CB7050E156C4 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -656,6 +718,23 @@
 			};
 			name = Debug;
 		};
+		F476E5F4ADFBA65B2828C0F5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.thecombinationrule.IronBoiTests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.1;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
 		FD926C5E7306A0CA03EE1618 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -706,6 +785,15 @@
 			buildConfigurations = (
 				C9801A01B2FA8A3AC57F2502 /* Debug */,
 				FD926C5E7306A0CA03EE1618 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D37C11E4BBC409843484332A /* Build configuration list for PBXNativeTarget "IronBoiTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F476E5F4ADFBA65B2828C0F5 /* Debug */,
+				2184F8EA368F8AAA113D8BBB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

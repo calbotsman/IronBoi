@@ -178,6 +178,19 @@ targets:
         # Write-only: finished workouts go to Apple Health (Services/HealthSync.swift).
         com.apple.developer.healthkit: true
 
+  # Logic tests that need no app, simulator audio or backend: they compile
+  # the few pure files they test directly. Run the "IronBoiTests" scheme.
+  IronBoiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: IronBoiTests
+      - path: IronBoi/Features/Coach/SetCount.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.10
+
 # A second scheme for tuning the blob's physics in the simulator: no backend,
 # no mic, the stunt reel on loop and the live tuner (DEBUG only). Pick
 # "IronBoi Reel" in Xcode and Run; see docs/design/orb-physics-tuning.md.
@@ -204,3 +217,10 @@ schemes:
         - variable: MYO_TUNER
           value: "1"
           isEnabled: true
+  IronBoiTests:
+    build:
+      targets:
+        IronBoiTests: all
+    test:
+      targets:
+        - IronBoiTests
