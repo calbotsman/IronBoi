@@ -38,7 +38,7 @@ export type CoachLoadedContext = {
 //   - state === "confirmed" (Phase 2 Task 2.3+), OR
 //   - state is undefined (legacy facts predating the proposal-queue change
 //     are grandfathered in as confirmed; they were already in the prompt).
-function isConfirmedForPrompt(fact: DocumentData): boolean {
+export function isConfirmedForPrompt(fact: DocumentData): boolean {
   return fact.state === undefined || fact.state === "confirmed";
 }
 
@@ -46,8 +46,16 @@ export async function loadCoachContext(
   db: Firestore,
   userId: string,
   sessionId: string,
-  options: { includePlanChanges?: boolean; includeProgress?: boolean } = {},
+  options: {
+    includePlanChanges?: boolean;
+    includeProgress?: boolean;
+    // Live voice with a memory brief (coach/memoryBrief.ts): the brief
+    // carries facts, notes and workouts, so only safety facts are read here
+    // (fresh and authoritative), no logs and no notes.
+    memory?: "full" | "safety_only";
+  } = {},
 ): Promise<CoachLoadedContext> {
+  const safetyOnly = options.memory === "safety_only";
   // The plan-change read needs a composite index (decision asc, decidedAt
   // desc). It's advisory context, never load-bearing — so it's (a) gated
   // behind the tool-loop feature bundle and (b) degraded to [] on failure
@@ -65,7 +73,7 @@ export async function loadCoachContext(
     : Promise.resolve([] as DocumentData[]);
 
   // The coach's running notes (coach/coachNotes.ts). Degrades to null.
-  const coachNotesPromise = db
+  const coachNotesPromise = safetyOnly ? Promise.resolve(null) : db
     .doc(coachNotesPath(userId))
     .get()
     .then((snap) => (snap.exists && typeof snap.get("content") === "string" ? (snap.get("content") as string) : null))
@@ -95,6 +103,7 @@ export async function loadCoachContext(
     profileSnap,
     recentFactsSnap,
     recentLogsSnap,
+    proposedCount,
     sessionHistorySnap,
     recentPlanChanges,
     progressSummary,
@@ -102,16 +111,33 @@ export async function loadCoachContext(
   ] =
     await Promise.all([
       db.doc(profilePath(userId)).get(),
-      db
-        .collection(`${userRoot(userId)}/memoryFacts`)
-        .orderBy("createdAt", "desc")
-        .limit(50)
-        .get(),
-      db
-        .collection(`${userRoot(userId)}/workoutLogs`)
-        .orderBy("date", "desc")
-        .limit(14)
-        .get(),
+      safetyOnly
+        ? db
+            .collection(`${userRoot(userId)}/memoryFacts`)
+            .where("category", "in", ["safety_note", "constraint"])
+            .limit(50)
+            .get()
+        : db
+            .collection(`${userRoot(userId)}/memoryFacts`)
+            .orderBy("createdAt", "desc")
+            .limit(50)
+            .get(),
+      safetyOnly
+        ? Promise.resolve(null)
+        : db
+            .collection(`${userRoot(userId)}/workoutLogs`)
+            .orderBy("date", "desc")
+            .limit(14)
+            .get(),
+      safetyOnly
+        ? db
+            .collection(`${userRoot(userId)}/memoryFacts`)
+            .where("state", "==", "proposed")
+            .count()
+            .get()
+            .then((snap) => snap.data().count)
+            .catch(() => 0)
+        : Promise.resolve(null),
       db
         // The NEWEST 40, read newest-first and flipped back to oldest-first
         // below. ("asc" + limit returned the first 40 messages ever sent,
@@ -130,14 +156,14 @@ export async function loadCoachContext(
     .filter((fact) => !fact.userDeletedAt);
 
   const confirmedFacts = allFacts.filter(isConfirmedForPrompt);
-  const pendingProposalCount = allFacts.filter(
+  const pendingProposalCount = proposedCount ?? allFacts.filter(
     (fact) => fact.state === "proposed",
   ).length;
 
   return {
     profile: profileSnap.exists ? profileSnap.data() ?? null : null,
     recentFacts: confirmedFacts,
-    recentLogs: recentLogsSnap.docs.map((doc) => doc.data()),
+    recentLogs: recentLogsSnap ? recentLogsSnap.docs.map((doc) => doc.data()) : [],
     sessionHistory: sessionHistorySnap.docs.map((doc) => doc.data()).reverse(),
     coachNotes: await coachNotesPromise,
     pendingProposalCount,

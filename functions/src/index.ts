@@ -4,7 +4,8 @@ import type { CollectionReference, DocumentReference } from "firebase-admin/fire
 import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { SynthesizeSpeechRequest, synthesizeSpeech, ttsAllowedForSignInProvider } from "./voice/speech.js";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
+import { rebuildMemoryBrief } from "./coach/memoryBrief.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { z } from "zod";
@@ -569,11 +570,19 @@ export const startLiveCoachSession = onCall(
     const voice = parsed.voice ?? (process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT);
     // The whole brain — profile, plan, recent workouts, memory facts, coach
     // notes, the shared conversation — locked into the session.
+    const builtStartedAt = Date.now();
     const instruction = await buildLiveSystemInstruction({
       db,
       coach,
       userId,
       today: parsed.clientDate ?? new Date().toISOString().slice(0, 10),
+      memoryBriefOnPhone: parsed.memoryBriefBuiltAt !== undefined,
+    });
+    safeLogger.info("Live voice instruction built", {
+      event: "live_voice_instruction_built",
+      userId,
+      outcome: parsed.memoryBriefBuiltAt ? "brief_on_phone" : "brief_on_server",
+      latencyMs: Date.now() - builtStartedAt,
     });
     try {
       const { token, expiresAt } = await mintLiveToken({
@@ -1093,6 +1102,9 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
       openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });
+    // After every coach conversation turn: the phone's cached memory brief
+    // refreshes from this (coach/memoryBrief.ts). Never throws.
+    await rebuildMemoryBrief(db, userId, "coach_turn");
   },
 );
 
@@ -1113,6 +1125,8 @@ export const onWorkoutLogCreated = onDocumentCreated(
   },
   async (event) => {
     const { userId } = event.params;
+    // A finished workout changes "last session" and "this week".
+    await rebuildMemoryBrief(db, userId, "workout_logged");
     try {
       await recomputeProgressSummaryIfStale(db, userId);
     } catch (error) {
@@ -1124,6 +1138,26 @@ export const onWorkoutLogCreated = onDocumentCreated(
           error instanceof Error ? error.message.slice(0, 180) : "unknown_error",
       });
     }
+  },
+);
+
+// Memory brief (coach/memoryBrief.ts): rebuilt whenever a fact is
+// remembered, confirmed, edited or forgotten — from the text coach, live
+// voice, or the Memory screen — and whenever the coach's notes are
+// rewritten. The phone's listener saves each new brief to disk.
+export const onMemoryFactWritten = onDocumentWritten(
+  { region: "us-central1", document: "users/{userId}/memoryFacts/{factId}", timeoutSeconds: 30, maxInstances: 10, retry: false },
+  async (event) => {
+    // A delete only updates an existing brief (reset must not recreate it).
+    await rebuildMemoryBrief(db, event.params.userId, "memory_fact_written", new Date(), { updateOnly: !event.data?.after.exists });
+  },
+);
+
+export const onCoachNotesWritten = onDocumentWritten(
+  { region: "us-central1", document: "users/{userId}/derivedSummaries/coach_notes", timeoutSeconds: 30, maxInstances: 10, retry: false },
+  async (event) => {
+    // A delete only updates an existing brief (reset must not recreate it).
+    await rebuildMemoryBrief(db, event.params.userId, "coach_notes_written", new Date(), { updateOnly: !event.data?.after.exists });
   },
 );
 

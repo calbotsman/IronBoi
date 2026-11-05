@@ -368,6 +368,28 @@ describe("Firestore rules isolation", () => {
     );
   });
 
+  it("memory_brief_owner_reads_only_and_other_users_are_denied", async () => {
+    // coach/memoryBrief.ts: the phone caches its own brief; nobody else may
+    // read it, and nobody (owner included) may write it.
+    await withAdminDb(async (admin) => {
+      for (const uid of [USER_A, USER_B]) {
+        await setDoc(doc(admin, `users/${uid}/derivedSummaries/memory_brief`), {
+          schema: "memory_brief.v1",
+          userId: uid,
+          builtAt: iso,
+          text: `Safety and injuries (always included):\n- ${uid} left knee`,
+        });
+      }
+    });
+    const userA = await authedDb(USER_A);
+    await assertSucceeds(getDoc(doc(userA, `users/${USER_A}/derivedSummaries/memory_brief`)));
+    await assertFails(getDoc(doc(userA, `users/${USER_B}/derivedSummaries/memory_brief`)));
+    await assertFails(setDoc(doc(userA, `users/${USER_A}/derivedSummaries/memory_brief`), { text: "rewritten" }));
+    await assertFails(setDoc(doc(userA, `users/${USER_B}/derivedSummaries/memory_brief`), { text: "rewritten" }));
+    const userB = await authedDb(USER_B);
+    await assertFails(getDoc(doc(userB, `users/${USER_A}/derivedSummaries/memory_brief`)));
+  });
+
   it("workoutSessions_owner_can_read_but_not_write", async () => {
     await withAdminDb(async (admin) => {
       await setDoc(doc(admin, `users/${USER_A}/workoutSessions/s1`), {

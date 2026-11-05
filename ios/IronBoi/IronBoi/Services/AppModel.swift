@@ -201,6 +201,7 @@ final class AppModel: NSObject, ObservableObject {
     private var workoutLogListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
     private var memoryFactListener: ListenerRegistration?
+    private var memoryBriefListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
     // bakes in "today's" dailyOverride) can be recomputed when the calendar
     // date changes without a server round-trip.
@@ -221,6 +222,7 @@ final class AppModel: NSObject, ObservableObject {
         workoutLogListener?.remove()
         progressListener?.remove()
         memoryFactListener?.remove()
+        memoryBriefListener?.remove()
     }
 
     func start() {
@@ -245,6 +247,7 @@ final class AppModel: NSObject, ObservableObject {
                 self.listenForWorkoutLogs(userId: user?.uid)
                 self.listenForProgressSummary(userId: user?.uid)
                 self.listenForMemoryFacts(userId: user?.uid)
+                self.listenForMemoryBrief(userId: user?.uid)
             }
         }
     }
@@ -382,6 +385,7 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             try await callCallable("resetMyData", data: [:])
+            if let userId = user?.uid { MemoryBriefCache.clear(userId: userId) }
             onboardingMessages = []
             messages = []
             onboardingStatus = .notStarted
@@ -403,11 +407,18 @@ final class AppModel: NSObject, ObservableObject {
     /// tools run with the text coach's gates.
     var liveBackend: LiveVoiceSession.Backend {
         LiveVoiceSession.Backend(
-            mint: { [weak self] handle in
+            mint: { [weak self] handle, briefBuiltAt in
                 guard let self else { throw CancellationError() }
                 var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
                 if let handle { data["resumeHandle"] = handle }
+                // We'll send our cached brief as the first [app] line, so the
+                // server needn't read memory before minting.
+                if let briefBuiltAt { data["memoryBriefBuiltAt"] = briefBuiltAt }
                 return try await self.callCallable("startLiveCoachSession", data: data)
+            },
+            memoryBrief: { [weak self] in
+                guard let userId = self?.user?.uid else { return nil }
+                return MemoryBriefCache.load(userId: userId)
             },
             recordTurn: { [weak self] user, coach, startedAt, interrupted in
                 guard let self else { throw CancellationError() }
@@ -2058,6 +2069,32 @@ final class AppModel: NSObject, ObservableObject {
                         return
                     }
                     self?.progressSummary = Self.makeProgressSummary(from: data)
+                }
+            }
+    }
+
+    /// Background refresh of the memory brief: the server rebuilds it after
+    /// every workout and coach conversation, and each new copy is saved to
+    /// disk for the next live session to open with (MemoryBriefCache).
+    private func listenForMemoryBrief(userId: String?) {
+        memoryBriefListener?.remove()
+        guard let userId else { return }
+        memoryBriefListener = db
+            .collection("users")
+            .document(userId)
+            .collection("derivedSummaries")
+            .document("memory_brief")
+            .addSnapshotListener { snapshot, error in
+                if let error {
+                    // Advisory, like progress: keep the cached copy.
+                    NSLog("[IronBoi] Memory brief listener error: \(error.localizedDescription)")
+                    return
+                }
+                guard let data = snapshot?.data(), let brief = MemoryBrief(firestore: data) else { return }
+                Task { @MainActor in
+                    if MemoryBriefCache.save(brief, userId: userId) {
+                        NotificationCenter.default.post(name: MemoryBriefCache.updated, object: brief)
+                    }
                 }
             }
     }
