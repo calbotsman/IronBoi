@@ -9,18 +9,18 @@ Status values: not started, in PR #N, merged (#N), dropped.
 |---|---|---|---|---|
 | I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | building (watch-app) | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
 | I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods building (watch-app); Health reads **deferred** (Phase 4, unassigned) | — |
-| I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | building (atmosphere) | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
-| I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | building (atmosphere) | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
-| I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | building (atmosphere) | **Plan gap.** |
-| I6 | Rest by recovery ("your HR's back down, let's go") | Partly (§1 rules) | in PR #44 (prompt rule only) | The rule tells the coach to wait. The phone rest timer still says "Go" on its own clock. No HR-driven end of rest. |
-| I7 | Works without colour (brightness/contrast/grain; greyscale test) | **No** | building (atmosphere) | **Plan gap.** Goes with I4. |
+| I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | in PR #49 (F13–F15) | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
+| I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | in PR #49 (F13, F15) | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
+| I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | in PR #49 (F13, F15) | **Plan gap.** |
+| I6 | Rest by recovery ("your HR's back down, let's go") | Partly (§1 rules) | in PR #44 (prompt rule) + #49 (voice line only, F13) | The rule tells the coach to wait. The phone rest timer still says "Go" on its own clock. No HR-driven end of rest. |
+| I7 | Works without colour (brightness/contrast/grain; greyscale test) | **No** | in PR #49 (F13, F15) | **Plan gap.** Goes with I4. |
 | I8 | Coach responds to HR, workout, music levels, talk style, frequency, kinds, weights, reps | Yes (§1) | in PR #44 (partial) | Sent: rest, sets, minutes, frequency, efforts, voice on/off, music playing. **Not sent:** music *levels* (voiceLevel/musicDip), training type mix, pace. See F3. |
-| I9 | "I'm not doing that, I'm going for a run": whole session replaced, logged as a run, from loose speech, no phrase rules | **No** | building (workout-replace); **#41 works against it** | **Plan gap.** Merged #41 catches "I'm going for a run" with a regex and *adds* a 20-min Run to the end of the strength workout (F1). HealthSync (#39) logs every workout as strength or flexibility. |
-| I10 | Ask lightly, once ("kettlebell work after?") from the profile's training goals; drop it on "no" | **No** | building (workout-replace) | **Plan gap.** The nearest plan item is "no mobility in 14 days → mention once", and #44 dropped it. Nothing remembers "asked, said no". |
-| I11 | Instant start: phone caches a memory brief | **No** | building (memory-brief) | **Plan gap.** |
-| I12 | Brief rebuilt on the server after each workout or conversation | **No** | building (memory-brief) | **Plan gap.** |
-| I13 | Brief stays small (~1–2k words, safety/injuries always in) | **No** | building (memory-brief) | **Plan gap.** |
-| I14 | Deep recall on demand ("what did I bench last spring?") | **No** | building (memory-brief); vector search **deferred** | **Plan gap.** |
+| I9 | "I'm not doing that, I'm going for a run": whole session replaced, logged as a run, from loose speech, no phrase rules | **No** | in PR #51; #41 hijack fixed, but "let's go for a run" is still caught by the rest/hold handlers (F21, F22) | **Plan gap.** Merged #41 catches "I'm going for a run" with a regex and *adds* a 20-min Run to the end of the strength workout (F1). HealthSync (#39) logs every workout as strength or flexibility. |
+| I10 | Ask lightly, once ("kettlebell work after?") from the profile's training goals; drop it on "no" | **No** | in PR #51; asks once per *session*, gear from a fixed list (F23) | **Plan gap.** The nearest plan item is "no mobility in 14 days → mention once", and #44 dropped it. Nothing remembers "asked, said no". |
+| I11 | Instant start: phone caches a memory brief | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
+| I12 | Brief rebuilt on the server after each workout or conversation | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
+| I13 | Brief stays small (~1–2k words, safety/injuries always in) | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
+| I14 | Deep recall on demand ("what did I bench last spring?") | **No** | in PR #50 (workout logs only; F19); conversations + vector search **deferred** | **Plan gap.** |
 | I15 | Social, opt-in (one onboarding question, off by default) | **No** | **deferred** (unassigned) | **Plan gap.** |
 | I16 | Join by invite link, no feeds | **No** | **deferred** (unassigned) | **Plan gap.** |
 | I17 | Coach brings friends in ("Sam trained this morning") | **No** | **deferred** (unassigned) | **Plan gap.** |
@@ -28,7 +28,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 
 **Ideas the plan silently leaves out:** I3 live stats pill, I4/I5/I7 HR atmosphere (colour, grain, MYO mirroring, colour-blind safe), I9 voice workout replacement, I10 ask-once suggestion, I11–I13 cached memory brief, I14 deep recall, I15–I18 opt-in social. None of these has a phase, an owner or an estimate.
 
-| I19 | Bank alternatives so swaps are instant (new, 2026-11-05) | No | building (workout-replace) | — |
+| I19 | Bank alternatives so swaps are instant (new, 2026-11-05) | No | in PR #51 (F24) | — |
 | I20 | Rep counter must count past target (new, 2026-11-05) | No | in PR #46 | F10–F12 |
 | I22 | "10 reps each side": unilateral lifts counted and logged per side (new, 2026-11-05) | No | building (weight-fix) | #46 still logs the weaker side as one number. |
 | I21 | Voice weight changes, total vs per-side (bug) | No | building (weight-fix) | — |

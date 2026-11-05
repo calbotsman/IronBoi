@@ -1,7 +1,7 @@
 # Watchdog findings
 
 *Updated 2026-11-05. Most severe first. CONFIRMED = read in the code. PLAUSIBLE = depends on runtime data or a device.*
-Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable), #46 (open, own commit 3d9bee2).
+Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable), #46 (open, own commit 3d9bee2), #49 (89c9e6d), #50 (2f8d8a7+5ba189c), #51 (c8346d6). #49–#51 were reviewed by sub-auditors; the key claims were re-checked by hand, and one #50 claim and one #51 claim were corrected below.
 
 ## High
 
@@ -36,6 +36,75 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 
 **F9. #44: `extend_rest` reports success before anything happens. CONFIRMED**
 `AppModel.swift:534–539`: it returns `ok: true, addedSeconds` after setting `restExtensionRequest`. The timer only changes if `CoachStageView` is mounted to catch the `onChange`. Scenario: the user is on another tab and the live coach is still connected. The coach says "I've given you 30 more seconds" and the timer is unchanged. The server tells the coach not to cue the next set until HR drops, but the phone's own rest timer still says "Go." on schedule, so the coach and the app can disagree.
+
+## Live voice "weird and laggy" (Josh, real workout)
+
+Ranked by likely contribution. L1–L3 are in code already merged or in #44, not in the new PRs.
+
+**L1. Coach audio is decoded on the main thread, and the next message waits for it. CONFIRMED**
+`LiveVoiceSession.swift` `receive(on:)` → `Task { @MainActor }` → JSON parse, base64 decode, Int16→Float conversion (`buffer(fromPCM16:)`) and `scheduleBuffer`. `task.receive` for the next message is only called after that. Any main-thread work during a workout therefore delays or gaps the coach's voice. Main-thread loaders found: #44 rebuilds the whole live context (an `AVAudioSession` query plus a walk over all logs) on every `CoachStageView` render; #49 redraws `CoachView`/`CoachStageView` every second and runs a 30 fps full-screen shader timeline (F14). Fix direction: decode off-main, re-arm `receive` immediately, and keep per-second state out of the stage view.
+
+**L2. Half-duplex whenever echo cancellation is off. CONFIRMED (pre-existing)**
+`uplink.halfDuplex = !hub.canTalkOver`: with music playing on the phone speaker, voice processing is off (`wantsEchoCancellation` requires `!isOtherAudioPlaying`), so the mic is dropped while the coach talks. You can't cut in, which feels like lag. #40's default Light dip keeps music up, so this is the normal case with Spotify on the speaker.
+
+**L3. Every session start waits on the server. CONFIRMED**
+`connect()` awaits `backend.mint` (the server builds a ~35–43k-char instruction and mints a token) before opening the socket, and the mic tap is only installed after `setupComplete`. #50 doesn't remove this wait (F16).
+
+**L4. #46 mutes the coach while counting**, and now for up to 20 s after the last rep; coach audio arriving meanwhile is dropped (`play` returns when `uplinkMuted`). See F11.
+
+**L5. #40 is not a live-voice cost.** The session release-and-retake on a dip change is skipped while live voice is active (`SoundMixSheet(canRetake: !live.isActive)`). PLAUSIBLE edge: `SoundMixControls()` in Preferences defaults to `canRetake: true`, so a dip change there during a live session would tear the audio session down.
+
+## #49 atmosphere (89c9e6d)
+
+**F13. Nothing real feeds heart rate, so most of the feature is inert in Release. CONFIRMED**
+The only `HeartRateHub.publish` caller is the DEBUG `HeartRateSimulator.swift:53` (gated by `#if DEBUG` and `MYO_HR_SIM`; it doesn't leak into Release, which is good). In Release, time in zone, recovery, "Recovered" and HR-driven colour/grain never happen; effort follows workout state only. The simulator also labels its data `source: .watch`, so DEBUG coach context looks like real Watch data.
+"Rest by recovery" is a voice line only: `sayRecovered` (`CoachView.swift:~301`) never touches `restEndsAt`, so rest isn't shortened and there's no "let's go".
+
+**F14. A weight-based calorie estimate is shown as a reading. CONFIRMED**
+`Effort.swift:108`: without HR, a flat 3.5 MET from body weight, accumulated over the whole session including rests. The pill shows "N kcal"; only the VoiceOver label says "About". The plan put calories out of scope, and #39 deliberately refused to show guessed calories.
+
+**F15. The pill's state re-renders the whole coach screen every second, and the shader ticks at 30 fps. PLAUSIBLE (perf; feeds L1)**
+`CoachView.swift:11` owns `@StateObject vitals`, ticked every second (`:65`), so `CoachView`'s body, and `CoachStageView` with it, re-evaluates each second. `WorkoutAtmosphere.swift:20-33` rebuilds the shader every frame (parsing a hex colour each time) and keeps ticking under Reduce Motion. Only the pill should observe `vitals`.
+Fine: every SwiftUI/Metal API exists at iOS 17, and the stitchable signature matches the Swift call; the ~10 s easing is as specified; the orb edits are in scope. No tests. The greyscale check measures real-shader screenshots, but the screenshots aren't committed, so it can't be re-run.
+
+## #50 memory brief (2f8d8a7, 5ba189c)
+
+**F16. "Instant start" isn't instant: live voice still waits on `mint`. CONFIRMED**
+`LiveVoiceSession.swift:161` still awaits `backend.mint`, which builds the full instruction server-side. The cache only skips a few reads (~7 ms by the PR's own table), and a first build without a cache is slower than before.
+
+**F17. Live conversations never rebuild the brief. CONFIRMED**
+The rebuild sits in `onUserCoachMessageCreated` after `if (... data.status !== "queued") return` (`index.ts:~1075`), and live turns are saved as `complete`. Text turns rebuild on every message (~180 reads each), duplicating the fact and notes triggers.
+
+**F18. The "~1,500-word" brief can reach ~3,900 words, and the injury guarantee is narrower than claimed. CONFIRMED**
+`memoryBrief.ts:25-30`: safety facts are outside the budget (30 × 80 words). Safety facts beyond 30 are dropped silently. The injury query only reads the `safety_note`/`constraint` categories, so an injury filed elsewhere and older than the newest 100 facts drops out.
+
+**F19. "Last spring" points to the wrong year. CONFIRMED**
+`toolRegistry.ts:312`: "'last spring' = roughly March to May of last year relative to <today>". On 2026-11-05 that sends the model to 2025; the most recent spring is 2026. Recall covers workout logs only, not conversations (the PR says so). "Nothing found" is explicit, which is good.
+
+**F20. Reset → facts deleted → each deletion fires a rebuild, which re-creates the brief the phone just cleared. CONFIRMED.** The server never compares the phone's `memoryBriefBuiltAt` with the stored brief, so a stale cache can still carry a forgotten fact (PLAUSIBLE).
+
+Corrected: the sub-audit said mid-session brief refreshes interrupt the coach. They're sent with `turnComplete: false`, and per Gemini Live docs only `turnComplete: true` interrupts, so **not a finding**. Real cost: each refresh appends ~1,500 words to the session, and with sliding-window compression the opening brief is the first thing dropped in long sessions (PLAUSIBLE).
+Fine: rules allow client read only, with no writes (tested); the brief is labelled as data; recall is uid-scoped; no trigger loop; no hardcoded phrases.
+
+## #51 session switch, banked swaps, ask-once (c8346d6)
+
+The #41 hijack (F1) is gone: "I'm not doing that, I'm going for a run", "I'd rather go for a run today" and "nah, let's do a run instead" now reach the coach, which can call `replace_session`, and the switched session logs and saves to Health as a run. Banked swaps are local for the swap sheet and the live `find_exercise_swaps`.
+
+**F21. "Let's go for a run" is still hijacked on the phone, now by the rest and hold handlers. CONFIRMED**
+`WorkoutEdits.swift:132-134` makes `cardioRequest` return nil on "go for", so the rest/hold guards no longer skip it. While resting, "let's go for a run" (5 words) matches `let's go` in `handleRestCommand` (`CoachStageView.swift:~1861`): the rest is skipped, "Go." is said, and the coach never hears it. Before an unstarted plank or carry, the same sentence starts the hold timer (`:1731`). (The sub-audit said "I'm going for a run" triggers this; it doesn't, because `\bgo\b` doesn't match "going". "Let's go for a run" does.)
+
+**F22. The fix is another phrase table. CONFIRMED**
+`WorkoutEdits.swift:132-134` adds "instead / rather / not doing / go for / going for…" regexes that decide on the phone before the model hears anything. That's the approach ideas.md (a) rules out. It works for the phrasings listed and will miss others.
+
+**F23. Ask-once is once per session, not once. CONFIRMED**
+`addOnAsked` resets when the session id changes (`AppModel.swift:~49`) and is only stored with the in-progress workout. A "no" isn't remembered, so it asks again next time. The add-on gear comes from the fixed list `FINISHER_GEAR` (`sessionAlternatives.ts:354`, kettlebell first), not from what the profile says they train toward.
+
+**F24. Banked swaps go stale after equipment changes. CONFIRMED**
+The bank only refreshes on a plan change or at workout start (`AppModel.swift:~38, ~839`) but is served before the network. An `update_training_setup` equipment change is ignored until the next refresh. Injuries aren't filtered in the bank or in the server swap (pre-existing).
+
+**F25. A switched session saves its whole span to Health as Running. PLAUSIBLE**
+`AppModel.swift:~1445` saves start→finish as Running, including the lifting done before the switch; if a Watch or Strava also records the run, Health gets a duplicate.
+Fine: every tool declared has a handler; the HealthKit activity types exist; no live-voice latency added; server tests check real behaviour. No iOS tests for the new routing, which is where F21 lives. Device checks unticked.
 
 ## #46 rep counting past target (3d9bee2)
 
