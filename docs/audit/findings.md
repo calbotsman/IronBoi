@@ -37,6 +37,27 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 **F9. #44: `extend_rest` reports success before anything happens. CONFIRMED**
 `AppModel.swift:534–539`: it returns `ok: true, addedSeconds` after setting `restExtensionRequest`. The timer only changes if `CoachStageView` is mounted to catch the `onChange`. Scenario: the user is on another tab and the live coach is still connected. The coach says "I've given you 30 more seconds" and the timer is unchanged. The server tells the coach not to cue the next set until HR drops, but the phone's own rest timer still says "Go." on schedule, so the coach and the app can disagree.
 
+## Re-audit: #38 (5ab9ff2 + ef2ad16) and #53 (87a8224)
+
+**Verdict: safe to merge once iOS CI is green** (it was pending at audit time). Merge #38 first: it carries the launch-crash fix that main needs now (F42).
+
+- **B1 fixed.** `takeLiveMint` decides handover server-side from the user's last mint (`isHandover`: ≥ 60 s since the last mint and within 15 min for Gemini / 65 min for OpenAI). The client flag is advisory. Anonymous uids always get Gemini, whose token locks the session. The ability of a signed-in client to `session.update` its own OpenAI session is recorded as an accepted limit (`liveOpenAI.ts:9-14`).
+- **B2 fixed.** Realtime tools run from `response.done`, and only when status is `completed`; cancelled-response calls are dropped and logged. `response.create` waits while a response is active (`requestOpenAIResponse`).
+- **B3 fixed.** The policy (md + html) says on by default, names OpenAI Realtime or Gemini Live, and discloses the Gemini/OpenAI TTS path. Nit: `privacy-policy.md:35` has a verbless fragment ("Google Cloud's data-processing terms (…), which do not allow…").
+- **B4 fixed.** The mic tap no longer checks `box.socket != nil` (`LiveVoiceSession.swift:1200`), so audio during a reconnect is held and replayed.
+- **B5 / F27 fixed.** `handedOver()` no longer resets failures; only `liveHealthy()` does, after 120 s of working live. More than the burst limit of reconnects in the window ends the session, so the policy's backoff and cap decide.
+- **B6 fixed.** `handOverToLive()` pushes the context note (`CoachStageView.swift:1683-1684`).
+- **F28 fixed** (B4). **F29 mitigated:** a missed pong only counts after a first pong, and reconnects have their own timeout.
+- **L3, disputed:** accepted as **not user-facing**. With standby and hand-over, the regular coach listens while live mints, so the mint wait now only delays the switch to live; nobody waits on it. Closed.
+- **Latency measurement, disputed:** "speech end" is still the last mic buffer above ~−40 dBFS (`:1392`). With voice processing on that's reasonable; with music on the speaker (VP off) it can be kept fresh by music, so the logged latency is a **lower bound**. Not blocking. Read it alongside the server's VAD (`input_audio_buffer.speech_stopped` on OpenAI) if the numbers look too good.
+- Open, minor: L2 (half-duplex with music on speaker) is unchanged; there's no iOS test of OpenAI event handling; no real OpenAI device session has been run yet.
+
+**F42. Launch crash on main (iOS 26.x): `HKHealthStore.workoutSessionMirroringStartHandler` getter. CONFIRMED, critical**
+Main (`20e701b`) `WatchWorkoutLink.swift:53`: `store.workoutSessionMirroringStartHandler == nil` runs in `App.init`. The 26.2 SDK header declares it read/write (`HKHealthStore.h:286`), but the iOS 26.3 simulator's HealthKit binary contains only the `setWorkoutSessionMirroringStartHandler:` selector, not the getter. The read is an unrecognized selector, so the app aborts at launch (Josh's 26.6 crash log, 14:07). The header-vs-runtime mismatch is why the #48 audit's "API exists" check passed. **Fix ef2ad16 is correct:** it never reads the property, tracks installation with a flag, and checks `responds(to: setWorkoutSessionMirroringStartHandler:)`. It's only on #38/#53, so **main still crashes until it's cherry-picked or #38 merges.**
+
+**F41. CI never launches the app. CONFIRMED, high (process)**
+F40 (missing plist) and F42 (missing getter) both passed CI because `ci.yml` builds and runs pure unit tests but never installs and launches the app. Both crash in `App.init`, so a launch smoke test would have caught both. Proposed: after the simulator build, `xcrun simctl boot` → `simctl install` → `simctl launch --console-pty` and fail if the process exits within ~10 s or the log shows `Terminating app` / `unrecognized selector`. Also: for device installs, `xcrun devicectl device process launch` plus a 10 s alive check before handing a build to Josh. Watchdog rule added: header presence is not proof an API works at runtime; for any newly used HealthKit/WatchKit property *getter* on the launch path, check the selector in the simulator runtime's framework binary.
+
 ## Final pre-merge: #38 OpenAI Realtime (ddc411f) + #53 on top (3b7e6c2)
 
 **Verdict: not yet. Both are close; the blockers are small and listed below.**
