@@ -498,11 +498,14 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var restEndsAt: Date?
 
     /// The workout screen's rest timer started, changed or ended (nil).
-    func noteRest(endsAt: Date?) {
+    /// `startedAt`: when the rest really began (the last rep of the set,
+    /// which can be a few seconds before the set was closed).
+    func noteRest(endsAt: Date?, startedAt: Date? = nil) {
         if let endsAt {
             if restEndsAt == nil {
-                restStartedAt = Date()
-                restPlannedSec = Int(endsAt.timeIntervalSinceNow.rounded())
+                let start = min(startedAt ?? Date(), Date())
+                restStartedAt = start
+                restPlannedSec = Int(endsAt.timeIntervalSince(start).rounded())
             }
         } else {
             restStartedAt = nil

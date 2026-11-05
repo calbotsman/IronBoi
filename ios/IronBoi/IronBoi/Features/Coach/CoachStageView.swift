@@ -129,6 +129,8 @@ struct CoachStageView: View {
     /// Resting between sets: when the rest ends. The status line counts it
     /// down and the blob breathes slow until "go".
     @State private var restEndsAt: Date?
+    /// When the current rest began: the last rep of the set it follows.
+    @State private var restStartedAt: Date?
     @State private var restTask: Task<Void, Never>?
     /// The live coach's context note waiting to go, and the last one sent.
     @State private var contextNoteTask: Task<Void, Never>?
@@ -210,7 +212,7 @@ struct CoachStageView: View {
             restEndsAt: restEndsAt,
             contextNote: appModel.liveContextNote,
             extension: appModel.restExtensionRequest,
-            noteRest: { appModel.noteRest(endsAt: $0) },
+            noteRest: { appModel.noteRest(endsAt: $0, startedAt: restStartedAt) },
             push: { pushContextNote($0) },
             extend: { extendRest(by: $0) }
         ))
@@ -1837,7 +1839,9 @@ struct CoachStageView: View {
 
     private func startRest(seconds: Int, from start: Date = Date()) {
         restTask?.cancel()
-        let ends = min(Date(), start).addingTimeInterval(TimeInterval(seconds))
+        let began = min(Date(), start)
+        let ends = began.addingTimeInterval(TimeInterval(seconds))
+        restStartedAt = began
         restEndsAt = ends
         restTask = Task {
             try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
