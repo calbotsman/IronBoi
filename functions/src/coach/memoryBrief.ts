@@ -22,14 +22,22 @@ import {
  * so a rebuild is cheap and the same inputs always give the same text.
  */
 export const MEMORY_BRIEF_SCHEMA = "memory_brief.v1";
-/** Budget for everything except safety facts, which are never cut. */
+/** Hard budget for the whole brief, safety facts included. */
 export const MEMORY_BRIEF_MAX_WORDS = 1_500;
-/** Safety facts are exempt from the budget, so each one has its own cap. */
+/**
+ * Safety facts are never dropped: up to this many words they're in full;
+ * past it every safety fact is cut to a one-liner instead (30 one-liners
+ * fit well inside the budget), so they can't crowd out the rest.
+ */
+const SAFETY_SHARE_WORDS = 600;
 const SAFETY_FACT_MAX_WORDS = 80;
+const SAFETY_COMPACT_WORDS = 16;
 const SAFETY_FACT_MAX = 30;
 const COMPACT_FACT_WORDS = 12;
 const THIS_WEEK_DAYS = 7;
-const FACTS_READ = 100;
+// Above the 100-live-fact cap (toolRegistry MAX_LIVE_MEMORY_FACTS) plus
+// soft-deleted ones, so the injury-word check sees every live fact.
+const FACTS_READ = 150;
 const SAFETY_READ = 50;
 const LOGS_READ = 30;
 
@@ -122,7 +130,10 @@ export function buildMemoryBriefText(input: {
   const safety = facts.filter(isSafetyFact).slice(0, SAFETY_FACT_MAX);
   const others = facts.filter((fact) => !isSafetyFact(fact));
 
-  const safetyLines = safety.map((fact) => `- ${clipWords(oneLine(fact.content), SAFETY_FACT_MAX_WORDS)}${factTail(fact)}`);
+  const fullSafety = safety.map((fact) => `- ${clipWords(oneLine(fact.content), SAFETY_FACT_MAX_WORDS)}${factTail(fact)}`);
+  const safetyLines = countWords(fullSafety.join(" ")) <= SAFETY_SHARE_WORDS
+    ? fullSafety
+    : safety.map((fact) => `- ${clipWords(oneLine(fact.content), SAFETY_COMPACT_WORDS)}${factTail(fact)}`);
 
   const logs = input.logs
     .filter((log) => typeof log.date === "string")
@@ -233,11 +244,31 @@ export async function buildMemoryBrief(db: Firestore, userId: string, now = new 
   return { schema: MEMORY_BRIEF_SCHEMA, userId, builtAt: now.toISOString(), today: day, ...built };
 }
 
-/** Rebuilds and stores the brief. Never throws: the brief is advisory and the next trigger heals it. */
-export async function rebuildMemoryBrief(db: Firestore, userId: string, reason: string, now = new Date()): Promise<MemoryBrief | null> {
+/**
+ * Rebuilds and stores the brief. Never throws: the brief is advisory and the
+ * next trigger heals it. `updateOnly` (used for deletes) never creates the
+ * doc: "Reset my data" deletes facts and the brief together, and a delete
+ * trigger must not bring the brief back. update() fails atomically if the
+ * reset got there first.
+ */
+export async function rebuildMemoryBrief(
+  db: Firestore,
+  userId: string,
+  reason: string,
+  now = new Date(),
+  options: { updateOnly?: boolean } = {},
+): Promise<MemoryBrief | null> {
   try {
     const brief = await buildMemoryBrief(db, userId, now);
-    await db.doc(memoryBriefPath(userId)).set(brief);
+    const ref = db.doc(memoryBriefPath(userId));
+    if (options.updateOnly) {
+      const updated = await ref.update(brief).then(() => true, (error: { code?: number }) => {
+        if (error?.code === 5) return false; // NOT_FOUND: reset already removed it.
+        throw error;
+      });
+      return updated ? brief : null;
+    }
+    await ref.set(brief);
     return brief;
   } catch (error) {
     safeLogger.warn("Memory brief rebuild failed", {
@@ -248,6 +279,15 @@ export async function rebuildMemoryBrief(db: Firestore, userId: string, reason: 
     });
     return null;
   }
+}
+
+/** Live voice has no end-of-conversation hook: rebuild after a spoken turn when the brief is older than this. */
+export const LIVE_REBUILD_AFTER_MINUTES = 10;
+
+export async function rebuildMemoryBriefIfOlder(db: Firestore, userId: string, minutes: number, reason: string, now = new Date()) {
+  const current = parseMemoryBrief((await db.doc(memoryBriefPath(userId)).get().catch(() => null))?.data());
+  if (current && now.getTime() - Date.parse(current.builtAt) < minutes * 60_000) return null;
+  return rebuildMemoryBrief(db, userId, reason, now);
 }
 
 export function parseMemoryBrief(data: DocumentData | undefined | null): MemoryBrief | null {

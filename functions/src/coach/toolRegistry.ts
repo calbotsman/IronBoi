@@ -315,7 +315,7 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
   {
     name: "recall_training_history",
     description:
-      "READ-ONLY look-up of the user's own logged workouts, further back than <recent_workouts> or the memory brief: 'what did I bench last spring?', 'when did I last squat?', 'how heavy was my row in March?'. Give the exercise name as they said it and/or a date range (their dates, YYYY-MM-DD; 'last spring' = roughly March to May of last year relative to <today>). Answer only from what it returns — sessionsFound 0 means nothing was logged, so say that and never guess a number.",
+      "READ-ONLY look-up of the user's own logged workouts, further back than <recent_workouts> or the memory brief: 'what did I bench last spring?', 'when did I last squat?', 'how heavy was my row in March?'. Give the exercise name as they said it and/or a date range (their dates, YYYY-MM-DD; 'last spring' = the most recent March–May that has already ended before <today>; 'last month' = the calendar month before <today>). Answer only from what it returns — sessionsFound 0 means nothing was logged, so say that and never guess a number.",
     parameters: {
       type: "object",
       properties: {

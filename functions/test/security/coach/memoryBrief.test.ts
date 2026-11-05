@@ -10,7 +10,7 @@ import {
   memoryBriefAge,
   rebuildMemoryBrief,
 } from "../../../src/coach/memoryBrief.js";
-import { buildLiveSystemInstruction } from "../../../src/coach/liveSession.js";
+import { RecordLiveTurnRequest, buildLiveSystemInstruction, recordLiveTurn } from "../../../src/coach/liveSession.js";
 import { assembleCoachPrompt, type CoachConfig } from "../../../src/coach/prompt.js";
 import { buildCoachContextBundle } from "../../../src/coach/contextBundle.js";
 import { loadCoachContext } from "../../../src/coach/context.js";
@@ -67,6 +67,20 @@ describe("memory brief: budget and safety (pure)", () => {
     expect(brief.text).toMatch(/\d+ older facts not shown \(preference \d+\)/);
     expect(brief.text).toContain(`Last session:\n${TODAY}:`);
     expect(brief.text).toContain("Earlier training:");
+  });
+
+  it("keeps the whole brief inside the budget even with 30 long injury notes, and keeps every one of them", () => {
+    const injuries = Array.from({ length: 30 }, (_, i) => fact(1000 + i, {
+      factId: `inj${i}`,
+      category: "safety_note",
+      content: `Injury ${i}: ${"a long description of what the physio said about loading, ranges and timelines ".repeat(6)}`,
+    }));
+    const facts = [...injuries, ...Array.from({ length: 200 }, (_, i) => fact(i + 1))];
+    const logs = Array.from({ length: 30 }, (_, i) => log(new Date(Date.parse(`${TODAY}T00:00:00Z`) - i * 2 * 86_400_000).toISOString().slice(0, 10)));
+    const brief = buildMemoryBriefText({ today: TODAY, facts, coachNotes: "Likes it short. ".repeat(80), logs });
+    expect(brief.words).toBeLessThanOrEqual(MEMORY_BRIEF_MAX_WORDS);
+    expect(brief.safetyFactCount).toBe(30);
+    for (let i = 0; i < 30; i += 1) expect(brief.text).toContain(`[id inj${i}]`);
   });
 
   it("always includes safety and injury facts, even when the budget can't fit anything else", () => {
@@ -160,7 +174,7 @@ describe("memory brief: build, store and live voice (emulator)", () => {
     expect(brief.text).toContain("Wants short answers, hates burpees.");
     expect(brief.text).toContain("Last session:\n2026-11-04:");
     expect(brief.text).not.toContain("OTHER USER");
-    expect(brief.words).toBeLessThanOrEqual(MEMORY_BRIEF_MAX_WORDS + 100);
+    expect(brief.words).toBeLessThanOrEqual(MEMORY_BRIEF_MAX_WORDS);
   });
 
   it("stores the brief at derivedSummaries/memory_brief", async () => {
@@ -170,6 +184,25 @@ describe("memory brief: build, store and live voice (emulator)", () => {
     expect(snap.get("schema")).toBe("memory_brief.v1");
     expect(snap.get("text")).toBe(stored?.text);
     expect(snap.get("builtAt")).toBe(`${TODAY}T12:00:00.000Z`);
+  });
+
+  it("a delete never recreates a brief that reset already removed", async () => {
+    await db.doc(memoryFactPath(USER, "knee")).set({ ...KNEE, userId: USER });
+    expect(await rebuildMemoryBrief(db, USER, "test", new Date(), { updateOnly: true })).toBeNull();
+    expect((await db.doc(memoryBriefPath(USER)).get()).exists).toBe(false);
+    await rebuildMemoryBrief(db, USER, "test");
+    expect(await rebuildMemoryBrief(db, USER, "test", new Date(), { updateOnly: true })).not.toBeNull();
+  });
+
+  it("a live conversation rebuilds the brief, at most every 10 minutes", async () => {
+    await db.doc(memoryFactPath(USER, "knee")).set({ ...KNEE, userId: USER });
+    const turn = RecordLiveTurnRequest.parse({ userText: "hey", coachText: "Hey Josh.", startedAt: `${TODAY}T10:00:00.000Z` });
+    await recordLiveTurn({ db, userId: USER, turn, provider: null, now: new Date(`${TODAY}T10:00:00Z`) });
+    expect((await db.doc(memoryBriefPath(USER)).get()).get("builtAt")).toBe(`${TODAY}T10:00:00.000Z`);
+    await recordLiveTurn({ db, userId: USER, turn, provider: null, now: new Date(`${TODAY}T10:05:00Z`) });
+    expect((await db.doc(memoryBriefPath(USER)).get()).get("builtAt")).toBe(`${TODAY}T10:00:00.000Z`);
+    await recordLiveTurn({ db, userId: USER, turn, provider: null, now: new Date(`${TODAY}T10:11:00Z`) });
+    expect((await db.doc(memoryBriefPath(USER)).get()).get("builtAt")).toBe(`${TODAY}T10:11:00.000Z`);
   });
 
   it("live voice: the server's brief, with its age, replaces raw memory sections", async () => {

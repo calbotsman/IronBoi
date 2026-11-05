@@ -1148,14 +1148,16 @@ export const onWorkoutLogCreated = onDocumentCreated(
 export const onMemoryFactWritten = onDocumentWritten(
   { region: "us-central1", document: "users/{userId}/memoryFacts/{factId}", timeoutSeconds: 30, maxInstances: 10, retry: false },
   async (event) => {
-    await rebuildMemoryBrief(db, event.params.userId, "memory_fact_written");
+    // A delete only updates an existing brief (reset must not recreate it).
+    await rebuildMemoryBrief(db, event.params.userId, "memory_fact_written", new Date(), { updateOnly: !event.data?.after.exists });
   },
 );
 
 export const onCoachNotesWritten = onDocumentWritten(
   { region: "us-central1", document: "users/{userId}/derivedSummaries/coach_notes", timeoutSeconds: 30, maxInstances: 10, retry: false },
   async (event) => {
-    await rebuildMemoryBrief(db, event.params.userId, "coach_notes_written");
+    // A delete only updates an existing brief (reset must not recreate it).
+    await rebuildMemoryBrief(db, event.params.userId, "coach_notes_written", new Date(), { updateOnly: !event.data?.after.exists });
   },
 );
 

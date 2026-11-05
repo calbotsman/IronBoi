@@ -8,7 +8,7 @@ import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
 import { assembleCoachPrompt, type CoachConfig, type PromptMemoryBrief } from "./prompt.js";
 import { memoryBriefPath } from "../paths.js";
-import { buildMemoryBrief, memoryBriefAge, parseMemoryBrief } from "./memoryBrief.js";
+import { LIVE_REBUILD_AFTER_MINUTES, buildMemoryBrief, memoryBriefAge, parseMemoryBrief, rebuildMemoryBriefIfOlder } from "./memoryBrief.js";
 import { VOICE_MODE_RULES } from "./orchestrate.js";
 import { CoachVoiceChoice } from "../voice/speech.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
@@ -388,6 +388,9 @@ export async function recordLiveTurn(args: {
       });
     }
   }
+  // After live conversation too, not just text turns (debounced: live
+  // records every exchange). Facts and notes have their own triggers.
+  await rebuildMemoryBriefIfOlder(db, userId, LIVE_REBUILD_AFTER_MINUTES, "live_turn", args.now);
   return severe ? { saved: true, stop: true, line: LIVE_SAFETY_LINE } : { saved: true, stop: false };
 }
 
