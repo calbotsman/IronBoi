@@ -1,7 +1,7 @@
 # Watchdog findings
 
 *Updated 2026-11-05. Most severe first. CONFIRMED = read in the code. PLAUSIBLE = depends on runtime data or a device.*
-Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable), #46 (open, own commit 3d9bee2), #49 (89c9e6d), #50 (2f8d8a7+5ba189c), #51 (c8346d6). #49–#51 were reviewed by sub-auditors; the key claims were re-checked by hand, and one #50 claim and one #51 claim were corrected below.
+Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable), #46 (open, own commit 3d9bee2), #49 (89c9e6d), #50 (2f8d8a7+5ba189c), #51 (c8346d6), #47 (3cbb241), #48 (e737fd7), #52 (face928), #53 (55250c7). #49–#51 were reviewed by sub-auditors; the key claims were re-checked by hand, and one #50 claim and one #51 claim were corrected below.
 
 ## High
 
@@ -105,6 +105,69 @@ The bank only refreshes on a plan change or at workout start (`AppModel.swift:~3
 **F25. A switched session saves its whole span to Health as Running. PLAUSIBLE**
 `AppModel.swift:~1445` saves start→finish as Running, including the lifting done before the switch; if a Watch or Strava also records the run, Health gets a duplicate.
 Fine: every tool declared has a handler; the HealthKit activity types exist; no live-voice latency added; server tests check real behaviour. No iOS tests for the new routing, which is where F21 lives. Device checks unticked.
+
+## #53 live voice reliability (55250c7)
+
+Verdict: **a fallback and observability PR. It doesn't fix Josh's "laggy".** The never-deaf hand-over between the regular coach and live is real, connection-counter guards hold, and no audio or per-buffer data is logged.
+
+**F26. L1 and L3 are untouched. CONFIRMED**
+`LiveVoiceSession.swift:313-338`: receive → `Task { @MainActor }` → parse/decode/play → only then re-arm `receive`. More main-thread work is added (latency check, outbox, a 300 ms hand-over poll in `CoachStageView.swift:1419`). Every start and reconnect still awaits `mint` (`:244`), and live now also waits for 2.5 s of quiet before taking the mic (`:1428`). L2/L4 unchanged.
+
+**F27. Unbounded reconnect loop. CONFIRMED**
+`LiveVoicePolicy.swift:109`: `handedOver()` resets `failures = 0`. A session that reaches setupComplete and then dies (quota, post-setup provider error) never hits the 6-try cap. It retries every ~2 s forever, minting a token each time and flipping the mic between coaches. `testReadyResetsTheBackoff` locks this in.
+
+**F28. Deaf gap on goAway reconnect. CONFIRMED**
+Before ready, mic audio is dropped (`box.socket` is nil until setupComplete, `:630`), and on a goAway reconnect the state stays `listening` with the "Live" badge while nothing hears for the whole mint + setup. The regular coach doesn't cover the gap, which contradicts "never deaf" in the body.
+
+**F29. Bare-number watchdogs. PLAUSIBLE**
+4 s ping / 3 s pong, an 8 s ready timeout (which includes the ~40k-char mint), and any unsatisfied network path each force a fallback and a fresh mint. On gym cellular this could cause the very flapping Josh feels. The latency line measures "speech end" as the last buffer above −40 dBFS, so with gym noise or music it reads near zero (PLAUSIBLE).
+Corrected: the sub-audit repeated "any clientContent interrupts". Per Gemini Live docs only `turnComplete: true` does, so **not a finding**. Conflicts: #50 (LiveVoiceSession.swift), #46 (pbxproj test target).
+
+## #48 Watch app, Phase 2 (e737fd7)
+
+Verdict: **APIs all real and correctly gated. The plan's structure is followed.** Checked against the iOS/watchOS 26.2 SDK headers: `workoutSessionMirroringStartHandler` (iOS 17), `startMirroringToCompanionDevice` (watchOS 10), `sendToRemoteWorkoutSession(data:)` async (iOS 17 / watchOS 10), `startWatchApp(with:completion:)` (iOS), `handle(_ workoutConfiguration:)`, and `HKLiveWorkoutBuilder` on the Watch only. The mirroring handler is set at launch (`IronBoiApp.swift:86`). The phone never blocks on `startWatchApp`. The Watch saves with sync id = session id. The target config and usage strings are right. Read permission is asked at the first Watch start. **Resolves F4 and most of F13:** `HeartRateHub` now gets real samples, and trend / `recoveryDrop60` are computed.
+
+**F30. Double save when the phone is slow to finish. CONFIRMED path**
+`MYOWatch/WatchWorkoutManager.swift:139`: Watch End → `endRequested` → after 8 s with no answer, the Watch ends and saves itself. The phone's later `endWorkout` (`WatchWorkoutLink.swift:176`) fails because the mirror is gone, so `AppModel+Watch.swift:49-51` falls back to `HealthSync.saveWorkout`. Different Health sources won't merge on sync id, so you get two workouts. The 8 s includes the phone's backend finish call; slow gym Wi-Fi or a failed finish is enough.
+
+**F31. No HR smoothing or hysteresis. CONFIRMED**
+The plan asks for 10 s smoothing and 15 s zone hysteresis. Trend compares raw means, and the Watch colours its zone per raw reading (`WatchViews.swift:76`). Wrist noise on presses will flip zones, and with #49 that means flickering atmosphere and coach rules firing on noise.
+
+**F32. A second permission prompt can stall the first Watch start. PLAUSIBLE**
+The Watch requests share for heart rate + active energy (`WatchWorkoutManager.swift:62`), which the phone never asked for. The session isn't created until that's answered, leaving the Watch on "Starting…".
+Low: no tests (trend, recovery, message round-trip, set-done fallback); a set marked done from the Watch with the coach screen closed starts no rest; Health permission is requested even with saving off (`WatchWorkoutLink.swift:438`); inline 1.5 / 8 / 4.5 / 15 s literals. The PR says plainly it hasn't run on a device.
+
+## #52 straps + AirPods, Phase 3 (face928)
+
+Verdict: **no invented APIs.** The iPhone `HKWorkoutSession`/`HKLiveWorkoutBuilder` (iOS 26) are behind both `#available(iOS 26.0, *)` and `#if compiler(>=6.2)`. CoreBluetooth calls and UUIDs 180D/2A37 are correct. The HRM parser follows the spec (UInt8/UInt16 bpm, energy-expended skipped before RR, RR/1024). AirPods are detected by readings arriving within 20 s, not an invented API. Priority Watch > strap > AirPods, with a 12 s dropout, is fine. No fake peripherals in Release.
+
+**F33. Health permission sheet mid-workout for anyone with Bluetooth headphones. CONFIRMED**
+`PhoneWorkoutSession.swift:44-56, 105`: `startIfUseful` fires for *any* Bluetooth output (car audio, plain earbuds) on iOS 26 and requests share for heart rate, a type nobody asked for before. It doesn't check `HealthSync.enabled`. Scenario: Josh with regular earbuds, 15 s into a set, gets a Health sheet. It also starts a full iPhone workout session for ~20 s on every such workout, with an unverified effect on the audio session that live voice uses (PLAUSIBLE).
+
+**F34. Finish can hang, and nothing is saved. PLAUSIBLE**
+`PhoneWorkoutSession.swift:70-73`: `end()` awaits a continuation that only resumes on the session's ended-state callback. If the session already ended or failed, it never resumes, so `AppModel+Watch` save stalls and HealthSync never runs.
+
+**F35. Bluetooth off/on mid-workout loses the strap. PLAUSIBLE**
+`HeartStrapConnector.swift:150-160`: on power-on only one queued action runs and nothing reconnects; `whenOn` keeps only one pending action.
+Low: no committed tests (the body's "parser checked with hand-built packets" isn't in the repo); the pairing screen publishes into the coach's HR hub outside a workout (cleared at start); the scan list hides straps by name, not UUID; inline 15/20/12 s literals.
+
+## #47 weight changes, total vs per-side, each-side logging (3cbb241)
+
+Verdict: **the server tool and log contract are sound; the phone parser fails common gym phrasings, and the tests only cover the device-check phrases.** The sub-auditor compiled `WeightLoad.swift` and ran each phrase; F36 and F37 were re-checked against the code by hand.
+
+**F36. "Go up to 50s" while holding 35s stores 85 lb each. CONFIRMED**
+`WeightLoad.swift:155`: the `absolute` regex needs `\b` right after the number, so "50s" isn't a target. "Up" then makes it `.by(50)` → 35 + 50. "Grab the 40s" is ignored entirely.
+
+**F37. The total-or-each guess ignores direction, tuned to one case. CONFIRMED**
+`WeightLoad.swift:183-185`: on a two-dumbbell lift, any "to N" closer to 2× current is halved. "Go up to 50" holding 35s → 25 each (lighter), and "go up to 35" holding 20s → 17.5. This fits Josh's "80 while holding 35s", and a "no" to the "Right?" check isn't handled (PLAUSIBLE).
+
+**F38. Barbell plates per side aren't converted to a total. CONFIRMED**
+"Put 25s on each side" stores 25 lb total; there's no plate maths (45 + 2×25 = 95). "Add a plate" falls through to the coach.
+
+**F39. Kilos are converted to lb, but there's no unit setting. CONFIRMED**
+`:146`: a kg user's "20 kilos" shows as 45 lb, and the UI says lb everywhere.
+Medium: side phrases are caught any time on one-side lifts, so "is the other side the same?" during rest never reaches the coach (`CoachStageView.swift:1471-1482`); left/right are logged only from voice counting (taps/stepper log no sides), and `reps` = the weaker side, so tonnage counts one side. The deploy order (server first, since the contract is `.strict()`) is stated in the body. Conflicts: #46 moved side counting into `SetCount.swift`, so #47's side logging must be ported there; both add a test target. Also conflicts with #51 and #44.
+Fine: "add ten pounds" on a barbell → +10 total, "make it 135" → 135, "20 each hand" → 20 each, `loadKg` meaning unchanged (no server double-count), and the server's lift tables are drift-tested.
 
 ## #46 rep counting past target (3d9bee2, re-push bd3e36b)
 

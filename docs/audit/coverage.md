@@ -7,8 +7,8 @@ Status values: not started, in PR #N, merged (#N), dropped.
 
 | # | Idea | In plan? | Status | Note |
 |---|---|---|---|---|
-| I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | building (watch-app) | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
-| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods building (watch-app); Health reads **deferred** (Phase 4, unassigned) | — |
+| I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | in PR #48 (F30–F32); calories streamed but not shown | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
+| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods in PR #52 (F33–F35); Health reads **deferred** (Phase 4, unassigned) | — |
 | I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | in PR #49 (F13–F15) | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
 | I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | in PR #49 (F13, F15) | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
 | I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | in PR #49 (F13, F15) | **Plan gap.** |
@@ -30,8 +30,8 @@ Status values: not started, in PR #N, merged (#N), dropped.
 
 | I19 | Bank alternatives so swaps are instant (new, 2026-11-05) | No | in PR #51 (F24) | — |
 | I20 | Rep counter must count past target (new, 2026-11-05) | No | in PR #46 | F10–F12 |
-| I22 | "10 reps each side": unilateral lifts counted and logged per side (new, 2026-11-05) | No | building (weight-fix) | #46 still logs the weaker side as one number. |
-| I21 | Voice weight changes, total vs per-side (bug) | No | building (weight-fix) | — |
+| I22 | "10 reps each side": unilateral lifts counted and logged per side (new, 2026-11-05) | No | in PR #47 | Per-side logged from voice counts only; must be ported onto #46's `SetCount`. |
+| I21 | Voice weight changes, total vs per-side (bug) | No | in PR #47 | F36–F39 |
 
 **Deferred, not dropped:** Phase 4 recovery reads, social (I15–I18), deep-recall vector search.
 
@@ -57,5 +57,9 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | P1.13 | Coach rules table | in PR #44 (partial) | HR, too-much, easy, welcome-back, voice-off and music rules done. Pace, mobility and tone rules not done. |
 | P1.14 | Evals per rule in `functions/src/evals` | **not started** | Only a unit test on prompt strings. |
 | P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | building (watch-app) | `HeartRateHub` exists but has no producer (F4). |
-| P3 | BLE straps, AirPods HR | building (watch-app, after P2) | — |
+| P3 | BLE straps, AirPods HR | in PR #52 | — |
 | P4 | Recovery reads (resting HR, HRV, sleep) | **deferred** (unassigned) | — |
+
+## Not an idea, but tracked
+
+| Live voice "weird and laggy" (Josh, real workout) | PR #53 adds fallback + logging, but **L1 (main-thread decode) and L3 (mint wait) are not fixed** (F26). |
