@@ -147,6 +147,12 @@ final class AppModel: NSObject, ObservableObject {
     /// suggests that time.
     private(set) var lastWorkoutStartedAt: Date?
     @Published private(set) var progressSummary: ProgressSummaryModel?
+    /// Recovery from Apple Health (AppModel+Recovery), when reads are on.
+    @Published var recovery: RecoveryBaseline.Summary?
+    var recoveryReadAt: Date?
+    /// The coach was cleared to offer a lighter session at this time; the
+    /// offer counts as made once a reply after it actually says it.
+    var lighterOfferPendingSince: Date?
     /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
     /// otherwise — the memory screen groups proposed / active / ended.
     @Published private(set) var memoryFacts: [MemoryFact] = []
@@ -420,6 +426,12 @@ final class AppModel: NSObject, ObservableObject {
                 // We'll send our cached brief as the first [app] line, so the
                 // server needn't read memory before minting.
                 if let briefBuiltAt { data["memoryBriefBuiltAt"] = briefBuiltAt }
+                // Recovery for the setup prompt; the lighter-session offer
+                // goes to one session a day (a reconnect doesn't re-offer).
+                if let recovery = self.recoveryPayload() {
+                    data["recovery"] = recovery
+                    if recovery["offerLighter"] as? Bool == true { self.noteLighterOfferCleared() }
+                }
                 return try await self.callCallable("startLiveCoachSession", data: data)
             },
             memoryBrief: { [weak self] in
@@ -428,6 +440,7 @@ final class AppModel: NSObject, ObservableObject {
             },
             recordTurn: { [weak self] user, coach, startedAt, interrupted in
                 guard let self else { throw CancellationError() }
+                self.noteCoachSaid(coach, at: Date())
                 return try await self.callCallable("recordLiveTurnCallable", data: [
                     "userText": String(user.prefix(4000)),
                     "coachText": String(coach.prefix(4000)),
@@ -533,6 +546,8 @@ final class AppModel: NSObject, ObservableObject {
             let context = liveCoachContext()
             if !context.isEmpty { data["liveContext"] = context }
             try await callCallable("sendCoachMessage", data: data)
+            // The coach was told it may offer a lighter session: once a day.
+            if (context["recovery"] as? [String: Any])?["offerLighter"] as? Bool == true { noteLighterOfferCleared() }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -652,6 +667,7 @@ final class AppModel: NSObject, ObservableObject {
         }
         context["delivery"] = CoachContext.delivery()
         if let switching = switchingContext() { context["switching"] = switching }
+        if let recovery = recoveryPayload() { context["recovery"] = recovery }
         return context
     }
 
@@ -924,6 +940,7 @@ final class AppModel: NSObject, ObservableObject {
         noteTimedBlock(nil)
         HeartRateHub.shared.reset()
         Task { await self.refreshAlternatives(force: false) }
+        Task { await self.refreshRecovery() }
         #if DEBUG
         // The preview has no backend: a small local session, enough to walk
         // through starting, teaching and counting.
@@ -1861,6 +1878,7 @@ final class AppModel: NSObject, ObservableObject {
                     }
 
                     self?.messages = snapshot?.documents.compactMap(Self.makeCoachMessage) ?? []
+                    self?.noteLighterOfferInReplies()
                     await self?.applyNewClientActions()
                 }
             }
@@ -2086,6 +2104,8 @@ final class AppModel: NSObject, ObservableObject {
         currentWorkoutPlan = Self.makeWorkoutPlanSummary(from: latestWorkoutPlanData)
         // Back in the app: roll the two-week reminder window forward.
         if !inPreview { Task { await TrainingReminders.shared.reschedule() } }
+        // And re-read recovery (throttled), so this morning's sleep is in.
+        Task { await refreshRecovery() }
     }
 
     private func listenForActiveWorkout(userId: String?) {

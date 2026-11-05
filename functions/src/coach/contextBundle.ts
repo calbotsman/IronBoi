@@ -1,6 +1,7 @@
 import type { DocumentData } from "firebase-admin/firestore";
 import type { CoachLoadedContext } from "./context.js";
 import type { RetrievedCorpusEntry } from "../corpus/researchCorpus.js";
+import type { RecoveryContext, RecoverySignal } from "../contracts/coach-agent.js";
 import { progressionLabel } from "../workouts/progressionDefaults.js";
 import { isTimedExercise } from "../workouts/exerciseCatalog.js";
 
@@ -21,10 +22,7 @@ export type CoachContextBundleV1 = {
   pendingProposalCount: number;
   recentWorkouts: CoachContextWorkout[];
   conversationWindow: CoachContextMessage[];
-  healthSummary: {
-    available: false;
-    reason: "healthkit_not_connected";
-  };
+  healthSummary: CoachContextHealthSummary;
   retrievedCorpus: RetrievedCorpusEntry[];
   // Recently accepted plan-adjustment proposals — so the coach can
   // reference a past change instead of re-asking about it.
@@ -40,6 +38,31 @@ export type CoachContextBundleV1 = {
   // when the user has no plan yet.
   currentPlan: CoachContextPlan | null;
 };
+
+/**
+ * Recovery from Apple Health, as the phone computed it this turn (it rides
+ * on liveContext.recovery / the live session request; nothing is stored or
+ * read server-side for it). Numbers only: the last 24 h and the person's own
+ * 28-day median.
+ */
+export type CoachContextHealthSummary =
+  | { available: false; reason: "healthkit_not_connected" }
+  | {
+      available: true;
+      restingHr?: number;
+      restingHrBaseline?: number;
+      hrvMs?: number;
+      hrvBaselineMs?: number;
+      sleepHours?: number;
+      signals: RecoverySignal[];
+      low: boolean;
+    };
+
+export function healthSummaryFromRecovery(recovery: RecoveryContext | undefined): CoachContextHealthSummary {
+  if (!recovery) return { available: false, reason: "healthkit_not_connected" };
+  const { offerLighter: _offer, ...numbers } = recovery;
+  return { available: true, ...numbers };
+}
 
 export type CoachContextPlanDay = {
   date: string;
@@ -160,11 +183,14 @@ export function buildCoachContextBundle(
     now = new Date().toISOString(),
     retrievedCorpus = [],
     today,
+    recovery,
   }: {
     userId: string;
     sessionId: string;
     now?: string;
     retrievedCorpus?: RetrievedCorpusEntry[];
+    // Phase 4: the phone's recovery summary for this turn, if Health reads are on.
+    recovery?: RecoveryContext;
     // The user's LOCAL calendar date (client-stamped clientDate). Falls back
     // to the UTC date of `now` — deterministic for fixtures, and only off by
     // a few hours at the day boundary for real users without clientDate.
@@ -201,10 +227,7 @@ export function buildCoachContextBundle(
       .slice(-30)
       .map(messageForPrompt)
       .filter((message): message is CoachContextMessage => hasText(message.content)),
-    healthSummary: {
-      available: false,
-      reason: "healthkit_not_connected",
-    },
+    healthSummary: healthSummaryFromRecovery(recovery),
     retrievedCorpus,
     // Defaults to [] for callers/fixtures built before this field existed —
     // same tolerance pattern as pendingProposalCount above.

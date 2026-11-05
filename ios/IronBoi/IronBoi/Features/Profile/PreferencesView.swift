@@ -485,6 +485,27 @@ struct PreferencesView: View {
                     .font(.caption)
                     .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
+                // Phase 4: asked here, when you turn it on, never at launch.
+                MyoValueRow(label: "Coach reads recovery") {
+                    Toggle("Coach reads recovery", isOn: Binding(
+                        get: { health.recoveryEnabled },
+                        set: { on in
+                            Task {
+                                if on {
+                                    await health.enableRecovery()
+                                } else {
+                                    health.disableRecovery()
+                                }
+                                await appModel.refreshRecovery(force: true)
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                }
+                Text("Reads resting heart rate, HRV and sleep from Health (including what Whoop, Oura or Garmin sync there) and compares the last 24 hours with your own last four weeks. Only a short summary goes with your coach messages to the AI model that writes the reply (Google Gemini, or OpenAI with live voice). It isn't stored: it's deleted once the reply is written. On a clearly low day Coach offers a lighter session; nothing changes unless you say yes.")
+                    .font(.caption)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             #if DEBUG
             Button("Send a test reminder in 10 seconds") {

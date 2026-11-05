@@ -165,7 +165,8 @@ targets:
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: MYO saves your finished workouts to Apple Health so they count toward your activity.
         # Read: live heart rate and active energy from a Watch workout (Services/WatchWorkoutLink.swift).
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: MYO connects to your heart rate strap so your coach can pace your rests.
-        INFOPLIST_KEY_NSHealthShareUsageDescription: MYO reads your heart rate and active energy during workouts so your coach can pace your rests.
+        # Phase 4 adds recovery reads (Services/HealthSync.swift readRecovery), asked from You → Training.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: MYO reads your heart rate and active energy during workouts so your coach can pace your rests, and, if you turn it on, your resting heart rate, HRV and sleep so your coach can offer a lighter session on low-recovery days.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: MYO uses speech recognition to turn your voice into coach messages.
         SWIFT_VERSION: 5.10
         TARGETED_DEVICE_FAMILY: 1
@@ -284,6 +285,8 @@ targets:
       - path: IronBoi/Models/SessionAlternatives.swift
       # Live voice reconnect rules (LiveVoicePolicyTests.swift).
       - path: IronBoi/Services/LiveVoicePolicy.swift
+      # Recovery baselines and thresholds (RecoveryBaselineTests.swift).
+      - path: IronBoi/Services/RecoveryBaseline.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

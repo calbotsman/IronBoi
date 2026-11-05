@@ -268,6 +268,7 @@ export async function orchestrateCoachTurn({
       // The plan block is anchored on the user's own calendar day, the same
       // way today-scope overrides are keyed — devices aren't in ET.
       today: clientDate ?? currentDateISO(),
+      recovery: liveContext?.recovery,
     });
     const assembled = assembleCoachPrompt(
       coach,

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Launch smoke test: install a simulator build of MYO, launch it, and fail if
+# it is dead (or left a crash report) after a few seconds.
+#
+# Both launch crashes of 2026-11-05 died in App.init and passed a build-only
+# CI: F40 (GoogleService-Info.plist not bundled, Firebase abort) and F42 (an
+# HKHealthStore getter that doesn't exist at runtime, unrecognized selector).
+#
+# Usage: scripts/ios-launch-smoke.sh path/to/IronBoi.app [runtime-id]
+#   runtime-id: e.g. com.apple.CoreSimulator.SimRuntime.iOS-26-0, or "oldest".
+#   Defaults to the newest available iOS runtime of the selected Xcode
+#   (DEVELOPER_DIR picks the Xcode).
+# Env: SMOKE_SECONDS (default 10).
+#
+# The app runs with MYO_NO_MIC=1 (never opens the mic) and MYO_PREVIEW=1
+# (DEBUG: skips sign-in into the no-backend preview session, so the launch
+# path goes past the first screen without touching the backend).
+set -euo pipefail
+
+APP="${1:?usage: $0 path/to/IronBoi.app [runtime-id]}"
+RUNTIME="${2:-}"
+WAIT="${SMOKE_SECONDS:-10}"
+
+[ -d "$APP" ] || { echo "::error::$APP not found"; exit 1; }
+BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+
+# Newest available iOS runtime, and an iPhone it supports.
+read -r RUNTIME DEVTYPE RUNTIME_NAME < <(xcrun simctl list runtimes available -j | python3 -c '
+import json, sys
+want = sys.argv[1]
+rts = [r for r in json.load(sys.stdin)["runtimes"] if r.get("platform") == "iOS" and r.get("isAvailable")]
+if want not in ("", "oldest"):
+    rts = [r for r in rts if r["identifier"] == want]
+if not rts:
+    sys.exit("no matching iOS simulator runtime")
+pick = min if want == "oldest" else max
+rt = pick(rts, key=lambda r: tuple(int(x) for x in r["version"].split(".")))
+import re
+phones = [d for d in rt["supportedDeviceTypes"] if d.get("productFamily") == "iPhone"]
+# Newest plain model: highest number, no "e"/"Plus"/"Max"/"mini" variant.
+def rank(d):
+    n = re.search(r"iPhone (\d+)", d["name"])
+    plain = re.fullmatch(r"iPhone \d+( Pro)?", d["name"]) is not None
+    return (plain, int(n.group(1)) if n else 0)
+print(rt["identifier"], max(phones, key=rank)["identifier"], rt["name"].replace(" ", "_"))
+' "$RUNTIME")
+[ -n "${DEVTYPE:-}" ] || { echo "::error::no usable iOS simulator runtime${RUNTIME:+ ($RUNTIME)}"; exit 1; }
+echo "Runtime: $RUNTIME_NAME ($RUNTIME), device: $DEVTYPE"
+
+# simctl can hang (seen locally: launch never returns on a wedged
+# CoreSimulator); give each call a deadline. macOS has no `timeout`.
+deadline() { local secs=$1; shift; perl -e 'alarm shift; exec @ARGV' "$secs" "$@"; }
+
+UDID=$(xcrun simctl create "MYO smoke" "$DEVTYPE" "$RUNTIME")
+LOG=$(mktemp -t myo-smoke-log)
+STREAM_PID=""
+cleanup() {
+  [ -n "$STREAM_PID" ] && kill "$STREAM_PID" 2>/dev/null || true
+  xcrun simctl shutdown "$UDID" >/dev/null 2>&1 || true
+  xcrun simctl delete "$UDID" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+xcrun simctl boot "$UDID"
+deadline 300 xcrun simctl bootstatus "$UDID" -b >/dev/null \
+  || { echo "::error::simulator did not finish booting in 300s"; exit 1; }
+
+# Crash reports for simulator apps land on the host.
+REPORTS="$HOME/Library/Logs/DiagnosticReports"
+mkdir -p "$REPORTS"
+MARK=$(mktemp -t myo-smoke-mark)
+
+deadline 180 xcrun simctl install "$UDID" "$APP"
+xcrun simctl spawn "$UDID" log stream --style compact --level debug \
+  --predicate "process == \"$EXE\" OR eventMessage CONTAINS \"$BUNDLE_ID\"" >"$LOG" 2>&1 &
+STREAM_PID=$!
+sleep 1
+
+fail=0
+set +e
+OUT=$(SIMCTL_CHILD_MYO_NO_MIC=1 SIMCTL_CHILD_MYO_PREVIEW=1 \
+  deadline 120 xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>&1)
+rc=$?
+set -e
+echo "$OUT"
+if [ "$rc" != 0 ]; then
+  # 142 = SIGALRM from the deadline. A crash during launch can also make
+  # simctl give up, so collect the crash report and log either way.
+  [ "$rc" = 142 ] && why="hung for 120s" || why="exited $rc"
+  echo "::error::simctl launch failed ($why) on $RUNTIME_NAME"
+  fail=1
+  sleep 5
+else
+  PID=$(echo "$OUT" | tail -1 | sed "s/.*: //")
+  echo "Launched $BUNDLE_ID (pid $PID); waiting ${WAIT}s"
+  sleep "$WAIT"
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "::error::$EXE (pid $PID) died within ${WAIT}s of launch on $RUNTIME_NAME"
+    fail=1
+  fi
+fi
+NEW=$(find "$REPORTS" -newer "$MARK" -name "$EXE*" 2>/dev/null || true)
+if [ -n "$NEW" ]; then
+  echo "::error::$EXE left a crash report on $RUNTIME_NAME"
+  fail=1
+fi
+
+if [ "$fail" = 1 ]; then
+  for f in $NEW; do
+    echo "----- $f"
+    # The .ips header line, then the fields that name the crash.
+    grep -E '"(exception|termination|asi|crashed|type|signal|reason|indicator)"|abort|selector|FIRApp|Firebase' "$f" | head -40
+    head -c 3000 "$f"
+    echo
+  done
+  echo "----- last log lines"
+  grep -E "Terminating|unrecognized selector|exception|FIRApp|fatal|error" "$LOG" | tail -40 || true
+  tail -60 "$LOG"
+  exit 1
+fi
+echo "OK: $EXE still running after ${WAIT}s on $RUNTIME_NAME, no crash report"
