@@ -602,6 +602,7 @@ export const startLiveCoachSession = onCall(
         userId,
         today,
         memoryBriefOnPhone: parsed.memoryBriefBuiltAt !== undefined,
+        recovery: parsed.recovery,
       });
       safeLogger.info("Live voice instruction built", {
         event: "live_voice_instruction_built",

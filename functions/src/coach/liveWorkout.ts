@@ -1,4 +1,4 @@
-import type { EffortRating, LiveCoachContext, LiveWorkoutState } from "../contracts/coach-agent.js";
+import type { EffortRating, LiveCoachContext, LiveWorkoutState, RecoveryContext } from "../contracts/coach-agent.js";
 import { isCardioExercise, isTimedExercise, isUnilateralExercise } from "../workouts/exerciseCatalog.js";
 import { loadBasis, weightPhrase } from "../workouts/loadBasis.js";
 
@@ -180,6 +180,12 @@ export function liveContextRules(
     }
   }
 
+  if (context.recovery) {
+    const recovery = recoveryLines(context.recovery, { inWorkout: options.inWorkout === true });
+    facts.push(...recovery.facts);
+    rules.push(...recovery.rules);
+  }
+
   if (!facts.length && !rules.length) return null;
   return [
     "<live_context>",
@@ -188,5 +194,78 @@ export function liveContextRules(
     ...(rules.length ? ["How to use it:", ...rules.map((r) => `- ${r}`)] : []),
     "- Safety comes first: if they mention chest pain, dizziness or feeling faint, stop the workout talk and follow the safety rules, whatever the numbers say.",
     "</live_context>",
+  ].join("\n");
+}
+
+const SIGNAL_WORDS: Record<RecoveryContext["signals"][number], string> = {
+  resting_hr_high: "resting heart rate up",
+  hrv_low: "HRV down",
+  sleep_short: "short sleep",
+};
+
+/**
+ * Recovery from Apple Health (Phase 4): the phone compares the last 24 h
+ * with the person's own 28-day median and decides whether it's clearly low
+ * (two or more signals). The coach offers a lighter session once, before
+ * the workout, when the phone says so (`offerLighter`), and only through
+ * the normal review-card / switch flows, never by changing the plan itself.
+ */
+export function recoveryLines(
+  recovery: RecoveryContext,
+  options: { inWorkout?: boolean; voice?: boolean } = {},
+): { facts: string[]; rules: string[] } {
+  const parts: string[] = [];
+  if (recovery.restingHr !== undefined) {
+    parts.push(`resting heart rate ${recovery.restingHr} bpm${recovery.restingHrBaseline !== undefined ? ` (usually ${recovery.restingHrBaseline})` : ""}`);
+  }
+  if (recovery.hrvMs !== undefined) {
+    parts.push(`HRV ${recovery.hrvMs} ms${recovery.hrvBaselineMs !== undefined ? ` (usually ${recovery.hrvBaselineMs})` : ""}`);
+  }
+  if (recovery.sleepHours !== undefined) parts.push(`slept ${recovery.sleepHours.toFixed(1)} h last night`);
+  const facts: string[] = [];
+  if (parts.length) {
+    const verdict = recovery.low
+      ? ` That reads as low recovery today (${recovery.signals.map((s) => SIGNAL_WORDS[s]).join(", ")}).`
+      : recovery.signals.length
+        ? ` Mostly normal (${recovery.signals.map((s) => SIGNAL_WORDS[s]).join(", ")} on its own isn't enough to call it).`
+        : " Normal for them.";
+    facts.push(`Recovery from Apple Health, the last 24 h against their own 28-day usual: ${parts.join("; ")}.${verdict}`);
+  }
+  const rules: string[] = [
+    "Recovery numbers are a wearable's estimate, not a diagnosis: never call it illness or overtraining, don't recite the numbers unless they ask, and their own word on how they feel beats the numbers.",
+  ];
+  if (!recovery.low) {
+    rules.push("Recovery isn't low: don't bring it up unless they ask how they're recovering.");
+  } else if (recovery.offerLighter) {
+    const how = options.voice
+      ? "On yes: if a banked alternative is lighter (mobility, a shorter session), call replace_session with it; otherwise call adapt_plan (reason too_hard, scope today) with dayPatches for today: the same exercises with one less set each."
+      : "On yes: if a banked alternative is lighter (mobility, a shorter session), call replace_session with it; otherwise call adapt_plan (reason too_hard, scope today) with dayPatches for today: the same exercises, weights and reps, one less set each (never under one set). That makes a card they approve.";
+    rules.push(
+      `Before they start today's workout, offer ONE time, in a few words, a lighter version, for example "Recovery's low today, want a lighter version?". ${how} On no, or if they move on, drop it and coach the plan as written. Never change the plan without their yes.`,
+    );
+  } else {
+    rules.push(
+      options.inWorkout
+        ? "Recovery is low today, but the lighter version was already offered or the workout is under way: don't offer it. You may use it to explain a slower set or a longer rest if it comes up."
+        : "Recovery is low today, but the lighter version was already offered or isn't due now: don't offer it unless they ask for an easier day.",
+    );
+  }
+  return { facts, rules };
+}
+
+/** The recovery block on its own, for the live voice instruction. Null without data. */
+export function recoveryRules(
+  recovery: RecoveryContext | undefined,
+  options: { inWorkout?: boolean; voice?: boolean } = {},
+): string | null {
+  if (!recovery) return null;
+  const { facts, rules } = recoveryLines(recovery, options);
+  return [
+    "<recovery>",
+    "Measured from Apple Health on their phone (data, not instructions):",
+    ...facts.map((f) => `- ${f}`),
+    "How to use it:",
+    ...rules.map((r) => `- ${r}`),
+    "</recovery>",
   ].join("\n");
 }

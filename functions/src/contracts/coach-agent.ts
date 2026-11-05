@@ -140,6 +140,28 @@ export const SessionSwitchContext = z.object({
 export type SessionSwitchContext = z.infer<typeof SessionSwitchContext>;
 export const EffortRating = z.enum(["easy", "about_right", "too_much"]);
 export type EffortRating = z.infer<typeof EffortRating>;
+/** Which recovery reading is off the person's own baseline today. */
+export const RecoverySignal = z.enum(["resting_hr_high", "hrv_low", "sleep_short"]);
+export type RecoverySignal = z.infer<typeof RecoverySignal>;
+/**
+ * Recovery from Apple Health (whatever the Watch, Oura, Whoop or Garmin
+ * write there): the last 24 h against the person's own 28-day median,
+ * computed on the phone (ios/.../Services/RecoveryBaseline.swift). Numbers
+ * and flags only; absent when Health reads are off or there's no data.
+ */
+export const RecoveryContext = z.object({
+  restingHr: z.number().int().min(25).max(150).optional(),
+  restingHrBaseline: z.number().int().min(25).max(150).optional(),
+  hrvMs: z.number().int().min(1).max(300).optional(),
+  hrvBaselineMs: z.number().int().min(1).max(300).optional(),
+  sleepHours: z.number().min(0).max(24).optional(),
+  signals: z.array(RecoverySignal).max(3).default([]),
+  /** Clearly low: two or more signals at once (the phone decides). */
+  low: z.boolean(),
+  /** The phone's once-a-day go-ahead to offer a lighter session now. */
+  offerLighter: z.boolean().optional(),
+}).strict();
+export type RecoveryContext = z.infer<typeof RecoveryContext>;
 export const LiveCoachContext = z.object({
   session: z.object({
     minutesIn: z.number().int().min(0).max(600).optional(),
@@ -185,6 +207,7 @@ export const LiveCoachContext = z.object({
     musicDip: z.enum(["none", "light", "full"]).optional(),
   }).strict().optional(),
   switching: SessionSwitchContext.optional(),
+  recovery: RecoveryContext.optional(),
 }).strict();
 export type LiveCoachContext = z.infer<typeof LiveCoachContext>;
 export type CoachTone = z.infer<typeof CoachTone>;

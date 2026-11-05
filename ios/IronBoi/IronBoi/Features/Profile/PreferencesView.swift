@@ -483,6 +483,27 @@ struct PreferencesView: View {
                     .font(.caption)
                     .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)
+                // Phase 4: asked here, when you turn it on, never at launch.
+                MyoValueRow(label: "Coach reads recovery") {
+                    Toggle("Coach reads recovery", isOn: Binding(
+                        get: { health.recoveryEnabled },
+                        set: { on in
+                            Task {
+                                if on {
+                                    await health.enableRecovery()
+                                } else {
+                                    health.disableRecovery()
+                                }
+                                await appModel.refreshRecovery(force: true)
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                }
+                Text("Resting heart rate, HRV and sleep from Health, including what Whoop, Oura or Garmin sync there. Compared with your own last four weeks; on a clearly low day, Coach offers a lighter session. Nothing changes unless you say yes.")
+                    .font(.caption)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             #if DEBUG
             Button("Send a test reminder in 10 seconds") {
