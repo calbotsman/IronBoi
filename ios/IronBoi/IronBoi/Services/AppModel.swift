@@ -227,6 +227,7 @@ final class AppModel: NSObject, ObservableObject {
 
     func start() {
         guard authHandle == nil else { return }
+        WatchWorkoutLink.shared.configure(appModel: self)
 
         authHandle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
@@ -557,10 +558,12 @@ final class AppModel: NSObject, ObservableObject {
                 let start = min(startedAt ?? Date(), Date())
                 restStartedAt = start
                 restPlannedSec = Int(endsAt.timeIntervalSince(start).rounded())
+                HeartRateHub.shared.noteRest(startedAt: start)
             }
         } else {
             restStartedAt = nil
             restPlannedSec = nil
+            HeartRateHub.shared.noteRest(startedAt: nil)
         }
         restEndsAt = endsAt
     }
@@ -619,7 +622,7 @@ final class AppModel: NSObject, ObservableObject {
             }
             context["session"] = session
             let hub = HeartRateHub.shared
-            if let heart = CoachContext.heart(hub.latest, ageYears: profile.ageYears, peak: hub.sessionPeak, now: now) {
+            if let heart = CoachContext.heart(hub.latest, zone: hub.zone, peak: hub.sessionPeak, now: now) {
                 context["heart"] = heart
             }
         }
@@ -905,6 +908,8 @@ final class AppModel: NSObject, ObservableObject {
                 ]
             )
             activeWorkout = response.activeWorkout
+            // The Peloton moment: MYO opens on the Watch by itself, if there is one.
+            startWatchWorkout()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1414,6 +1419,7 @@ final class AppModel: NSObject, ObservableObject {
         do {
             let _: EmptyFunctionResponse = try await callCallable(
                 "abandonWorkoutSessionCallable", data: ["sessionId": workout.sessionId])
+            discardWatchWorkout(sessionId: workout.sessionId)
             activeWorkout = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -1463,6 +1469,10 @@ final class AppModel: NSObject, ObservableObject {
             if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
                 let id = activeWorkout.sessionId
                 if let replaced = sessionReplacement {
+                    // A switched session is two workouts in Health, which the
+                    // phone saves; the Watch recorded it as one, so its
+                    // recording is discarded rather than saved alongside.
+                    discardWatchWorkout(sessionId: id)
                     // What was lifted before the switch is strength; the rest is what they switched to.
                     let split = replaced.switchedAt.flatMap(Self.parseISO).flatMap { $0 > start && $0 < end ? $0 : nil }
                     let planned = activeWorkout.workoutName
@@ -1474,8 +1484,8 @@ final class AppModel: NSObject, ObservableObject {
                                                             activity: replaced.activity, start: split ?? start, end: end)
                     }
                 } else {
-                    let name = activeWorkout.workoutName
-                    Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, start: start, end: end) }
+                    // Saved once: by the Watch when it ran this workout, else here.
+                    saveFinishedWorkoutToHealth(sessionId: id, name: activeWorkout.workoutName, start: start, end: end)
                 }
             }
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil

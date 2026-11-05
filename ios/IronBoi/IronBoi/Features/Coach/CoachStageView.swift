@@ -216,6 +216,26 @@ struct CoachStageView: View {
             push: { pushContextNote($0) },
             extend: { extendRest(by: $0) }
         ))
+        .onReceive(WatchWorkoutLink.shared.$setDoneRequest) { request in
+            guard request != nil else { return }
+            WatchWorkoutLink.shared.setDoneRequest = nil
+            logSetFromWatch()
+        }
+    }
+
+    /// Set done on the Watch: a hold or cardio block ends now; otherwise the
+    /// next set of this lift is logged at its target reps, and rest starts,
+    /// as when you say "set done".
+    private func logSetFromWatch() {
+        if holdEndsAt != nil {
+            finishHold(early: true)
+            return
+        }
+        guard let index = currentExerciseIndex, let exercise = currentExercise,
+              let set = appModel.completeNextSet(exerciseIndex: index, reps: exercise.targetReps) else { return }
+        if restEndsAt != nil { cancelRest() }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        confirm(setDoneLine("Set \(set) done.", exerciseIndex: index) + restLine(afterSetOn: index))
     }
 
     #if DEBUG

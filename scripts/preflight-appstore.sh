@@ -122,6 +122,20 @@ else
   warn "rules are NOT auto-verified against $PROD_PROJECT here — deploy them with: npx firebase-tools deploy --only firestore:rules --project $PROD_PROJECT"
 fi
 
+# --- 5. HealthKit usage strings (App Review rejects a missing one) ----------
+echo
+echo "HealthKit usage strings"
+YML="$REPO_ROOT/ios/IronBoi/project.yml"
+for key in NSHealthShareUsageDescription NSHealthUpdateUsageDescription; do
+  # Once for the iPhone app (INFOPLIST_KEY_...), once for the Watch app.
+  COUNT=$(grep -c "$key:" "$YML" || true)
+  if [ "$COUNT" -ge 2 ]; then
+    pass "$key set for the iPhone and Watch apps"
+  else
+    fail "$key missing from the iPhone or Watch app in project.yml"
+  fi
+done
+
 echo
 if [ "$FAILURES" -gt 0 ]; then
   printf "\033[31m%s check(s) failed\033[0m — do NOT submit to the App Store.\n" "$FAILURES"

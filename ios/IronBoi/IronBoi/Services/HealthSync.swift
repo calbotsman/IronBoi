@@ -3,9 +3,11 @@ import HealthKit
 
 /// Saves finished workouts to Apple Health, when you've turned it on.
 ///
-/// Write-only: MYO asks to save workouts and reads nothing back. Each saved
+/// This is the phone's own save, for workouts without a Watch. When the
+/// Watch ran the workout it saves it instead, with heart rate and energy,
+/// and this is skipped (WatchWorkoutLink / AppModel+Watch). Each saved
 /// workout carries the session id as its sync identifier, so Health replaces
-/// rather than duplicates if the same session is ever saved twice.
+/// rather than duplicates if the same app saves the same session twice.
 ///
 /// No calories: MYO doesn't measure them, and Health would show a guess as
 /// if it were a reading. Duration and the workout type are what we know.

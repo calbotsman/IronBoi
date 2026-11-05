@@ -53,12 +53,13 @@ enum CoachContext {
     }
 
     /// The live heart rate, if one is fresh enough to send at all.
-    static func heart(_ sample: HeartSample?, ageYears: Int?, peak: Int?, now: Date = Date()) -> [String: Any]? {
+    /// `zone` is the hub's smoothed, hysteresis-held zone (HeartRateHub.zone).
+    static func heart(_ sample: HeartSample?, zone: Int?, peak: Int?, now: Date = Date()) -> [String: Any]? {
         guard let sample else { return nil }
         let age = Int(now.timeIntervalSince(sample.at).rounded())
         guard age >= 0, age <= 600, (30...240).contains(sample.bpm) else { return nil }
         var heart: [String: Any] = ["source": sample.source.rawValue, "bpm": sample.bpm, "ageSec": age]
-        if let zone = HeartZones.zone(bpm: sample.bpm, ageYears: ageYears, observedPeak: peak) { heart["zone"] = zone }
+        if let zone, (1...5).contains(zone) { heart["zone"] = zone }
         if let trend = sample.trend { heart["trend"] = trend.rawValue }
         if let drop = sample.recoveryDrop60 { heart["recoveryDrop60"] = max(-60, min(drop, 120)) }
         if let peak, (30...240).contains(peak) { heart["sessionPeak"] = peak }
@@ -125,48 +126,96 @@ struct HeartSample: Equatable {
     var recoveryDrop60: Int?
 }
 
-/// Where live heart rate lands, whichever device sends it. Empty until a
-/// source exists: the Watch app (Phase 2), a Bluetooth strap or AirPods
-/// (Phase 3). The coach context reads `latest`; nothing reads a device.
+/// Where live heart rate lands, whichever device sends it: the Watch app
+/// (WatchWorkoutLink, Phase 2); Bluetooth straps and AirPods are Phase 3.
+/// The coach context reads `latest`; nothing reads a device directly.
+///
+/// Interface other code relies on (the atmosphere visuals read it): `latest`,
+/// `sessionPeak`, `zone`, `activeEnergyKcal`, `publish(_:)`, `reset()`. `latest`
+/// carries `trend` and `recoveryDrop60`, computed here when the source
+/// doesn't send them.
 @MainActor
 final class HeartRateHub: ObservableObject {
     static let shared = HeartRateHub()
     @Published private(set) var latest: HeartSample?
     /// Highest reading this workout.
     @Published private(set) var sessionPeak: Int?
+    /// Heart-rate zone 1–5, from the last 10 s averaged and held 15 s
+    /// before it changes (ZoneTracker), so wrist noise doesn't flip it.
+    /// Nil without an age on the profile.
+    @Published private(set) var zone: Int?
+    /// From the profile, for zones (kept current by WatchWorkoutLink).
+    var ageYears: Int?
+    private var zoneTracker = ZoneTracker()
+    /// Active energy this workout so far, as the Watch measures it. Kept
+    /// for the coach and visuals; not shown as a number in the app.
+    @Published private(set) var activeEnergyKcal: Double?
+
+    /// The last 60 s of readings, oldest first, for the trend.
+    private var recent: [(at: Date, bpm: Int)] = []
+    /// The reading when the current rest began, for the recovery drop.
+    private var restStart: (at: Date, bpm: Int)?
+    private var restDrop60: Int?
 
     func publish(_ sample: HeartSample) {
+        recent.append((sample.at, sample.bpm))
+        recent.removeAll { sample.at.timeIntervalSince($0.at) > 60 }
+        var sample = sample
+        if sample.trend == nil { sample.trend = trend(now: sample.at) }
+        if sample.recoveryDrop60 == nil { sample.recoveryDrop60 = recoveryDrop(sample) }
         latest = sample
         sessionPeak = max(sessionPeak ?? 0, sample.bpm)
+        zone = zoneTracker.add(bpm: sample.bpm, at: sample.at, ageYears: ageYears, observedPeak: sessionPeak)
+    }
+
+    func publishActiveEnergy(kcal: Double) {
+        guard kcal.isFinite, kcal >= 0 else { return }
+        activeEnergyKcal = kcal
+    }
+
+    /// The rest timer started (a date) or ended (nil). The drop in the first
+    /// minute of rest is how fast the heart comes down.
+    func noteRest(startedAt: Date?) {
+        restDrop60 = nil
+        guard let startedAt, let bpm = latest?.bpm, let at = latest?.at,
+              startedAt.timeIntervalSince(at) < 15 else {
+            restStart = nil
+            return
+        }
+        restStart = (startedAt, bpm)
     }
 
     /// A new workout: forget the last one's readings.
     func reset() {
         latest = nil
         sessionPeak = nil
+        activeEnergyKcal = nil
+        zone = nil
+        zoneTracker.reset()
+        recent = []
+        restStart = nil
+        restDrop60 = nil
     }
-}
 
-enum HeartZones {
-    /// 1–5 as a share of max heart rate (50/60/70/80/90%). Max is the
-    /// age-predicted 208 − 0.7 × age, raised to the highest reading seen if
-    /// that's higher. Nil without an age: a peak alone would call the first
-    /// reading of the day zone 5.
-    static func zone(bpm: Int, ageYears: Int?, observedPeak: Int?) -> Int? {
-        guard let max = maxHR(ageYears: ageYears, observedPeak: observedPeak) else { return nil }
-        let share = Double(bpm) / max
-        switch share {
-        case ..<0.6: return 1
-        case ..<0.7: return 2
-        case ..<0.8: return 3
-        case ..<0.9: return 4
-        default: return 5
+    /// Rising or falling: the last 10 s against 20–30 s before, by 5 bpm or
+    /// more. Nil until there's half a minute of readings.
+    private func trend(now: Date) -> HeartSample.Trend? {
+        func mean(_ range: ClosedRange<TimeInterval>) -> Double? {
+            let values = recent.filter { range.contains(now.timeIntervalSince($0.at)) }.map(\.bpm)
+            return values.isEmpty ? nil : Double(values.reduce(0, +)) / Double(values.count)
         }
+        guard let late = mean(0...10), let early = mean(20...30) else { return nil }
+        let change = late - early
+        return change >= 5 ? .rising : change <= -5 ? .falling : .steady
     }
 
-    /// The max heart rate the zones are shares of (see `zone`).
-    static func maxHR(ageYears: Int?, observedPeak: Int?) -> Double? {
-        guard let age = ageYears, (10...100).contains(age) else { return nil }
-        return Swift.max(208 - 0.7 * Double(age), Double(observedPeak ?? 0))
+    /// Beats dropped once a minute of rest has passed (fixed from then on).
+    private func recoveryDrop(_ sample: HeartSample) -> Int? {
+        if let restDrop60 { return restDrop60 }
+        guard let start = restStart, sample.at.timeIntervalSince(start.at) >= 60 else { return nil }
+        restDrop60 = start.bpm - sample.bpm
+        return restDrop60
     }
 }
+
+// HeartZones lives in MYOShared/HeartZones.swift: the Watch colors its BPM with it too.
