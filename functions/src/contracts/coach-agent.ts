@@ -63,6 +63,9 @@ export const DataCategory = z.enum([
   "healthkit_body_weight",
   "healthkit_hrv",
   "conversation_history",
+  // Social prototype: share "trained today" + weekly streak with friends
+  // you connected with by invite, and let the coach mention theirs.
+  "social_activity",
 ]);
 
 export const RiskLevel = z.enum(["low", "medium", "high", "blocked"]);
@@ -896,6 +899,9 @@ export const AuditEventType = z.enum([
   // Goal, experience, equipment or schedule changed after onboarding (from
   // the You screen or by telling the coach); the plan may be rebuilt.
   "training_setup_changed",
+  // Social prototype: a mutual friend connection was made or left.
+  "social_connection_added",
+  "social_connection_removed",
 ]);
 
 export const AuditActor = z.enum(["user", "coach", "system"]);

@@ -46,6 +46,8 @@ struct IronBoiApp: App {
 
 struct AppRootView: View {
     @EnvironmentObject private var appModel: AppModel
+    /// Social prototype — inert unless SocialFeature.isAvailable.
+    @ObservedObject private var social = SocialModel.shared
 
     var body: some View {
         Group {
@@ -66,6 +68,22 @@ struct AppRootView: View {
         }
         .task {
             appModel.start()
+        }
+        // Social prototype: with the flag off none of these do anything —
+        // refresh() returns at once, the sheet never shows, links are ignored.
+        .task(id: "\(appModel.user?.uid ?? "")-\(appModel.onboardingStatus == .complete)") {
+            guard SocialFeature.isAvailable else { return }
+            if appModel.user == nil { social.signedOut(); return }
+            await social.refresh(onboardingComplete: appModel.onboardingStatus == .complete)
+        }
+        .sheet(isPresented: $social.askOnboardingQuestion, onDismiss: {
+            // Swiping it away counts as the default answer: no.
+            if SocialFeature.isAvailable, !social.isOn { Task { await social.answerOnboarding(false) } }
+        }) {
+            SocialOnboardingQuestion()
+        }
+        .onOpenURL { url in
+            if social.handle(url: url), appModel.onboardingStatus == .complete { appModel.showProfile = true }
         }
         #if DEBUG
         // MYO_LIVE_PROBE=1: once signed in, open a live voice session, say

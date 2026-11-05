@@ -6,6 +6,18 @@ import { defineSecret } from "firebase-functions/params";
 import { SynthesizeSpeechRequest, synthesizeSpeech, ttsAllowedForSignInProvider } from "./voice/speech.js";
 import { onDocumentCreated, onDocumentWritten } from "firebase-functions/v2/firestore";
 import { rebuildMemoryBrief } from "./coach/memoryBrief.js";
+import {
+  SOCIAL_CONSENT_CATEGORY,
+  SOCIAL_CONSENT_RECORD_ID,
+  acceptSocialInvite,
+  createSocialInvite,
+  leaveSocialConnection,
+  listSocialFriends,
+  publishSocialActivity,
+  removeSocialData,
+  removeSocialDataBestEffort,
+  requireSocialEnabled,
+} from "./social/store.js";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { z } from "zod";
@@ -358,6 +370,11 @@ export const deleteAccount = onCall(
       actor: "user",
     });
 
+    // Social data lives outside users/{uid}: connections both ways, open
+    // invites, the activity doc. Best-effort and isolated — it must never
+    // stop an account being deleted (flag on or off).
+    await removeSocialDataBestEffort(db, userId, (error) => logSocialCleanupFailure(userId, "delete_account", error));
+
     // Recursive delete of all user-scoped data.
     await deleteDocumentTree(db.doc(userRoot(userId)));
 
@@ -391,6 +408,8 @@ export const getCoachBootstrap = onCall(CALLABLE_OPTS, async (request) => {
 // (claude/callable-migration) found no callable existed for this endpoint.
 export const resetMyData = onCall(CALLABLE_OPTS, async (request) => {
   const userId = requireUserId(request.auth);
+  // Start over wipes consent records, so social sharing must go with them.
+  await removeSocialDataBestEffort(db, userId, (error) => logSocialCleanupFailure(userId, "reset", error));
   await deleteDocumentTree(db.doc(userRoot(userId)), RESET_KEEPS);
   return { ok: true, userId };
 });
@@ -477,6 +496,11 @@ export const recordConsent = onCall(CALLABLE_OPTS, async (request) => {
       granted: parsed.granted,
     },
   });
+
+  if (parsed.category === SOCIAL_CONSENT_CATEGORY) {
+    if (parsed.granted) await publishSocialActivity(db, userId);
+    else await removeSocialData(db, userId);
+  }
 
   return { ok: true, recordId: parsed.recordId };
 });
@@ -967,7 +991,57 @@ export const revokeConsent = onCall(CALLABLE_OPTS, async (request) => {
     payload: { recordId: parsed.recordId },
   });
 
+  // Social: revoking stops sharing AND removes every connection both ways.
+  const revoked = (await db.doc(consentRecordPath(userId, parsed.recordId)).get()).data();
+  if (parsed.recordId === SOCIAL_CONSENT_RECORD_ID || revoked?.category === SOCIAL_CONSENT_CATEGORY) {
+    await removeSocialData(db, userId);
+  }
+
   return { ok: true, recordId: parsed.recordId };
+});
+
+// Social prototype (social/store.ts). Every callable refuses unless
+// IRONBOI_SOCIAL_ENABLED=true; the app hides social behind its own flag too.
+// App Check is ALWAYS enforced here (not tied to IRONBOI_ENFORCE_APP_CHECK):
+// invite codes are bearer secrets. Register App Attest before turning the
+// flag on — see docs/product/social-prototype.md.
+const SOCIAL_CALLABLE_OPTS = { ...CALLABLE_OPTS, enforceAppCheck: true } as const;
+
+function logSocialCleanupFailure(userId: string, path: string, error: unknown) {
+  safeLogger.warn("Social cleanup failed", {
+    event: "social_cleanup_failed",
+    userId,
+    path,
+    errorCode: error instanceof Error ? error.name : "unknown_error",
+  });
+}
+export const createSocialInviteCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  requireSocialEnabled();
+  return { ok: true as const, ...(await createSocialInvite(db, userId)) };
+});
+
+export const acceptSocialInviteCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  requireSocialEnabled();
+  const result = await acceptSocialInvite(db, userId, (request.data as { code?: unknown } | null)?.code);
+  await recordAuditEventBestEffort(db, { userId, eventType: "social_connection_added", actor: "user" });
+  return { ok: true as const, ...result };
+});
+
+export const leaveSocialConnectionCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  requireSocialEnabled();
+  const result = await leaveSocialConnection(db, userId, (request.data as { friendId?: unknown } | null)?.friendId);
+  await recordAuditEventBestEffort(db, { userId, eventType: "social_connection_removed", actor: "user" });
+  return result;
+});
+
+export const getSocialFriendsCallable = onCall(SOCIAL_CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  requireSocialEnabled();
+  const today = z.object({ today: z.string().date() }).parse(request.data ?? {}).today;
+  return { ok: true as const, friends: await listSocialFriends(db, userId, today) };
 });
 
 export const createCoachSession = onCall(
@@ -1213,6 +1287,16 @@ export const onWorkoutLogCreated = onDocumentCreated(
           error instanceof Error ? error.message.slice(0, 180) : "unknown_error",
       });
     }
+    // Social prototype: friends see "trained today" + streak. No-op unless
+    // the flag is on and this user consented.
+    const date = event.data?.data()?.date;
+    await publishSocialActivity(db, userId, { trainedOn: typeof date === "string" ? date : undefined }).catch((error) => {
+      safeLogger.warn("Social activity publish failed", {
+        event: "social_activity_publish_failed",
+        userId,
+        errorCode: error instanceof Error ? error.name : "unknown_error",
+      });
+    });
   },
 );
 

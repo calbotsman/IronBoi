@@ -43,6 +43,11 @@ targets:
         UIBackgroundModes: [audio, bluetooth-central]
         # The rest countdown on the lock screen (RestWidget).
         NSSupportsLiveActivities: true
+        # Social prototype invite links (myo://join/CODE). The app ignores
+        # them unless SocialFeature.isAvailable.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.thecombinationrule.ironboi.invite
+            CFBundleURLSchemes: [myo]
     preBuildScripts:
       - name: "Select GoogleService-Info.plist for $CONFIGURATION"
         script: |

@@ -65,6 +65,8 @@ struct PreferencesView: View {
                     paperCard
                     limitsCard
                     MemorySummaryCard()
+                    // Social prototype: draws nothing unless the flag is on.
+                    SocialCard()
                     regenerateCard
                     accountCard
                 }

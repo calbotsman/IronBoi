@@ -190,7 +190,13 @@ service cloud.firestore {
 
       match /consentRecords/{recordId} {
         allow read: if owns(userId);
+        // Social consent goes through recordConsent / revokeConsent only, so
+        // turning it off always runs the cleanup (connections both ways,
+        // shared activity, invites). A direct write would skip it.
         allow write: if owns(userId)
+          && recordId != "social_activity_v1"
+          && (resource == null || resource.data.get("category", "") != "social_activity")
+          && request.resource.data.get("category", "") != "social_activity"
           && request.resource.data.userId == userId
           && onlyKeys([
             "userId", "recordId", "category", "purpose", "granted",
@@ -210,6 +216,27 @@ service cloud.firestore {
     // deletion); if we ever need to expose deletion status, add a
     // callable instead.
     match /deletedAccounts/{userId} {
+      allow read, write: if false;
+    }
+
+    // Social prototype (functions/src/social/store.ts). All server-written.
+    // Friends never read Firestore directly: the getSocialFriends callable
+    // returns name, trained-today yes/no and streak after re-checking both
+    // people's consent. socialActivity/{uid} holds the date "today" is
+    // computed from, so only its owner may read it. A connection opens
+    // nothing under users/{uid}.
+    match /socialActivity/{userId} {
+      allow read: if owns(userId);
+      allow write: if false;
+    }
+
+    match /socialConnections/{pairId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow write: if false;
+    }
+
+    // Invite codes are bearer secrets: only the accept callable reads them.
+    match /socialInvites/{code} {
       allow read, write: if false;
     }
 
