@@ -12,6 +12,9 @@ struct PreferencesView: View {
     /// Training-day nudges — on the phone, not part of the saved profile.
     @ObservedObject private var reminders = TrainingReminders.shared
     @State private var reminderNote: String?
+    /// Saving finished workouts to Apple Health — also phone-only.
+    @ObservedObject private var health = HealthSync.shared
+    @State private var healthNote: String?
 
     // Local editing copy. Seeded from appModel.profile on appear and
     // refreshed if Firestore pushes a new version while we're not editing.
@@ -433,6 +436,29 @@ struct PreferencesView: View {
                 Text(reminderNote)
                     .font(.footnote)
                     .foregroundStyle(MyoColor.Text.tertiary.color)
+            }
+            if health.isAvailable {
+                MyoValueRow(label: "Save workouts to Apple Health") {
+                    Toggle("Save workouts to Apple Health", isOn: Binding(
+                        get: { health.enabled },
+                        set: { on in
+                            if on {
+                                Task {
+                                    let ok = await health.enable()
+                                    healthNote = ok ? nil : "Turn on MYO in the Health app: Sharing → Apps → MYO."
+                                }
+                            } else {
+                                health.disable()
+                                healthNote = nil
+                            }
+                        }
+                    ))
+                    .labelsHidden()
+                }
+                Text(healthNote ?? "Each finished workout goes to Health with its time and type. MYO doesn't read anything from Health.")
+                    .font(.caption)
+                    .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             #if DEBUG
             Button("Send a test reminder in 10 seconds") {

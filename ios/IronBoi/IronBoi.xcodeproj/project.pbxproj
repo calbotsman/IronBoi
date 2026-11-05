@@ -20,6 +20,7 @@
 		28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
 		2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */; };
 		302EFB0F1A9C9E4BFC2C13F6 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B95702D3FB16E882BF8E3F9 /* FlowLayout.swift */; };
+		31D9F65E51B20F61260F722A /* HealthSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C698900CF6774CF078D13616 /* HealthSync.swift */; };
 		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
 		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
@@ -119,6 +120,7 @@
 		AC8A7F0156E886437433E203 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
 		B4E60CD7DDA97B7D6E1C118C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C698900CF6774CF078D13616 /* HealthSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthSync.swift; sourceTree = "<group>"; };
 		CAE8CC59433E740F466264C6 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		CD792AC9EF71C813B550654E /* CoachStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachStageView.swift; sourceTree = "<group>"; };
 		D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info-Prod.plist"; sourceTree = "<group>"; };
@@ -206,6 +208,7 @@
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
 				7701CCF07727848BE39DE49A /* AudioHub.swift */,
 				FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */,
+				C698900CF6774CF078D13616 /* HealthSync.swift */,
 				5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */,
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */,
@@ -450,6 +453,7 @@
 				302EFB0F1A9C9E4BFC2C13F6 /* FlowLayout.swift in Sources */,
 				8C0DBA5370D46A7D67B5553B /* Gear.swift in Sources */,
 				2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */,
+				31D9F65E51B20F61260F722A /* HealthSync.swift in Sources */,
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
 				DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */,
 				7FFE32B5ACB8BB3E25F08D85 /* LiveWorkoutCard.swift in Sources */,
@@ -621,6 +625,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-staging.cloudfunctions.net";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MYO saves your finished workouts to Apple Health so they count toward your activity.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -653,6 +658,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = MYO;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-prod.cloudfunctions.net";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MYO saves your finished workouts to Apple Health so they count toward your activity.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
