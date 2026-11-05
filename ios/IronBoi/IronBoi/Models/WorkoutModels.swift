@@ -54,9 +54,38 @@ struct PlannedWorkoutDay: Equatable, Identifiable {
     // temporary coach adjustment) rather than the repeating template —
     // drives the ADJUSTED tag on the Train tab card.
     var isAdjusted: Bool = false
+    // Their runs this day (people who run: the lifting is fitted around them).
+    var runs: [PlannedRun] = []
 
     var totalSets: Int {
         exercises.reduce(0) { $0 + $1.sets }
+    }
+}
+
+struct PlannedRun: Equatable, Identifiable, Hashable {
+    var id: String { label + (note ?? "") }
+
+    let kind: String
+    let distanceMi: Double?
+    let durationMin: Int?
+    let note: String?
+
+    /// "Easy run · 2 mi", "Long run · 45 min".
+    var label: String {
+        let name: String
+        switch kind {
+        case "long": name = "Long run"
+        case "steady": name = "Steady run"
+        case "intervals": name = "Intervals"
+        case "walk_run": name = "Walk-run"
+        default: name = "Easy run"
+        }
+        var parts = [name]
+        if let distanceMi {
+            parts.append(distanceMi == distanceMi.rounded() ? "\(Int(distanceMi)) mi" : String(format: "%.2g mi", distanceMi))
+        }
+        if let durationMin { parts.append("\(durationMin) min") }
+        return parts.joined(separator: " · ")
     }
 }
 

@@ -25,6 +25,13 @@ enum WorkoutVoice {
     /// `from`: the count already reached before this transcript began — real
     /// counting spans pauses, and the recognizer restarts between them.
     static func repCount(in transcript: String, from start: Int = 0) -> Int {
+        // "It was 2 sets at 10 reps", "50 pounds": describing, not counting.
+        let words = tokens(transcript)
+        let numbers = words.compactMap { Int($0) ?? numberWords[$0] }
+        let runsOn = zip(numbers, numbers.dropFirst()).contains { $1 == $0 + 1 }
+        if !runsOn, words.contains(where: { $0.range(of: #"^(sets?|reps?|pounds?|lbs?|kilos?|kg|kgs)$"#, options: .regularExpression) != nil }) {
+            return start
+        }
         // Every number-ish word, in order, with whether it was a clear
         // number or only sounds like one ("to", "for").
         let heard: [(value: Int, soundAlike: Bool)] = expanded(tokens(transcript), after: start).compactMap { token in
@@ -100,6 +107,25 @@ enum WorkoutVoice {
         // recogniser makes of "set done" in a gym.
         return t.range(of: #"\b(done|finished|that's it|that is it|set complete|that's the set|got it|last one|sat down|shut down|set down|said done|said that|sit down|sets done|set's done|that's done|all done)\b"#,
                        options: .regularExpression) != nil
+    }
+
+    /// Mid-workout, worth the coach's attention without "MYO" first. The mic
+    /// hears the gym: "E", "Hey", "What? Two.", "There she is." went to the
+    /// coach and set off a loop of "did you mean…?" (2026-10-15). Fragments
+    /// and stray words are dropped; a real question, a yes or no to the
+    /// coach's question, or something about the workout gets through.
+    static func worthSendingMidWorkout(_ transcript: String, justAsked: Bool) -> Bool {
+        let words = tokens(transcript)
+        let filler: Set<String> = ["uh", "um", "umm", "ah", "oh", "e", "a", "an", "the", "and", "so", "like", "what",
+                                   "hey", "yo", "nah", "bon", "dam", "damn", "huh", "hmm", "mm", "okay", "ok", "wow", "man"]
+        let meaningful = words.filter { !filler.contains($0) && Int($0) == nil && numberWords[$0] == nil }
+        let t = normalized(transcript)
+        func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
+        if justAsked, says(#"^\W*(yes|yeah|yep|yup|no|nope|sure|correct|right|exactly|that's right)\b"#) { return true }
+        guard meaningful.count >= 2 else { return false }
+        let aboutWorkout = says(#"\b(heavy|heavier|light|lighter|weight|pounds?|lbs?|kilos?|reps?|sets?|hurts?|hurting|pain|sore|tired|form|next|skip|swap|done|finish|knee|back|shoulder|elbow|wrist|hip|ankle|neck|rest|break|water|easier|harder|instead|change|demo|show)\b"#)
+        if justAsked || aboutWorkout { return true }
+        return meaningful.count >= 3 && (isQuestionOrRequest(transcript) || words.count >= 6)
     }
 
     /// Mid-count, something that isn't a number and isn't "done": a question
@@ -254,7 +280,7 @@ enum WorkoutVoice {
     /// eight", "all sets done" — for when you didn't count out loud. Needs
     /// the word "set", so a bare "done" (finishing the workout?) isn't one.
     static func setsLogged(in transcript: String) -> SetsLogged? {
-        let t = normalized(transcript)
+        let t = heardAsSetDone(normalized(transcript))
         func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
         // "How many sets did I do?", "two sets left" — questions and counts
         // of what's to come aren't logging anything.
@@ -263,7 +289,7 @@ enum WorkoutVoice {
             return nil
         }
         guard says(#"\bsets?\b"#),
-              says(#"\b(done|finished|finish|complete|completed|did|that's|got|knocked out|logged)\b"#) else { return nil }
+              says(#"\b(done|finished|finish|complete|completed|did|that's|got|knocked out|logged|was|were)\b"#) else { return nil }
         let reps = number(before: #"\s*(reps?|times)\b"#, in: t) ?? number(after: #"\bsets? of\s+"#, in: t)
         if says(#"\b(all|every|remaining)( the| my| of my| of the)? sets\b"#) || says(#"\ball done\b"#) {
             return SetsLogged(sets: nil, reps: reps)
@@ -287,11 +313,29 @@ enum WorkoutVoice {
         return Int(word) ?? numberWords[word]
     }
 
+    /// What the recogniser makes of "set done" in a gym — "said done",
+    /// "sat down", "parents come, said done" — read back as "set done", so
+    /// a set logs without counting. Only the phrase on its own (or at the
+    /// end of what you said) is rewritten; "I sat down on the bench" isn't.
+    static func heardAsSetDone(_ t: String) -> String {
+        t.replacingOccurrences(
+            of: #"\b(said|sat|sit|shut|set|sets|said that|cette|that)\s+(done|down|dun|don)\s*[.!]?\s*$"#,
+            with: "set done", options: .regularExpression)
+    }
+
+
     // MARK: - Helpers
 
     private static func normalized(_ text: String) -> String {
         text.lowercased()
             .replacingOccurrences(of: "’", with: "'")
+            // The recogniser writes "50 pound" as "£50": a weight, not money.
+            .replacingOccurrences(of: #"£\s*(\d+(\.\d+)?)(\s*pounds?)?"#, with: "$1 pounds", options: .regularExpression)
+    }
+
+    /// "I did it with 50", "that was 50 pounds": about sets already done.
+    static func isPastTense(_ transcript: String) -> Bool {
+        normalized(transcript).range(of: #"\b(did|was|were|used|went|lifted|had|been)\b"#, options: .regularExpression) != nil
     }
 
     private static func tokens(_ text: String) -> [String] {

@@ -145,3 +145,25 @@ describe("what they like to do", () => {
     expect(draft?.activities).toEqual(["lift", "run"]);
   });
 });
+
+describe("an answer for a later question", () => {
+  beforeAll(() => {
+    app = getApps()[0] ?? initializeApp({ projectId: "demo-ironboi-security" });
+    db = getFirestore(app);
+  });
+  beforeEach(async () => {
+    await db.recursiveDelete(db.doc(`users/${USER_ID}`));
+  });
+
+  it("gear said early is kept for the gear question, which is then already answered", async () => {
+    await answer("Build muscle", { goals: ["muscle_gain"] });
+    clock += 1000;
+    await processOnboardingAnswer(db, USER_ID, {
+      content: "I have kettlebells, dumbbells, barbells, a punching bag and bands",
+      timestamp: new Date(clock).toISOString(), inputMode: "voice", field: "equipment",
+    }, seed.DEFAULT_PLAN);
+    const draft = (await db.doc(profilePath(USER_ID)).get()).get("onboardingDraft");
+    expect(draft.equipment).toEqual(expect.arrayContaining(["kettlebells", "dumbbells", "barbell"]));
+    expect(draft.goals).toEqual(["muscle_gain"]);
+  });
+});

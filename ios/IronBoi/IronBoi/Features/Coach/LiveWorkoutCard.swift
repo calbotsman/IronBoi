@@ -306,14 +306,14 @@ struct LiveWorkoutCard: View {
     /// "3 × 10", "3 × 30 s" for a hold, "20 min" for a cardio block.
     static func targetText(_ exercise: ActiveWorkoutExercise) -> String {
         if ExerciseKnowledge.isCardio(exercise.name) {
-            return ExerciseKnowledge.durationText(seconds: exercise.targetReps * max(1, exercise.targetSets))
+            return ExerciseKnowledge.durationText(seconds: ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps) * max(1, exercise.targetSets))
         }
         return "\(exercise.targetSets) × \(exercise.targetReps)\(ExerciseKnowledge.isTimed(exercise.name) ? " s" : "")"
     }
 
     private func nextSetLine(_ exercise: ActiveWorkoutExercise) -> String {
         if ExerciseKnowledge.isCardio(exercise.name) {
-            return "\(ExerciseKnowledge.durationText(seconds: exercise.targetReps)) · say go to start the timer"
+            return "\(ExerciseKnowledge.durationText(seconds: ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps))) · starts when you're moving, or say go"
         }
         let next = min(exercise.completedSetCount + 1, exercise.targetSets)
         let weight = appModel.workingWeight(for: exercise)

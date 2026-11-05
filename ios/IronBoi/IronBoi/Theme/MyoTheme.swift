@@ -275,6 +275,22 @@ enum CoachVoiceOption {
         Voice(name: "Algieba", female: false, feel: .calm),
     ]
 
+    /// What each voice says when you try it — its own line, so switching
+    /// voices never sounds like the same thing again.
+    static func sample(for name: String) -> String {
+        switch name {
+        case "Sulafat": return "Hey, I'm your coach. We'll build this together, one session at a time."
+        case "Laomedeia": return "Let's go! Two more good sets and you're done for today."
+        case "Kore": return "Brace, breathe, drive. That's what a good rep looks like."
+        case "Achernar": return "Nice and steady. Take all the time you need between sets."
+        case "Achird": return "Good to meet you. I'll keep it simple and keep you moving."
+        case "Puck": return "Alright! Let's make today a good one. You ready?"
+        case "Orus": return "Feet planted. Chest up. Now push. No shortcuts."
+        case "Algieba": return "Breathe out on the effort. Slow on the way down. You've got this."
+        default: return voice(named: name).feel.sample
+        }
+    }
+
     static func voice(named name: String) -> Voice {
         all.first { $0.name == name } ?? all[0]
     }

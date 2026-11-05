@@ -14,10 +14,24 @@ struct ExerciseKnowledge: Equatable {
     /// Kept in step with the server catalog's `timed` (a test checks).
     static let timed: Set<String> = ["Plank", "Side Plank", "Hollow Body Hold", "Wall Sit", "Superman Hold", "Sandbag Carry", "Farmer Carry", "Suitcase Carry", "Yoga Flow"]
 
+    /// A fat-loss plan prescribes these in MINUTES (reps 30 = 30 minutes,
+    /// functions/src/onboarding/flow.ts addFatLossWork) so the plan-change
+    /// tool's reps cap still fits; every other timed item is in seconds.
+    /// `seconds` reads a target of 90 or less on these as minutes. What's
+    /// logged is always seconds (the server's durationSec).
+    static let legacyMinutes: Set<String> = ["Zone 2 Walk/Jog", "Incline Walk"]
+
+    /// How long one timed set lasts, in seconds: a hold tops out at ten
+    /// minutes, cardio at three hours.
+    static func seconds(_ exerciseName: String, target: Int) -> Int {
+        if legacyMinutes.contains(exerciseName), target <= 90 { return max(1, target) * 60 }
+        return max(5, min(target, isCardio(exerciseName) ? 3 * 3600 : 600))
+    }
+
     /// A hold, a carry or a cardio block: "Plank", "Weighted Plank", "Farmer
     /// Carry", "Indoor Cycling".
     static func isTimed(_ exerciseName: String) -> Bool {
-        if timed.contains(exerciseName) || isCardio(exerciseName) { return true }
+        if timed.contains(exerciseName) || isCardio(exerciseName) || legacyMinutes.contains(exerciseName) { return true }
         let lower = exerciseName.lowercased()
         return timed.contains { lower.contains($0.lowercased()) }
     }

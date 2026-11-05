@@ -450,7 +450,7 @@ struct CoachVoicePicker: View {
             name = CoachVoiceOption.name(female: female, feel: feel)
         }
         chosen = true
-        onTry(feel.sample)
+        onTry(CoachVoiceOption.sample(for: name))
     }
 }
 

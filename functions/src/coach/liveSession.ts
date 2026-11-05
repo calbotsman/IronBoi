@@ -33,6 +33,13 @@ export const StartLiveCoachSessionRequest = z.object({
   resumeHandle: z.string().min(1).max(4096).optional(),
   // The person's pick from COACH_VOICES, so live sounds like spoken replies.
   voice: CoachVoiceChoice,
+  // Which live voice model: Gemini Live (default) or OpenAI Realtime, for
+  // an A/B. OpenAI only where IRONBOI_LIVE_OPENAI_ENABLED is on.
+  provider: z.enum(["gemini", "openai"]).optional(),
+  // The phone's own view that this is a handover. Advisory only (logged):
+  // the server decides from the user's last mint (isHandover), so a client
+  // can't claim the larger handover cap.
+  handover: z.boolean().optional(),
   // The phone has a cached memory brief (coach/memoryBrief.ts) built at this
   // time and sends it as the session's first [app] line, so the server
   // skips reading memory. Absent: the server puts its own copy in.
@@ -42,6 +49,8 @@ export const StartLiveCoachSessionRequest = z.object({
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";
 export const LIVE_VOICE_DEFAULT = "Kore";
 export const LIVE_MINTS_PER_DAY_DEFAULT = 40;
+/** Handovers (about one per 7.5 min of live talk) — roughly 25 hours a day. */
+export const LIVE_HANDOVERS_PER_DAY_DEFAULT = 200;
 const TOKEN_MINUTES = 15;
 const NEW_SESSION_SECONDS = 60;
 
@@ -82,6 +91,8 @@ export function liveSetup(args: { model: string; voice: string; prompt: string }
     model: `models/${args.model}`,
     generationConfig: {
       responseModalities: ["AUDIO"],
+      // Native-audio models pick their language themselves and don't take
+      // a languageCode; English is held by the prompt (LIVE_RULES).
       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: args.voice } } },
     },
     systemInstruction: { parts: [{ text: args.prompt }] },
@@ -123,14 +134,56 @@ export async function mintLiveToken(args: {
   return { token: body.name, expiresAt };
 }
 
-/** Counts a mint against the day's cap; false when the cap is reached. */
-export async function takeLiveMint(db: Firestore, userId: string, cap: number, now = new Date()): Promise<boolean> {
+// --- Which provider ----------------------------------------------------------
+// The OpenAI Realtime session itself (config, voices, client secret) lives in
+// liveOpenAI.ts; this is only the operator's default.
+
+/** Which provider live voice uses: OpenAI when the operator says so. */
+export function liveProvider(env: NodeJS.ProcessEnv = process.env): "openai" | "gemini" {
+  return env.IRONBOI_LIVE_PROVIDER === "openai" ? "openai" : "gemini";
+}
+
+/**
+ * A mint is a handover (its own, larger daily cap) only when the server
+ * can see one is plausible — never because the phone says so:
+ * - the user's previous mint is recent enough that its connection could
+ *   still be open: a Gemini connection lasts ~10 min on a 15-min token, an
+ *   OpenAI session at most 60 min (the phone hands over at 45), plus slack;
+ * - and it isn't right on top of it: real handovers come minutes apart (the
+ *   time limit) or on a network change, so anything within a minute of the
+ *   last mint is a fresh session, counted against the main cap.
+ */
+export const HANDOVER_WINDOW_MS = { gemini: 15 * 60_000, openai: 65 * 60_000 } as const;
+export const HANDOVER_MIN_SPACING_MS = 60_000;
+
+export function isHandover(lastMintAt: number | undefined, nowMs: number, provider: "gemini" | "openai"): boolean {
+  if (lastMintAt === undefined) return false;
+  const since = nowMs - lastMintAt;
+  return since >= HANDOVER_MIN_SPACING_MS && since <= HANDOVER_WINDOW_MS[provider];
+}
+
+/**
+ * Counts a mint against the day's cap. Whether it's a handover is decided
+ * here from the user's last mint (isHandover), not by the client.
+ */
+export async function takeLiveMint(
+  db: Firestore,
+  userId: string,
+  caps: { mints: number; handovers: number },
+  now = new Date(),
+  provider: "gemini" | "openai" = "gemini",
+): Promise<{ ok: boolean; handover: boolean }> {
   const ref = db.doc(usagePath(userId, `live-${todayUtcDateKey(now)}`));
+  const lastRef = db.doc(usagePath(userId, "live-last-mint"));
   return db.runTransaction(async (tx) => {
-    const used = ((await tx.get(ref)).get("liveMints") as number | undefined) ?? 0;
-    if (used >= cap) return false;
-    tx.set(ref, { liveMints: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    return true;
+    const [day, last] = await Promise.all([tx.get(ref), tx.get(lastRef)]);
+    const handover = isHandover(last.get("at") as number | undefined, now.getTime(), provider);
+    const counter = handover ? "liveHandovers" : "liveMints";
+    const used = (day.get(counter) as number | undefined) ?? 0;
+    if (used >= (handover ? caps.handovers : caps.mints)) return { ok: false, handover };
+    tx.set(ref, { [counter]: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    tx.set(lastRef, { at: now.getTime(), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { ok: true, handover };
   });
 }
 
@@ -231,6 +284,8 @@ const LIVE_RULES = [
   "- You are talking out loud, live. They can interrupt you; if they do, stop and listen. Keep replies to one to three spoken sentences unless they ask for more.",
   "- In live voice there is no <current_user_message> tag: the current message is whatever they're saying to you right now.",
   "- If they're counting reps, stay quiet. Never count for them.",
+  "- Always speak English. If what you hear sounds like another language, it's a mishearing in a noisy gym: answer in English, or ask them to say it again.",
+  "- The app says set results, rest times and the next exercise itself, in your voice, and tells you with an [app] line. Never repeat those; add something only if it's genuinely useful.",
   "- Speech gets misheard, especially in a gym. If a phrase doesn't make sense (\"leave a bench\" while they're on a row), take the closest sensible meaning given the exercise they're on and what was just said (\"lean on a bench\"), and answer that, naming your guess in passing. Only ask them to say it again if you truly can't tell.",
   "- Keep the thread: a follow-up (\"can I…\", \"what about…\", \"show me\") is about the exercise or topic you were just talking about.",
   "- When they ask you to show them, call show_exercise and talk them through it while it plays.",
