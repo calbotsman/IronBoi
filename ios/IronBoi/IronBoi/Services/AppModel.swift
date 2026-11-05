@@ -1113,20 +1113,6 @@ final class AppModel: NSObject, ObservableObject {
         return setIndex + 1
     }
 
-    /// Raises a completed set's rep count — you kept counting past the
-    /// target. The extra reps are logged as done, so Coach sees you're
-    /// outgrowing the weight.
-    func updateSetReps(exerciseIndex: Int, setNumber: Int, reps: Int) {
-        let setIndex = setNumber - 1
-        guard var workout = activeWorkout,
-              workout.exercises.indices.contains(exerciseIndex),
-              workout.exercises[exerciseIndex].completedSets.indices.contains(setIndex)
-        else { return }
-        workout.exercises[exerciseIndex].completedSets[setIndex].reps = reps
-        workout.updatedAt = Self.isoString(from: Date())
-        activeWorkout = workout
-    }
-
     /// The weight the user is actually working at for this exercise.
     ///
     /// Applies to every set not already logged; sets already marked done keep

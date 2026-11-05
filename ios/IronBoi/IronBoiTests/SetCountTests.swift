@@ -116,4 +116,26 @@ final class SetCountTests: XCTestCase {
         _ = set.advance(to: 1, at: start.addingTimeInterval(40))
         XCTAssertEqual(set.repsToLog, 8)
     }
+
+    func testMicReopensOnceRepsStopWhileSetStaysOpen() {
+        var set = SetCount(exercise: 0, target: 10, eachSide: false)
+        _ = counted(&set, to: 11, gap: 1)
+        XCTAssertEqual(set.repsStoppedAfter, SetCount.stoppedFloor)
+        XCTAssertLessThan(set.repsStoppedAfter, set.quietWindow)
+        XCTAssertEqual(set.lastRepAt, start.addingTimeInterval(10))
+    }
+
+    func testMicReopensLaterForSlowReps() {
+        var set = SetCount(exercise: 0, target: 10, eachSide: false)
+        _ = counted(&set, to: 10, gap: 4)
+        XCTAssertEqual(set.repsStoppedAfter, 4 * SetCount.stoppedAllowance, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(set.repsStoppedAfter, set.quietWindow)
+    }
+
+    func testMicNeverReopensAfterTheSetCloses() {
+        var set = SetCount(exercise: 0, target: 10, eachSide: false)
+        _ = set.advance(to: 1, at: start)
+        _ = set.advance(to: 2, at: start.addingTimeInterval(SetCount.longestQuiet))
+        XCTAssertEqual(set.repsStoppedAfter, set.quietWindow)
+    }
 }

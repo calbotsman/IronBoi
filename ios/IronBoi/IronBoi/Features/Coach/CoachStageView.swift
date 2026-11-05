@@ -205,6 +205,7 @@ struct CoachStageView: View {
         stage.onChange(of: appModel.showExerciseRequest) { _, request in
             if let request { demo(request.name) }
         }
+        .onChange(of: live.heard) { _, heard in liveHeard(heard) }
         .modifier(LiveContextSync(
             restEndsAt: restEndsAt,
             contextNote: appModel.liveContextNote,
@@ -1608,15 +1609,35 @@ struct CoachStageView: View {
         }
         // Quiet for a while → the set's over. How long depends on where you
         // are (short of the target, a pause is a breath) and your pace.
-        closeCount(after: tally.quietWindow)
+        closeCount(after: tally.quietWindow, reopenAfter: tally.repsStoppedAfter)
     }
 
-    private func closeCount(after seconds: TimeInterval) {
+    /// Once reps stop (`reopenAfter`), the live coach hears you again — it
+    /// isn't kept deaf for the whole close window. Another number mutes it
+    /// again; talking to it closes the set right away (see `liveHeard`).
+    private func closeCount(after seconds: TimeInterval, reopenAfter: TimeInterval? = nil) {
         closeCountTask?.cancel()
         closeCountTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            var waited: TimeInterval = 0
+            if let reopen = reopenAfter, reopen < seconds {
+                try? await Task.sleep(nanoseconds: UInt64(reopen * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                if live.isActive { live.setUplinkMuted(false) }
+                waited = reopen
+            }
+            try? await Task.sleep(nanoseconds: UInt64((seconds - waited) * 1_000_000_000))
             if !Task.isCancelled { finishCount() }
         }
+    }
+
+    /// The live coach heard you while a set was still open (its mic reopens
+    /// once reps stop): you're talking, not counting, so the set's over now.
+    private func liveHeard(_ heard: String) {
+        guard live.isActive, !live.uplinkMuted, setCount != nil,
+              !heard.trimmingCharacters(in: .whitespaces).isEmpty,
+              !WorkoutVoice.looksLikeCounting(heard, running: true) else { return }
+        AudioHub.log("set closed: talking to the live coach")
+        finishCount()
     }
 
     /// One side done on an each-side lift: count the other from one. If the
@@ -1673,7 +1694,7 @@ struct CoachStageView: View {
             head = "Set \(setNumber) done."
         }
         var line = setDoneLine(head, exerciseIndex: countedIndex)
-        line += restLine(afterSetOn: countedIndex)
+        line += restLine(afterSetOn: countedIndex, since: finished.lastRepAt)
         if let interrupted = interruptedSpeech, !interrupted.isEmpty {
             line += " Want the rest of what I was saying?"
             resumeOffered = true
@@ -1801,23 +1822,25 @@ struct CoachStageView: View {
 
     /// Starts the rest if there's more work after this set, and returns the
     /// words for it. Nothing if the workout is done.
-    private func restLine(afterSetOn index: Int?) -> String {
+    /// `since`: when the set really ended (the last rep), so rest counts
+    /// from there rather than from when the quiet stretch closed it.
+    private func restLine(afterSetOn index: Int?, since: Date? = nil) -> String {
         guard let workout = appModel.activeWorkout, let index, workout.exercises.indices.contains(index) else { return "" }
         let exercise = workout.exercises[index]
         let moreOnThis = exercise.completedSetCount < exercise.targetSets
         let moreToCome = workout.exercises.indices.contains(index + 1)
         guard moreOnThis || moreToCome else { return "" }
         let seconds = Self.restSeconds(for: exercise)
-        startRest(seconds: seconds)
+        startRest(seconds: seconds, from: since ?? Date())
         return tips == .quiet ? "" : " Rest \(seconds == 90 ? "ninety" : "sixty") seconds."
     }
 
-    private func startRest(seconds: Int) {
+    private func startRest(seconds: Int, from start: Date = Date()) {
         restTask?.cancel()
-        let ends = Date().addingTimeInterval(TimeInterval(seconds))
+        let ends = min(Date(), start).addingTimeInterval(TimeInterval(seconds))
         restEndsAt = ends
         restTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
             guard !Task.isCancelled, restEndsAt == ends else { return }
             restEndsAt = nil
             UINotificationFeedbackGenerator().notificationOccurred(.success)

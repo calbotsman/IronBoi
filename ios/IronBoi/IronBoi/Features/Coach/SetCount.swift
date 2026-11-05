@@ -20,7 +20,9 @@ struct SetCount: Equatable {
     /// The slowest you've gone between two numbers this set (per rep, when
     /// the recogniser dropped a word and the count jumped).
     private(set) var slowestRep: TimeInterval = 0
-    private var lastRepAt: Date?
+    /// When the last number was heard: the set ended there, so rest
+    /// counts from it, not from when the quiet stretch ran out.
+    private(set) var lastRepAt: Date?
 
     init(exercise: Int, target: Int, eachSide: Bool) {
         self.exercise = exercise
@@ -75,6 +77,19 @@ struct SetCount: Equatable {
     static let paceAllowance = 2.0
     /// However slow the reps, this much quiet ends the set.
     static let longestQuiet: TimeInterval = 20
+
+    /// Quiet for longer than your slowest rep (by this much) means you've
+    /// stopped repping, at least for now.
+    static let stoppedAllowance = 1.5
+    /// Never sooner than this: a normal rep takes a second or two.
+    static let stoppedFloor: TimeInterval = 3
+
+    /// How long after the last number you've stopped repping. The coach's
+    /// ears reopen here — talking to it right after racking is heard —
+    /// while the set stays open a while longer in case of one more rep.
+    var repsStoppedAfter: TimeInterval {
+        min(quietWindow, max(Self.stoppedFloor, slowestRep * Self.stoppedAllowance))
+    }
 
     /// How long the mic must stay quiet before the set is over, from the
     /// last number heard. Scales with your own pace this set: grinding reps
