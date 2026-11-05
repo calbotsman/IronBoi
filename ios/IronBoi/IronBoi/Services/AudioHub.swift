@@ -27,7 +27,7 @@ final class AudioHub {
     /// The workout's done: a rising arpeggio.
     private lazy var fanfareBuffer = Self.tone([(523, 0.09), (659, 0.09), (784, 0.09), (1046, 0.28)], gain: 0.28)
     /// Coach's audio format: Cloud TTS LINEAR16 at 24 kHz, mono.
-    static let voiceFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
+    nonisolated static let voiceFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
 
     private var configured = false
     private var engineStarted = false
@@ -122,6 +122,15 @@ final class AudioHub {
     /// may be switched on or off to suit the current route.
     func start(reconfigure: Bool = false) throws {
         let session = AVAudioSession.sharedInstance()
+        // Already up exactly as wanted: nothing to do. Coach calls this
+        // before every line, and each full pass re-activated the session
+        // on the main thread (and logged), three times per reply.
+        if !reconfigure, sessionActive, engineStarted, engine.isRunning, !needsCategory(session) { return }
+        let began = Date()
+        defer {
+            let ms = Int(Date().timeIntervalSince(began) * 1000)
+            if ms >= 30 { Self.log("start took \(ms) ms") }
+        }
         // Before we take the session, the route is the system's own — if
         // headphones are on, it shows them.
         if !sessionActive {
@@ -408,7 +417,8 @@ final class AudioHub {
     }
 
     /// Decodes Cloud TTS WAV bytes into a buffer the player can schedule.
-    static func buffer(fromWAV data: Data) throws -> AVAudioPCMBuffer {
+    /// Off the main thread is fine (and better: it writes and reads a file).
+    nonisolated static func buffer(fromWAV data: Data) throws -> AVAudioPCMBuffer {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("coach-\(UUID().uuidString).wav")
         try data.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }

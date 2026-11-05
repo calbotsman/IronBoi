@@ -62,9 +62,11 @@
 		6DB49F0BFC0DB1170FA7DD83 /* MYOWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEAE0D8CCD1BA65F8D855558 /* MYOWatchApp.swift */; };
 		6F05B9718C79D1C4CEFB54C5 /* EffortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF08E19B82B68A9F1800268E /* EffortTests.swift */; };
 		70729DE4265CE75D0E245E11 /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DECCF4FA552889A83248A3 /* WorkoutModels.swift */; };
+		7343887AA1C1FAFFE8E0689C /* LiveVoicePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B17D034C332354469AA016 /* LiveVoicePolicy.swift */; };
 		74F7B5D37CFBCB62F3640E73 /* WorkoutEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083722ABB4FE380F28D66DF6 /* WorkoutEdits.swift */; };
 		772BF83112E39339AC2E9561 /* CoachStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD792AC9EF71C813B550654E /* CoachStageView.swift */; };
 		774C91A01115DF4BCCE7B596 /* SetCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */; };
+		7A2011631319A4C8C91958E6 /* LiveVoicePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73551C805B0044EC1F0C4D06 /* LiveVoicePolicyTests.swift */; };
 		7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */; };
 		7CE0660BBEDC99B11BB65681 /* MemoryFact.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */; };
 		7E148C16912BB7F38AACD81D /* RestActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F10C35335B09DF5C8E78766 /* RestActivity.swift */; };
@@ -111,6 +113,7 @@
 		D6E220C671AAFCB8B5F3D232 /* WatchWorkoutManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA46FC99CC577A73006B0CD /* WatchWorkoutManager.swift */; };
 		DDE287948E75C936D7F8D05A /* PlanReviewCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */; };
 		DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */; };
+		E12D9219931FCC256A09C96E /* LiveVoicePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91B17D034C332354469AA016 /* LiveVoicePolicy.swift */; };
 		E2611A41CD0A45F47F8F3234 /* CoachMix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040387C0316794F5C15D9648 /* CoachMix.swift */; };
 		E3EAE1F3A7C556888D745185 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */; };
 		E9B29F8FE79E94BC90A2A3FE /* WatchWorkoutLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A49F537763E309EA90847347 /* WatchWorkoutLink.swift */; };
@@ -216,6 +219,7 @@
 		681D85C3C6859F9383DA0385 /* ExerciseKnowledge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseKnowledge.swift; sourceTree = "<group>"; };
 		6CB267883F8AE6525B619F90 /* IronBoiTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = IronBoiTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveLibrary.swift; sourceTree = "<group>"; };
+		73551C805B0044EC1F0C4D06 /* LiveVoicePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoicePolicyTests.swift; sourceTree = "<group>"; };
 		73C5EE0407EB961F5B79622A /* DossierComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DossierComponents.swift; sourceTree = "<group>"; };
 		7471B86DB66DD6B54955497F /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
 		7475AB77513A49C9F500062D /* CoachContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachContext.swift; sourceTree = "<group>"; };
@@ -230,6 +234,7 @@
 		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		8E6486137A4FFFD180E600A3 /* TypeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypeBar.swift; sourceTree = "<group>"; };
+		91B17D034C332354469AA016 /* LiveVoicePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoicePolicy.swift; sourceTree = "<group>"; };
 		92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeLife.swift; sourceTree = "<group>"; };
 		94B79E936F7D5DE0FAA86D63 /* HeartStrapConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeartStrapConnector.swift; sourceTree = "<group>"; };
 		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
@@ -351,6 +356,7 @@
 			children = (
 				DF08E19B82B68A9F1800268E /* EffortTests.swift */,
 				C8BF537C304698B396A4D0BC /* ExerciseMotionShim.swift */,
+				73551C805B0044EC1F0C4D06 /* LiveVoicePolicyTests.swift */,
 				A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */,
 				B22248F2FDB989898C274F26 /* WeightLoadTests.swift */,
 			);
@@ -390,6 +396,7 @@
 				C698900CF6774CF078D13616 /* HealthSync.swift */,
 				5F6293ACFF569B8D8169B9BE /* HeartRateMeasurement.swift */,
 				94B79E936F7D5DE0FAA86D63 /* HeartStrapConnector.swift */,
+				91B17D034C332354469AA016 /* LiveVoicePolicy.swift */,
 				5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */,
 				57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */,
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
@@ -763,6 +770,7 @@
 				FA5ED921350DA344444F6C3A /* HeartZones.swift in Sources */,
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
 				9958D935D8CDAD73CED74B68 /* LiveStatsPill.swift in Sources */,
+				7343887AA1C1FAFFE8E0689C /* LiveVoicePolicy.swift in Sources */,
 				DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */,
 				7FFE32B5ACB8BB3E25F08D85 /* LiveWorkoutCard.swift in Sources */,
 				45B2225415238550102F6499 /* MemoryBriefCache.swift in Sources */,
@@ -842,6 +850,8 @@
 				6F05B9718C79D1C4CEFB54C5 /* EffortTests.swift in Sources */,
 				D197BCAB78C19472943E6B8F /* ExerciseKnowledge.swift in Sources */,
 				FAC3331659CDF488408A0A3B /* ExerciseMotionShim.swift in Sources */,
+				E12D9219931FCC256A09C96E /* LiveVoicePolicy.swift in Sources */,
+				7A2011631319A4C8C91958E6 /* LiveVoicePolicyTests.swift in Sources */,
 				071A7CE1BFDA0289D53B2D43 /* SessionAlternatives.swift in Sources */,
 				EB61595884711817A062E761 /* SetCount.swift in Sources */,
 				774C91A01115DF4BCCE7B596 /* SetCountTests.swift in Sources */,
