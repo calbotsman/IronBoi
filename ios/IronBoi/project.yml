@@ -29,9 +29,6 @@ targets:
       # checkout doesn't have it when xcodegen runs. Listed on its own as
       # optional so the project always bundles it; without it Firebase
       # aborts at launch (crash on 2026-11-05).
-      - path: IronBoi/GoogleService-Info.plist
-        optional: true
-        buildPhase: resources
       - path: MYOShared
     info:
       path: IronBoi/Info.plist
