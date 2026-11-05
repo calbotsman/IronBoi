@@ -825,7 +825,8 @@ struct CoachStageView: View {
                     }
                     if currentExercise.map({ ExerciseKnowledge.isTimed($0.name) }) == true {
                         if holdEndsAt == nil {
-                            quickTap("Start hold", systemImage: "timer") { startHold() }
+                            quickTap(currentExercise.map { ExerciseKnowledge.isCardio($0.name) } == true ? "Start timer" : "Start hold",
+                                     systemImage: "timer") { startHold() }
                         } else {
                             quickTap("Done", systemImage: "checkmark") { finishHold(early: true) }
                         }
@@ -1237,7 +1238,8 @@ struct CoachStageView: View {
     private var statusLine: String {
         if let holdEndsAt, appModel.activeWorkout != nil {
             let left = max(0, Int(holdEndsAt.timeIntervalSinceNow.rounded(.up)))
-            return String(format: "Hold · %d:%02d", left / 60, left % 60)
+            let label = currentExercise.map { ExerciseKnowledge.isCardio($0.name) } == true ? "Cardio" : "Hold"
+            return String(format: "%@ · %d:%02d", label, left / 60, left % 60)
         }
         if let restEndsAt, appModel.activeWorkout != nil {
             let left = max(0, Int(restEndsAt.timeIntervalSinceNow.rounded(.up)))
@@ -1695,9 +1697,18 @@ struct CoachStageView: View {
     private func handleHoldCommand(_ text: String) -> Bool {
         guard let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return false }
         let t = text.lowercased()
+        // "Add a run now" adds one; it doesn't start this timer.
+        if holdEndsAt == nil, WorkoutEdit.cardioRequest(t) != nil { return false }
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         if holdEndsAt != nil {
-            guard says(#"\b(done|stop|finished|that's it|that's all|enough|can't|cannot|i'm out|im out)\b"#) else { return false }
+            // A cardio block runs for minutes while you chat: only a clear
+            // "done" ends it, not "I can't hear the music".
+            if ExerciseKnowledge.isCardio(exercise.name) {
+                guard t.split(separator: " ").count <= 6,
+                      says(#"\b(done|finished|stop the timer|stop|that's it|that's all)\b"#) else { return false }
+            } else {
+                guard says(#"\b(done|stop|finished|that's it|that's all|enough|can't|cannot|i'm out|im out)\b"#) else { return false }
+            }
             finishHold(early: true)
             return true
         }
@@ -1710,7 +1721,8 @@ struct CoachStageView: View {
     private func startHold() {
         guard holdEndsAt == nil, let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return }
         if restEndsAt != nil { cancelRest() }
-        let seconds = max(5, min(exercise.targetReps, 600))
+        let seconds = Self.holdSeconds(exercise)
+        let cardio = ExerciseKnowledge.isCardio(exercise.name)
         let start = Date()
         let ends = start.addingTimeInterval(TimeInterval(seconds))
         holdStartedAt = start
@@ -1718,7 +1730,9 @@ struct CoachStageView: View {
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         AudioHub.shared.play(cue: .tick)
         if speaksReplies, tips != .quiet {
-            voice.speak("Go. \(seconds) seconds.", messageId: "local-\(UUID().uuidString)")
+            let line = cardio ? "Go. \(ExerciseKnowledge.spokenDuration(seconds: seconds)). Say done when you're finished."
+                : "Go. \(seconds) seconds."
+            voice.speak(line, messageId: "local-\(UUID().uuidString)")
         }
         holdTask?.cancel()
         holdTask = Task {
@@ -1735,7 +1749,7 @@ struct CoachStageView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } else if !saidHalfway, seconds >= 30, left == seconds / 2, tips == .full, speaksReplies, !voice.isSpeaking {
                     saidHalfway = true
-                    voice.speak("Halfway. Breathe.", messageId: "local-\(UUID().uuidString)")
+                    voice.speak(cardio ? "Halfway. Keep it steady." : "Halfway. Breathe.", messageId: "local-\(UUID().uuidString)")
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -1749,18 +1763,28 @@ struct CoachStageView: View {
             cancelHold()
             return
         }
-        let target = max(5, min(exercise.targetReps, 600))
+        let target = Self.holdSeconds(exercise)
         let held = early ? max(1, min(target, Int(Date().timeIntervalSince(started).rounded()))) : target
         cancelHold()
         guard let set = appModel.completeNextSet(exerciseIndex: index, reps: held) else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         AudioHub.shared.play(cue: .target)
-        let head = held < target ? "Set \(set): \(held) seconds." : "Set \(set) done."
+        let head: String
+        if ExerciseKnowledge.isCardio(exercise.name) {
+            head = "\(exercise.name) done, \(ExerciseKnowledge.spokenDuration(seconds: held)) logged."
+        } else {
+            head = held < target ? "Set \(set): \(held) seconds." : "Set \(set) done."
+        }
         var line = setDoneLine(head, exerciseIndex: index)
         line += restLine(afterSetOn: index)
         markRestartHandled()
         voiceInput.stop()
         confirm(line)
+    }
+
+    /// How long the timer runs: a hold tops out at ten minutes, cardio at three hours.
+    private static func holdSeconds(_ exercise: ActiveWorkoutExercise) -> Int {
+        max(5, min(exercise.targetReps, ExerciseKnowledge.isCardio(exercise.name) ? 3 * 3600 : 600))
     }
 
     private func cancelHold() {
@@ -1816,6 +1840,8 @@ struct CoachStageView: View {
     private func handleRestCommand(_ text: String) -> Bool {
         guard restEndsAt != nil else { return false }
         let t = text.lowercased()
+        // "Add 20 minutes on the bike" is a cardio block, not more rest.
+        if WorkoutEdit.cardioRequest(t) != nil { return false }
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         if says(#"\b(skip|skip rest|skip the rest|go|ready|let's go|lets go|next set|i'm ready|im ready)\b"#), t.split(separator: " ").count <= 5 {
             cancelRest()
@@ -1856,6 +1882,16 @@ struct CoachStageView: View {
                 confirm("Added \(name). Let's do it now.")
             } else {
                 confirm("Added \(name), \(s) sets of \(r).")
+            }
+        case .addCardio(let name, let minutes, let now):
+            guard let index = appModel.addCardioBlock(name: name, minutes: minutes) else { return }
+            let length = ExerciseKnowledge.spokenDuration(seconds: minutes * 60)
+            let lowered = name.prefix(1) + name.dropFirst().lowercased()
+            if now || currentExerciseIndex == index {
+                appModel.focusExercise(index)
+                confirm("\(lowered), \(length). Let's do it now.")
+            } else {
+                confirm("Got it: \(lowered), \(length), added at the end.")
             }
         case .swap(let index, let name):
             let old = workout.exercises[index].name
@@ -2340,7 +2376,10 @@ struct CoachStageView: View {
             let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
             let side = WorkoutVoice.isEachSide(exercise.name) ? " each side" : ""
-            if ExerciseKnowledge.isTimed(exercise.name) {
+            if ExerciseKnowledge.isCardio(exercise.name) {
+                let length = ExerciseKnowledge.spokenDuration(seconds: exercise.targetReps * max(1, exercise.targetSets))
+                lines.append("\(lead), \(exercise.name). \(length). Say go when you start, and done when you're finished.")
+            } else if ExerciseKnowledge.isTimed(exercise.name) {
                 lines.append("\(lead), \(exercise.name). \(exercise.targetSets) holds of \(exercise.targetReps) seconds\(side)\(load). Say go when you're set.")
             } else {
                 lines.append("\(lead), \(exercise.name). \(exercise.targetSets) sets of \(exercise.targetReps)\(side)\(load).")

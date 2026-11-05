@@ -119,6 +119,30 @@ describe("finishWorkoutSession records what was actually lifted", () => {
     expect(set.reps).toBe(8); // falls back to the prescription
   });
 
+  it("logs a cardio block added mid-workout as time", async () => {
+    // "I'm adding indoor cycling to my workout today": the app appends a
+    // one-set timed block whose reps are seconds (20 min = 1200).
+    const started = await startSession();
+    const result = (await finishWorkoutSession(db, USER_ID, {
+      sessionId: started.sessionId,
+      completedAt: "2026-07-28T18:00:00.000Z",
+      exercises: [
+        {
+          exerciseIndex: 2,
+          name: "Indoor Cycling",
+          targetSets: 1,
+          targetReps: 1200,
+          targetWeight: 0,
+          exerciseDone: true,
+          completedSets: [{ setIndex: 0, completed: true, reps: 1080 }],
+        },
+      ],
+    })) as { workoutLog: { exercises: { name: string; sets: { reps: number; durationSec?: number; loadKg?: number }[] }[] } };
+    const block = result.workoutLog.exercises[0];
+    expect(block.name).toBe("Indoor Cycling");
+    expect(block.sets).toEqual([{ reps: 1080, durationSec: 1080 }]);
+  });
+
   it("logs only completed sets", async () => {
     const result = (await finishWith([
       { completed: true, weight: 135, reps: 8 },

@@ -2,8 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  CARDIO_PATTERN,
+  NOT_CARDIO_PATTERN,
   allExercises,
   canonicalMuscle,
+  isCardioExercise,
+  isTimedExercise,
   isValidSwap,
   lookupExercise,
   normalizeExerciseKey,
@@ -243,6 +247,14 @@ describe("server catalog ↔ iOS ExerciseKnowledge drift", () => {
     expect([...ios].sort()).toEqual([...server].sort());
   });
 
+  it("the cardio words agree between the catalog and iOS", () => {
+    const swiftPattern = (name: string) =>
+      swift.match(new RegExp(`static let ${name} = #"([^"]*)"#`))?.[1];
+    // Swift raw strings hold single backslashes; the TS strings already do.
+    expect(swiftPattern("cardioPattern")).toBe(CARDIO_PATTERN);
+    expect(swiftPattern("notCardioPattern")).toBe(NOT_CARDIO_PATTERN);
+  });
+
   it("muscle lists agree between the catalog and iOS", () => {
     const ios = parseSwiftEntries();
     for (const entry of allExercises()) {
@@ -259,5 +271,23 @@ describe("catalog integrity", () => {
   it("has no duplicate exercise keys", () => {
     const keys = allExercises().map((entry) => normalizeExerciseKey(entry.name));
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe("cardio blocks", () => {
+  // Added mid-workout by voice ("I'm adding indoor cycling today", "20
+  // minutes on the bike", "a run at the end"): one timed set, reps in seconds.
+  it("recognises cardio by name and treats it as timed", () => {
+    for (const name of ["Indoor Cycling", "Cycling", "Run", "Rowing", "Treadmill Walk", "Assault Bike", "Elliptical", "Stair Climber", "Incline Walk"]) {
+      expect(isCardioExercise(name), name).toBe(true);
+      expect(isTimedExercise(name), name).toBe(true);
+    }
+  });
+
+  it("leaves lifts that share a cardio word alone", () => {
+    for (const name of ["Walking Lunges", "Walking Lunge", "Farmer Carry", "Bent-over Barbell Row", "Barbell Back Squat", "Plank"]) {
+      expect(isCardioExercise(name), name).toBe(false);
+    }
+    expect(isTimedExercise("Barbell Back Squat")).toBe(false);
   });
 });
