@@ -77,7 +77,7 @@ struct RecordView: View {
             break
         }
         if let pr = logs.heaviestLift {
-            out.append(("\(pr.pounds) lb", pr.name))
+            out.append((WeightLoad.label(Double(pr.pounds), for: pr.name), pr.name))
         }
         return out
     }

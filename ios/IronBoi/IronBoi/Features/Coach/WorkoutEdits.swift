@@ -15,7 +15,8 @@ enum WorkoutEdit: Equatable {
     case swapForSomething(Int)
     case skip(Int)
     case jump(Int)
-    case targets(Int, sets: Int?, reps: Int?)
+    /// `eachSide`: "10 reps each side" — the reps are per side.
+    case targets(Int, sets: Int?, reps: Int?, eachSide: Bool = false)
     case finish
 
     static func parse(_ transcript: String, exercises: [ActiveWorkoutExercise], current: Int?) -> WorkoutEdit? {
@@ -105,12 +106,14 @@ enum WorkoutEdit: Equatable {
            let index = find(m[0]), index != current {
             return .jump(index)
         }
+        // "10 reps each side", "do 8 per leg": the reps are per side.
+        let perSide = first(#"\b(?:each|per|a|on each) (?:side|leg|arm)\b"#) != nil
         if let current, first(#"\b(make it|make that|let's do|lets do|i'll do|do|change (?:it|this|that) to|switch to|going to do|gonna do)\b"#) != nil
-            || t.contains("instead") {
+            || t.contains("instead") || perSide {
             let (sets, reps) = setsAndReps(in: t)
             if sets != nil || reps != nil {
                 let target = first(#"\bfor (?:the )?([a-z -]+)$"#).flatMap { find($0[0]) } ?? current
-                return .targets(target, sets: sets, reps: reps)
+                return .targets(target, sets: sets, reps: reps, eachSide: perSide && reps != nil)
             }
         }
         return nil

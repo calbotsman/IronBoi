@@ -102,6 +102,9 @@ struct ActiveWorkoutExercise: Codable, Equatable, Identifiable {
     var completedSets: [ActiveWorkoutSet]
     var exerciseDone: Bool
     var notes: String?
+    /// Reps are per side, said mid-workout ("10 reps each side"); nil = the
+    /// exercise's own default (ExerciseKnowledge.isUnilateral).
+    var eachSide: Bool? = nil
 
     var completedSetCount: Int {
         completedSets.filter(\.completed).count
@@ -119,6 +122,9 @@ struct ActiveWorkoutSet: Codable, Equatable, Identifiable {
     // progress layer (tonnage, Epley e1RM) silently had no data to read.
     var reps: Int?
     var weight: Double?
+    /// A one-side-at-a-time lift: each side's reps (`reps` is the fewer).
+    var leftReps: Int? = nil
+    var rightReps: Int? = nil
 }
 
 struct StartWorkoutResponse: Decodable {

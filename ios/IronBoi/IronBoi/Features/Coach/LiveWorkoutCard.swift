@@ -278,7 +278,7 @@ struct LiveWorkoutCard: View {
             stepButton("minus", label: "Less weight") {
                 appModel.setWorkoutExerciseWeight(exerciseIndex: exercise.exerciseIndex, weight: weight - 5)
             }
-            Text("\(Self.pounds(weight)) lb")
+            Text(WeightLoad.label(weight, for: exercise.name))
                 .font(.system(.footnote, design: .monospaced).weight(.semibold))
                 .foregroundStyle(MyoColor.Text.primary.color)
                 .frame(minWidth: 54)
@@ -317,13 +317,9 @@ struct LiveWorkoutCard: View {
         }
         let next = min(exercise.completedSetCount + 1, exercise.targetSets)
         let weight = appModel.workingWeight(for: exercise)
-        let load = weight > 0 ? " · \(Self.pounds(weight)) lb" : ""
+        let load = weight > 0 ? " · \(WeightLoad.label(weight, for: exercise.name))" : ""
         let target = ExerciseKnowledge.isTimed(exercise.name) ? "\(exercise.targetReps) s hold" : "\(exercise.targetReps) reps"
         return "Set \(next) of \(exercise.targetSets) · \(target)\(load)"
-    }
-
-    static func pounds(_ weight: Double) -> String {
-        weight.truncatingRemainder(dividingBy: 1) == 0 ? String(Int(weight)) : String(format: "%.1f", weight)
     }
 }
 

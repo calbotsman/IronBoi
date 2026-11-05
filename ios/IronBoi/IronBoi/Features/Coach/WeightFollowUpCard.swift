@@ -25,7 +25,7 @@ struct WeightFollowUpCard: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(MyoColor.Text.primary.color)
                         Spacer()
-                        Text("\(LiveWorkoutCard.pounds(s.fromLb)) → \(LiveWorkoutCard.pounds(s.toLb)) lb")
+                        Text(WeightLoad.change(from: s.fromLb, to: s.toLb, for: s.exerciseName))
                             .font(.system(.subheadline, design: .monospaced).weight(.semibold))
                             .foregroundStyle(s.toLb > s.fromLb ? MyoTheme.Colors.ochre : MyoColor.Text.secondary.color)
                     }

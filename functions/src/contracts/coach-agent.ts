@@ -88,6 +88,8 @@ export const LiveWorkoutState = z.object({
   targetReps: z.number().int().min(0).max(200),
   weightLb: z.number().min(0).max(2000).optional(),
   repsCountedThisSet: z.number().int().min(0).max(200).optional(),
+  /** Reps are per side: the set is a left and a right. */
+  eachSide: z.boolean().optional(),
   exercises: z.array(z.string().min(1).max(80)).max(30),
 }).strict();
 export type LiveWorkoutState = z.infer<typeof LiveWorkoutState>;
@@ -420,6 +422,9 @@ export const WorkoutLog = z.object({
             z.object({
               reps: z.number().int().nonnegative().optional(),
               loadKg: z.number().nonnegative().optional(),
+              // One side at a time: each side's reps (`reps` is the fewer).
+              leftReps: z.number().int().nonnegative().optional(),
+              rightReps: z.number().int().nonnegative().optional(),
               durationSec: z.number().int().nonnegative().optional(),
               distanceM: z.number().nonnegative().optional(),
               rpe: z.number().min(1).max(10).optional(),
@@ -527,6 +532,9 @@ export const ActiveWorkoutSet = z.object({
   completed: z.boolean().default(false),
   reps: z.number().int().nonnegative().optional(),
   weight: z.number().nonnegative().optional(),
+  // A one-side-at-a-time lift: each side's reps (`reps` is the fewer).
+  leftReps: z.number().int().nonnegative().max(500).optional(),
+  rightReps: z.number().int().nonnegative().max(500).optional(),
 }).strict();
 
 export const ActiveWorkoutExercise = z.object({
@@ -538,6 +546,9 @@ export const ActiveWorkoutExercise = z.object({
   completedSets: z.array(ActiveWorkoutSet).default([]),
   exerciseDone: z.boolean().default(false),
   notes: z.string().optional(),
+  // Reps are per side ("10 reps each side"), set by the user mid-workout;
+  // absent = the exercise's own default (catalog `unilateral`).
+  eachSide: z.boolean().optional(),
 }).strict();
 
 export const ActiveWorkoutSession = z.object({

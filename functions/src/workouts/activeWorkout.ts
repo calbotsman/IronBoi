@@ -252,6 +252,8 @@ export async function finishWorkoutSession(
           return {
             reps,
             ...(loadKg !== undefined ? { loadKg } : {}),
+            ...(set.leftReps !== undefined ? { leftReps: set.leftReps } : {}),
+            ...(set.rightReps !== undefined ? { rightReps: set.rightReps } : {}),
             // A hold, a carry or a cardio block is done for time: its reps
             // are seconds, so the log says so too ("Indoor Cycling", 1200 s).
             ...(isTimedExercise(exercise.name) ? { durationSec: reps } : {}),

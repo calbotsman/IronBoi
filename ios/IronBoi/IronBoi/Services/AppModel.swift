@@ -16,6 +16,8 @@ final class AppModel: NSObject, ObservableObject {
 
     @Published private(set) var user: User?
     @Published private(set) var messages: [CoachMessage] = []
+    /// The coach asked "up to what?" about a lift's weight (AppModel+WorkoutWeight).
+    @Published var weightQuestion: WeightQuestion?
     @Published private(set) var onboardingMessages: [CoachMessage] = []
     @Published private(set) var onboardingStatus: OnboardingStatus = .notStarted
     /// False until the first profile snapshot lands. Until then the app
@@ -447,6 +449,7 @@ final class AppModel: NSObject, ObservableObject {
                         ["name": $0.name, "primary": $0.primary, "equipment": $0.equipment, "reason": $0.reason] as [String: Any]
                     }]
                 }
+                if name == "set_workout_weight" { return self.liveSetWeight(args) }
                 guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
                 let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
                     "name": name,
@@ -538,6 +541,7 @@ final class AppModel: NSObject, ObservableObject {
         let weight = workingWeight(for: exercise)
         if weight > 0 { state["weightLb"] = min(weight, 2000) }
         if let repsCounted, repsCounted > 0 { state["repsCountedThisSet"] = min(repsCounted, 200) }
+        if WorkoutVoice.isEachSide(exercise) { state["eachSide"] = true }
         return state
     }
 
@@ -1184,6 +1188,9 @@ final class AppModel: NSObject, ObservableObject {
                                              offerAddOn: action.offeredAddOn)
                 case .addSessionAddOn:
                     _ = addSessionAddOn()
+                case .setWeight, .askWeight:
+                    // The text coach's set_workout_weight (AppModel+WorkoutWeight).
+                    if let weight = action.weight { applyWorkoutAction(weight) }
                 }
             }
         }
@@ -1346,6 +1353,32 @@ final class AppModel: NSObject, ObservableObject {
         workout.updatedAt = Self.isoString(from: Date())
         activeWorkout = workout
         return setIndex + 1
+    }
+
+    // MARK: One side at a time (single-arm rows, split squats)
+
+    /// Stores both sides of a logged set; its `reps` becomes the fewer, so
+    /// progress never credits reps one side didn't do.
+    func recordSides(exerciseIndex: Int, setNumber: Int, left: Int?, right: Int?) {
+        let setIndex = setNumber - 1
+        guard var workout = activeWorkout,
+              workout.exercises.indices.contains(exerciseIndex),
+              workout.exercises[exerciseIndex].completedSets.indices.contains(setIndex) else { return }
+        let counted = [left, right].compactMap { $0 }
+        guard let fewest = counted.min() else { return }
+        workout.exercises[exerciseIndex].completedSets[setIndex].leftReps = left.map { max(0, $0) }
+        workout.exercises[exerciseIndex].completedSets[setIndex].rightReps = right.map { max(0, $0) }
+        workout.exercises[exerciseIndex].completedSets[setIndex].reps = max(1, fewest)
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+    }
+
+    /// "10 reps each side": count this lift a side at a time from now on.
+    func setEachSide(_ exerciseIndex: Int, _ on: Bool) {
+        guard var workout = activeWorkout, workout.exercises.indices.contains(exerciseIndex) else { return }
+        workout.exercises[exerciseIndex].eachSide = on
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
     }
 
     /// The weight the user is actually working at for this exercise.

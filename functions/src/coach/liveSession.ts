@@ -17,6 +17,7 @@ import { findLatestPendingProposal, publishDraftProposals, severeMarkerHit } fro
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
 import type { CoachModelProvider, CoachToolDeclaration } from "./modelProvider.js";
 import { ADD_SESSION_ADD_ON_DECLARATION, REPLACE_SESSION_DECLARATION } from "./sessionSwitch.js";
+import { SET_WORKOUT_WEIGHT } from "./workoutWeightTool.js";
 
 /**
  * Live voice (beta), milestone 1 of docs/design/live-voice-brain.md: the
@@ -214,6 +215,7 @@ export const PHONE_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       },
     },
   },
+  SET_WORKOUT_WEIGHT,
 ];
 
 export function liveToolDeclarations() {
@@ -235,7 +237,8 @@ const LIVE_RULES = [
   "- You remember everything in <conversation>, <memory_facts> and <coach_notes>. Never ask them for something they already told you there; use it.",
   "- When a tool changes the plan, say what changed in one sentence. A proposal is only applied when they say yes AFTER hearing it.",
   "- Lines in the conversation that start with [app] are notes from the app about what's on screen or what they just did, not the user speaking. Don't read them out.",
-  "- In a workout the app handles counting, \"set done\" and weight changes itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- In a workout the app handles counting, \"set done\" and exact weight commands (\"40 pounds\") itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- Any other talk of changing the weight (\"I'm going up\", \"going heavier on this one\"): call set_workout_weight. No number yet: call it without one and ask \"Up to what?\".",
   "- [app] lines starting \"Context:\" carry the latest rest, heart rate and recent-training numbers. The newest one is the truth about right now; older ones are history. Never quote a heart rate that isn't in the newest Context line, and never guess one.",
   "- Heart rate is one signal: mention it at most once per rest, and only when it changes what they should do. High at the end of a set (zone 4–5) or slow to come down in rest: give them more rest with extend_rest and say so in a few words. Low through a set they finished at full reps: you may offer a bit more next set; never push past the plan.",
   "- On a cardio block (Context says \"on cardio\"), heart rate is the pace guide instead: zone 4–5 for a while, suggest easing a notch; zone 1–2, they can pick it up if they want. No rest is running, so never call extend_rest then.",

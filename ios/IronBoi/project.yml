@@ -241,6 +241,14 @@ targets:
       - path: IronBoi/Features/Coach/SetCount.swift
       - path: IronBoi/Features/Coach/Atmosphere/Effort.swift
       - path: IronBoi/Models/UserProfile.swift
+      # Weights, sides and workout commands (WeightLoadTests.swift).
+      - path: IronBoi/Models/WeightLoad.swift
+      - path: IronBoi/Models/WorkoutModels.swift
+      - path: IronBoi/Models/ExerciseKnowledge.swift
+      - path: IronBoi/Models/CoachWorkoutAction.swift
+      - path: IronBoi/Features/Coach/WorkoutEdits.swift
+      - path: IronBoi/Features/Coach/WorkoutVoice.swift
+      - path: IronBoi/Models/SessionAlternatives.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
