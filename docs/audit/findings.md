@@ -37,7 +37,19 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 **F9. #44: `extend_rest` reports success before anything happens. CONFIRMED**
 `AppModel.swift:534–539`: it returns `ok: true, addedSeconds` after setting `restExtensionRequest`. The timer only changes if `CoachStageView` is mounted to catch the `onChange`. Scenario: the user is on another tab and the live coach is still connected. The coach says "I've given you 30 more seconds" and the timer is unchanged. The server tells the coach not to cue the next set until HR drops, but the phone's own rest timer still says "Go." on schedule, so the coach and the app can disagree.
 
-## Live voice "weird and laggy" (Josh, real workout)
+## Process
+
+**F40. Main's committed Xcode project doesn't bundle GoogleService-Info.plist, so a build from it crashes at launch. CONFIRMED, high**
+Reported: a device build from live-voice-fix's worktree aborted in `FirebaseApp.configure()` (`IronBoiApp.swift:24`) with no GoogleService-Info.plist in the bundle.
+Root cause: the plist is gitignored and is written by the `Select GoogleService-Info.plist` pre-build script (`project.yml:22-103`). XcodeGen only adds files that exist *when it runs*. Commit **29a375a** ("chore: regenerate Xcode project", merged with #40) was generated in a worktree without the file, and it **removed** the `GoogleService-Info.plist in Resources` entry from `project.pbxproj`. Since then, main, #44, #48, #49, #50, #51 and #53 all lack it (0 references). #46, #47 and #52 happen to have it back (regenerated where the file existed), so whichever merges last decides. CI is green because it only builds; nothing launches the app.
+Fix (proposed, for the owning session):
+1. `project.yml` → under `IronBoi.sources` add `- path: IronBoi/GoogleService-Info.plist` with `optional: true` and `buildPhase: resources`, so XcodeGen always references it, file or not.
+2. Add a build-phase assert (a postBuildScript, or a script after Copy Bundle Resources): `test -f "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/GoogleService-Info.plist" || { echo "error: GoogleService-Info.plist missing from bundle"; exit 1; }`. Then CI fails instead of the phone.
+3. Add a CI launch smoke test: `xcrun simctl install` + `simctl launch`, then check the process is alive after ~5 s.
+4. Device installs (the direct-to-iPhone loop): after install, launch with `xcrun devicectl device process launch` and confirm it stays up before handing it to Josh.
+Watchdog check added: every PR touching `project.pbxproj` must keep exactly one `GoogleService-Info.plist in Resources` (until fix 1 lands).
+
+ (Josh, real workout)
 
 Ranked by likely contribution. L1–L3 are in code already merged or in #44, not in the new PRs.
 
