@@ -222,13 +222,13 @@ export function buildCoachContextBundle(
   };
 }
 
-function factRank(category: unknown): number {
+export function factRank(category: unknown): number {
   if (category === "safety_note") return 0;
   if (category === "constraint") return 1;
   return 2;
 }
 
-function isLapsed(until: unknown, today: string): boolean {
+export function isLapsed(until: unknown, today: string): boolean {
   return typeof until === "string" && /^\d{4}-\d{2}-\d{2}$/.test(until) && until < today;
 }
 
@@ -337,7 +337,7 @@ function pickProfile(profile: DocumentData) {
   return picked;
 }
 
-function memoryFactForPrompt(fact: DocumentData): CoachContextMemoryFact {
+export function memoryFactForPrompt(fact: DocumentData): CoachContextMemoryFact {
   const content = stringValue(fact.content, 1_000) ?? "";
   return compactObject({
     factId: stringValue(fact.factId, 120),
@@ -352,7 +352,7 @@ function memoryFactForPrompt(fact: DocumentData): CoachContextMemoryFact {
   });
 }
 
-function workoutForPrompt(log: DocumentData): CoachContextWorkout {
+export function workoutForPrompt(log: DocumentData): CoachContextWorkout {
   const postSessionNotes = stringValue(log.postSessionNotes, 800);
   const exerciseSummary = Array.isArray(log.exercises)
     ? log.exercises

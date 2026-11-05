@@ -133,3 +133,8 @@ export function coachNotesPath(userId: string) {
 export function progressSummaryPath(userId: string) {
   return `${userRoot(userId)}/derivedSummaries/progress_current`;
 }
+
+/** The coach's memory brief: a small, budgeted page the phone caches (coach/memoryBrief.ts). */
+export function memoryBriefPath(userId: string) {
+  return `${userRoot(userId)}/derivedSummaries/memory_brief`;
+}

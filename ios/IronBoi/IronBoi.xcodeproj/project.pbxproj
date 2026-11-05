@@ -27,6 +27,7 @@
 		3CC76B586DFB89D458F96661 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = 09A65CA69F32F34D53A925B5 /* FirebaseCore */; };
 		3E5C18B933FC52AE142AD1C6 /* WorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7471B86DB66DD6B54955497F /* WorkoutView.swift */; };
 		40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */; };
+		45B2225415238550102F6499 /* MemoryBriefCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */; };
 		4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD07E5325615931462D65FF0 /* AmbientLife.swift */; };
 		517EC3482C4841986CFB46AD /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC8A7F0156E886437433E203 /* ConversationView.swift */; };
 		51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */; };
@@ -106,6 +107,7 @@
 		507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputEngine.swift; sourceTree = "<group>"; };
 		5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingReminders.swift; sourceTree = "<group>"; };
 		56F34489DC4CA0B351BAF69F /* OrbPhysics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrbPhysics.swift; sourceTree = "<group>"; };
+		57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBriefCache.swift; sourceTree = "<group>"; };
 		58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneBodyMotion.swift; sourceTree = "<group>"; };
 		5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
@@ -234,6 +236,7 @@
 				FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */,
 				C698900CF6774CF078D13616 /* HealthSync.swift */,
 				5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */,
+				57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */,
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */,
 				507BD74721D2EB9EDEF0AACA /* VoiceInputEngine.swift */,
@@ -506,6 +509,7 @@
 				0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */,
 				DF3A35F877F98A2367A11514 /* LiveVoiceSession.swift in Sources */,
 				7FFE32B5ACB8BB3E25F08D85 /* LiveWorkoutCard.swift in Sources */,
+				45B2225415238550102F6499 /* MemoryBriefCache.swift in Sources */,
 				7CE0660BBEDC99B11BB65681 /* MemoryFact.swift in Sources */,
 				AB88E520959883D65800468A /* MemoryReviewView.swift in Sources */,
 				EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */,
