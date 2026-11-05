@@ -162,6 +162,7 @@ export const LIVE_TOOL_NAMES = [
   "update_training_setup",
   "forget_user_fact",
   "find_exercise_swaps",
+  "recall_training_history",
 ] as const;
 export type LiveToolName = (typeof LIVE_TOOL_NAMES)[number];
 

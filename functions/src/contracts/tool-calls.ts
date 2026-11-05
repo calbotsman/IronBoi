@@ -283,6 +283,16 @@ export const FindExerciseSwapsRequest = ToolCallBase.extend({
   availableEquipment: z.array(z.string().min(1).max(30)).max(12).optional(),
 }).strict();
 
+// Deep recall (coach/recall.ts): a read-only look-up over the user's own
+// workoutLogs — "what did I bench last spring?".
+export const RecallTrainingHistoryRequest = ToolCallBase.extend({
+  tool: z.literal("recall_training_history"),
+  exerciseName: z.string().min(1).max(120).optional(),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  limit: z.number().int().min(1).max(20).optional(),
+}).strict();
+
 export const FindExerciseSwapsResult = ToolResultBase.extend({
   options: z
     .array(
@@ -373,6 +383,7 @@ export const CoachToolRequest = z.discriminatedUnion("tool", [
   SetPreferredNameToolRequest,
   ForgetUserFactToolRequest,
   FindExerciseSwapsRequest,
+  RecallTrainingHistoryRequest,
   ExplainExerciseRequest,
   FlagRiskRequest,
   SummarizeProgressRequest,
