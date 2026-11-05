@@ -154,6 +154,7 @@ export const RecoveryContext = z.object({
   restingHrBaseline: z.number().int().min(25).max(150).optional(),
   hrvMs: z.number().int().min(1).max(300).optional(),
   hrvBaselineMs: z.number().int().min(1).max(300).optional(),
+  /** Hours asleep in the last 24 h (naps included), not "last night". */
   sleepHours: z.number().min(0).max(24).optional(),
   signals: z.array(RecoverySignal).max(3).default([]),
   /** Clearly low: two or more signals at once (the phone decides). */

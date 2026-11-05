@@ -52,7 +52,8 @@ describe("recovery context", () => {
     const rules = liveContextRules({ recovery: low }) ?? "";
     expect(rules).toContain("resting heart rate 63 bpm (usually 55)");
     expect(rules).toContain("HRV 31 ms (usually 48)");
-    expect(rules).toContain("slept 5.4 h");
+    expect(rules).toContain("slept 5.4 h in the last 24 h");
+    expect(rules).not.toContain("last night");
     expect(rules).toContain("low recovery today");
     expect(rules).toContain("Recovery's low today, want a lighter version?");
     expect(rules).toContain("ONE time");

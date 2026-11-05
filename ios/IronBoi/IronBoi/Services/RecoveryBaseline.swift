@@ -20,7 +20,8 @@ import Foundation
 /// - **HRV (SDNN) flags at ≤ 80 % of baseline.** Wrist HRV is noisy — the
 ///   day-to-day coefficient of variation is often 10–20 % — so −20 % is a
 ///   real dip but not proof on its own.
-/// - **Sleep flags under 6 h** of actual sleep (in bed doesn't count).
+/// - **Sleep flags under 6 h** of actual sleep in the last 24 h (in bed
+///   doesn't count; a nap counts, so it's "the last 24 h", not "last night").
 ///   Under 6 h is the usual "short sleep" cut-off in sleep research; adults
 ///   are advised 7+.
 /// - **Low = two or more flags at once.** Each signal alone misfires too
@@ -122,6 +123,14 @@ enum RecoveryBaseline {
         if let v = summary.sleepHours { out["sleepHours"] = v }
         if summary.isLow { out["offerLighter"] = offerLighter }
         return out
+    }
+
+    /// Whether a coach reply is the lighter-session offer ("Recovery's low
+    /// today, want a lighter version?"), so it counts as made only once
+    /// it was actually said, not when the coach was cleared to say it.
+    static func mentionsLighterOffer(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return t.contains("lighter") || t.contains("easier") || t.contains("recovery") || t.contains("dial it back")
     }
 
     /// Whether the coach may offer the lighter version now: recovery is

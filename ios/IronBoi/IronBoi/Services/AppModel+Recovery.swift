@@ -44,5 +44,29 @@ extension AppModel {
 
     func noteLighterOffered() {
         UserDefaults.standard.set(todayISO, forKey: Self.lighterOfferedKey)
+        lighterOfferPendingSince = nil
+    }
+
+    /// The coach was just told it may offer. Until a reply actually says
+    /// it, the next turn may offer again (the reply could have been about
+    /// something else, or failed).
+    func noteLighterOfferCleared(at now: Date = Date()) {
+        if lighterOfferPendingSince == nil { lighterOfferPendingSince = now.addingTimeInterval(-5) }
+    }
+
+    /// A coach line the person heard or read: marks the offer made if it is the offer.
+    func noteCoachSaid(_ text: String, at: Date) {
+        guard let since = lighterOfferPendingSince, at >= since,
+              RecoveryBaseline.mentionsLighterOffer(text) else { return }
+        noteLighterOffered()
+    }
+
+    /// Text coach replies, as they land.
+    func noteLighterOfferInReplies() {
+        guard let since = lighterOfferPendingSince else { return }
+        for message in messages where message.role == .coach && message.timestamp >= since {
+            noteCoachSaid(message.content, at: message.timestamp)
+            if lighterOfferPendingSince == nil { return }
+        }
     }
 }

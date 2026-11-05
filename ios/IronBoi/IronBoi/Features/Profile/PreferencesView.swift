@@ -500,7 +500,7 @@ struct PreferencesView: View {
                     ))
                     .labelsHidden()
                 }
-                Text("Resting heart rate, HRV and sleep from Health, including what Whoop, Oura or Garmin sync there. Compared with your own last four weeks; on a clearly low day, Coach offers a lighter session. Nothing changes unless you say yes.")
+                Text("Reads resting heart rate, HRV and sleep from Health (including what Whoop, Oura or Garmin sync there) and compares the last 24 hours with your own last four weeks. Only a short summary goes with your coach messages to the AI model that writes the reply (Google Gemini, or OpenAI with live voice). It isn't stored: it's deleted once the reply is written. On a clearly low day Coach offers a lighter session; nothing changes unless you say yes.")
                     .font(.caption)
                     .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
                     .fixedSize(horizontal: false, vertical: true)

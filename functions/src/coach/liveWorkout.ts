@@ -221,7 +221,7 @@ export function recoveryLines(
   if (recovery.hrvMs !== undefined) {
     parts.push(`HRV ${recovery.hrvMs} ms${recovery.hrvBaselineMs !== undefined ? ` (usually ${recovery.hrvBaselineMs})` : ""}`);
   }
-  if (recovery.sleepHours !== undefined) parts.push(`slept ${recovery.sleepHours.toFixed(1)} h last night`);
+  if (recovery.sleepHours !== undefined) parts.push(`slept ${recovery.sleepHours.toFixed(1)} h in the last 24 h (naps included)`);
   const facts: string[] = [];
   if (parts.length) {
     const verdict = recovery.low

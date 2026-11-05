@@ -106,4 +106,10 @@ final class RecoveryBaselineTests: XCTestCase {
         XCTAssertFalse(R.mayOfferLighter(summary: fine, offeredOn: nil, today: "2026-11-05", setsDone: nil))
         XCTAssertFalse(R.mayOfferLighter(summary: nil, offeredOn: nil, today: "2026-11-05", setsDone: nil))
     }
+
+    func testOfferCountsOnlyWhenTheReplySaysIt() {
+        XCTAssertTrue(R.mentionsLighterOffer("Recovery's low today, want a lighter version?"))
+        XCTAssertTrue(R.mentionsLighterOffer("Want to keep it easier today?"))
+        XCTAssertFalse(R.mentionsLighterOffer("Nice. First up, goblet squats, 3 sets of 10."))
+    }
 }
