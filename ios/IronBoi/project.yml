@@ -224,3 +224,25 @@ schemes:
     test:
       targets:
         - IronBoiTests
+  # The workout screen's atmosphere without a Watch: the preview straight
+  # into a workout, a pretend heart rate rising and falling (DEBUG only;
+  # MYO_HR_SIM=calm|pumped|follow|wave, see HeartRateSimulator.swift).
+  IronBoi Heart:
+    build:
+      targets:
+        IronBoi: all
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: FIRAAppCheckDebugToken
+          value: 7B49E8DA-2CDA-4A4C-8C9E-93D1C5A40F11
+          isEnabled: true
+        - variable: MYO_PREVIEW
+          value: "1"
+          isEnabled: true
+        - variable: MYO_NO_MIC
+          value: "1"
+          isEnabled: true
+        - variable: MYO_HR_SIM
+          value: wave
+          isEnabled: true
