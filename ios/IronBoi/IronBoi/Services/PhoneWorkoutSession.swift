@@ -7,7 +7,9 @@ import HealthKit
 /// and heart rate from supported earbuds arrives through the live data source.
 ///
 /// Used only when no Watch session is mirrored (a phone and a Watch session
-/// for one workout would count twice) and Bluetooth audio is connected. If
+/// for one workout would count twice), "Save workouts to Apple Health" is
+/// on with heart-rate access already granted (so no Health sheet appears
+/// mid-workout), and AirPods or Beats are the audio route. If
 /// no heart rate arrives within 20 s, the earbuds can't measure it: the
 /// session is ended and its recording thrown away, and the workout carries
 /// on as before. When it does stream, this session saves the workout to
@@ -39,21 +41,38 @@ final class PhoneWorkoutSession: NSObject, ObservableObject {
         return false
     }
 
-    /// Headphones that might measure heart rate are connected (any Bluetooth
-    /// output; whether they actually can is found out from the readings).
-    static var bluetoothAudioConnected: Bool {
-        AVAudioSession.sharedInstance().currentRoute.outputs.contains {
-            [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP].contains($0.portType)
+    /// AirPods or Beats are playing: the only headphones that might measure
+    /// heart rate. Matched on the route's name, which iOS gives them by
+    /// default ("Josh's AirPods Pro"); renamed ones are missed. Whether these
+    /// ones actually measure it is found out from the readings.
+    static var heartRateHeadphonesConnected: Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains { output in
+            [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP].contains(output.portType)
+                && ["airpods", "beats"].contains { output.portName.lowercased().contains($0) }
         }
     }
+
+    /// The types this session writes and reads. HealthSync.enable asks for
+    /// the same set, so this session never has to ask.
+    static let shareTypes: Set<HKSampleType> = [HKObjectType.workoutType(), HKQuantityType(.heartRate)]
+    static let readTypes: Set<HKObjectType> = [HKQuantityType(.heartRate)]
 
     /// Start, for the workout `sessionId`, if supported and nothing better
     /// is streaming.
     func startIfUseful(sessionId: String, activityType: HKWorkoutActivityType) {
-        guard isSupported, session == nil, Self.bluetoothAudioConnected,
+        guard isSupported, session == nil, HealthSync.shared.enabled, Self.heartRateHeadphonesConnected,
               !WatchWorkoutLink.shared.isMirroring else { return }
         #if compiler(>=6.2)
-        if #available(iOS 26.0, *) { Task { await begin(sessionId: sessionId, activityType: activityType) } }
+        if #available(iOS 26.0, *) {
+            Task {
+                // Never put a Health sheet up mid-workout: only go ahead if
+                // access was already granted (from the Health toggle or a
+                // Watch workout).
+                let status = try? await store.statusForAuthorizationRequest(toShare: Self.shareTypes, read: Self.readTypes)
+                guard status == .unnecessary else { return }
+                await begin(sessionId: sessionId, activityType: activityType)
+            }
+        }
         #endif
     }
 
@@ -67,9 +86,26 @@ final class PhoneWorkoutSession: NSObject, ObservableObject {
                 return false
             }
             endPlan = (save, name)
+            // Already over (ended or failed on its own): save what it has now.
+            if session.state == .ended || session.state == .stopped {
+                return await withCheckedContinuation { continuation in
+                    finishing = continuation
+                    Task { await finish(at: Date()) }
+                }
+            }
             return await withCheckedContinuation { continuation in
                 finishing = continuation
                 session.end()
+                // If the ended callback never comes, don't hang the finish:
+                // after 10 s the phone saves it the plain way instead.
+                Task {
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    guard let pending = self.finishing else { return }
+                    AudioHub.log("phone session: no end callback, falling back to HealthSync")
+                    self.finishing = nil
+                    self.stop(discard: true)
+                    pending.resume(returning: false)
+                }
             }
         }
         #endif
@@ -100,9 +136,7 @@ final class PhoneWorkoutSession: NSObject, ObservableObject {
     #if compiler(>=6.2)
     @available(iOS 26.0, *)
     private func begin(sessionId: String, activityType: HKWorkoutActivityType) async {
-        let heartRate = HKQuantityType(.heartRate)
         do {
-            try await store.requestAuthorization(toShare: [HKObjectType.workoutType(), heartRate], read: [heartRate])
             let configuration = HKWorkoutConfiguration()
             configuration.activityType = activityType
             configuration.locationType = .indoor
@@ -134,6 +168,8 @@ final class PhoneWorkoutSession: NSObject, ObservableObject {
 
     @available(iOS 26.0, *)
     private func finish(at date: Date) async {
+        // Already handled (finished, or the 10 s fallback gave up).
+        guard finishing != nil else { return }
         guard let builder = builder as? HKLiveWorkoutBuilder, let sessionId else {
             finishing?.resume(returning: false)
             finishing = nil

@@ -69,6 +69,7 @@
 		8DD4164DE5B52A83FA01C074 /* OnboardingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039EE3F780882104FBD9CC48 /* OnboardingModels.swift */; };
 		8F74849D763D35FFA34E137C /* MoveSpec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37B11E9E7F9FBAB3A75A3B70 /* MoveSpec.swift */; };
 		8FB00210D5060ADFCBB12BBF /* CoachVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */; };
+		955C579CC39620ED56202529 /* HeartRateMeasurement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6293ACFF569B8D8169B9BE /* HeartRateMeasurement.swift */; };
 		97122EBA819A4AC4B8DD976A /* SessionChangesCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAE7937F1EE073A0A0F01714 /* SessionChangesCard.swift */; };
 		971478636E13DB8A91D04639 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */; };
 		9958D935D8CDAD73CED74B68 /* LiveStatsPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C542D53F30A1976AE920F6 /* LiveStatsPill.swift */; };
@@ -164,6 +165,7 @@
 		57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBriefCache.swift; sourceTree = "<group>"; };
 		58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OneBodyMotion.swift; sourceTree = "<group>"; };
 		5E065A9C8694D5D93A3F0B13 /* WatchViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchViews.swift; sourceTree = "<group>"; };
+		5F6293ACFF569B8D8169B9BE /* HeartRateMeasurement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeartRateMeasurement.swift; sourceTree = "<group>"; };
 		5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveVoiceSession.swift; sourceTree = "<group>"; };
 		60101B940C2222A85AFAE5E9 /* OneBody.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = OneBody.metal; sourceTree = "<group>"; };
 		67C542D53F30A1976AE920F6 /* LiveStatsPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStatsPill.swift; sourceTree = "<group>"; };
@@ -332,6 +334,7 @@
 				040387C0316794F5C15D9648 /* CoachMix.swift */,
 				FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */,
 				C698900CF6774CF078D13616 /* HealthSync.swift */,
+				5F6293ACFF569B8D8169B9BE /* HeartRateMeasurement.swift */,
 				94B79E936F7D5DE0FAA86D63 /* HeartStrapConnector.swift */,
 				5FA4F643A3C849FDDFB1FB8E /* LiveVoiceSession.swift */,
 				57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */,
@@ -655,6 +658,7 @@
 				8C0DBA5370D46A7D67B5553B /* Gear.swift in Sources */,
 				2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */,
 				31D9F65E51B20F61260F722A /* HealthSync.swift in Sources */,
+				955C579CC39620ED56202529 /* HeartRateMeasurement.swift in Sources */,
 				2C70161B8D3374BC258764A1 /* HeartRateSimulator.swift in Sources */,
 				BB6588CFAF60B960C39FA989 /* HeartStrapConnector.swift in Sources */,
 				67556EF240F65601BD0A3D45 /* HeartStrapView.swift in Sources */,

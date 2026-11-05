@@ -35,7 +35,12 @@ final class HealthSync: ObservableObject {
     func enable() async -> Bool {
         guard isAvailable else { return false }
         do {
-            try await store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [])
+            // Workouts, plus heart rate: what a Watch or AirPods workout
+            // reads live and saves with the workout (PhoneWorkoutSession
+            // only runs when this was granted, so it never asks mid-workout).
+            try await store.requestAuthorization(
+                toShare: [HKObjectType.workoutType(), HKQuantityType(.heartRate)],
+                read: [HKQuantityType(.heartRate)])
         } catch {
             AudioHub.log("health auth failed: \(error.localizedDescription)")
             return false
