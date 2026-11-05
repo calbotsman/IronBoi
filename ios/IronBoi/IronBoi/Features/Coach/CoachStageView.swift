@@ -109,18 +109,18 @@ struct CoachStageView: View {
     /// A reply that arrived while you were mid-sentence, or mid-count.
     @State private var heldReply: CoachMessage?
     @State private var heldReplyAt: Date?
-    /// Reps counted out loud in the current utterance.
-    @State private var repCount = 0
-    /// The set this count already closed (exercise index, 1-based set) —
-    /// counting past the target updates it instead of starting another.
-    @State private var countedSet: (exercise: Int, set: Int)?
+    /// The set being counted out loud, if any. It's logged once, when the
+    /// set ends — not when the count reaches the target.
+    @State private var setCount: SetCount?
+    /// Reps counted so far in this set.
+    private var repCount: Int { setCount?.count ?? 0 }
     /// Listening was stopped by a local workout command, which restarts it
     /// itself — the timeout handler shouldn't also restart it.
     @State private var restartHandledLocally = false
     @State private var restartMarks = 0
     /// One side of an each-side lift counted to target: its reps, while the
     /// other side is counted from one.
-    @State private var firstSide: Int?
+    private var firstSide: Int? { setCount?.firstSide }
     /// The count reached before the current transcript began; counting
     /// carries across the recognizer's restarts.
     @State private var countBase = 0
@@ -129,6 +129,8 @@ struct CoachStageView: View {
     /// Resting between sets: when the rest ends. The status line counts it
     /// down and the blob breathes slow until "go".
     @State private var restEndsAt: Date?
+    /// When the current rest began: the last rep of the set it follows.
+    @State private var restStartedAt: Date?
     @State private var restTask: Task<Void, Never>?
     /// The live coach's context note waiting to go, and the last one sent.
     @State private var contextNoteTask: Task<Void, Never>?
@@ -205,11 +207,12 @@ struct CoachStageView: View {
         stage.onChange(of: appModel.showExerciseRequest) { _, request in
             if let request { demo(request.name) }
         }
+        .onChange(of: live.heard) { _, heard in liveHeard(heard) }
         .modifier(LiveContextSync(
             restEndsAt: restEndsAt,
             contextNote: appModel.liveContextNote,
             extension: appModel.restExtensionRequest,
-            noteRest: { appModel.noteRest(endsAt: $0) },
+            noteRest: { appModel.noteRest(endsAt: $0, startedAt: restStartedAt) },
             push: { pushContextNote($0) },
             extend: { extendRest(by: $0) }
         ))
@@ -1373,7 +1376,7 @@ struct CoachStageView: View {
     /// The exercise being counted: the one whose set this count closed, or
     /// the current one.
     private var countingExercise: ActiveWorkoutExercise? {
-        (countedSet?.exercise ?? currentExerciseIndex).flatMap { appModel.activeWorkout?.exercises[$0] }
+        (setCount?.exercise ?? currentExerciseIndex).flatMap { appModel.activeWorkout?.exercises[$0] }
     }
 
     /// Every finished utterance comes here. Mid-workout, counting and weight
@@ -1559,7 +1562,8 @@ struct CoachStageView: View {
     }
 
     /// Live: each number you say moves the count, carrying across pauses.
-    /// Reaching the target logs the set; counting on raises its reps.
+    /// Reaching the target is acknowledged (two notes, a buzz) and the count
+    /// keeps going; the set is logged when it ends.
     private func trackReps(in transcript: String) {
         guard appModel.activeWorkout != nil else { return }
         // A hold is timed, not counted: counting the seconds out loud isn't reps.
@@ -1567,7 +1571,7 @@ struct CoachStageView: View {
         // A fresh transcript (the recognizer restarted): continue from here.
         if transcript.isEmpty { countBase = repCount; return }
         guard voiceInput.isListening,
-              let index = countedSet?.exercise ?? currentExerciseIndex,
+              let index = setCount?.exercise ?? currentExerciseIndex,
               let exercise = appModel.activeWorkout?.exercises[index] else { return }
 
         if repCount > 0, WorkoutVoice.saysSetDone(transcript) {
@@ -1576,56 +1580,75 @@ struct CoachStageView: View {
         }
         // "Add curls, 3 by 12" isn't counting, even though "12" reads as 1, 2.
         guard WorkoutVoice.looksLikeCounting(transcript, running: repCount > 0) else { return }
-        let count = WorkoutVoice.repCount(in: transcript, from: countBase)
-        guard count > repCount else { return }
-        AudioHub.log("count \(repCount) → \(count) (heard: \(transcript.suffix(40)))")
+        let heard = WorkoutVoice.repCount(in: transcript, from: countBase)
+        var tally = setCount
+            ?? SetCount(exercise: index, target: exercise.targetReps, eachSide: WorkoutVoice.isEachSide(exercise.name))
+        let step = tally.advance(to: heard, at: Date())
+        guard step != .ignored else { return }
+        AudioHub.log("count \(repCount) → \(heard) (heard: \(transcript.suffix(40)))")
         if live.isActive {
             // Every number, not just the first: the coach may have started
             // a late reply mid-count.
             live.hush()
             live.setUplinkMuted(true)
         }
-        repCount = count
+        setCount = tally
         voiceInput.holdOpen = true
         // You're lifting again: the rest is over, quietly.
         if restEndsAt != nil { cancelRest() }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        // A tick you can hear without looking; two notes at the target.
-        AudioHub.shared.play(cue: countedSet == nil && count >= exercise.targetReps ? .target : .tick)
-        if let done = countedSet {
-            appModel.updateSetReps(exerciseIndex: done.exercise, setNumber: done.set, reps: count)
-        } else if count >= exercise.targetReps, firstSide == nil, WorkoutVoice.isEachSide(exercise.name) {
-            switchSides(at: count)
+        // A tick you can hear without looking; two notes at the target —
+        // the only acknowledgement, so nothing talks over the next rep.
+        AudioHub.shared.play(cue: step == .rep ? .tick : .target)
+        switch step {
+        case .switchSides:
+            switchSides()
             return
-        } else if count >= exercise.targetReps,
-                  let set = appModel.completeNextSet(exerciseIndex: index, reps: count) {
-            countedSet = (index, set)
+        case .reachedTarget:
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        case .rep, .ignored:
+            break
         }
-        // Quiet for a while → the set's over. Short once you've hit the
-        // target (you might push a couple more); long if you're short of
-        // it (slow tempo, or catching your breath mid-set).
+        // Quiet for a while → the set's over. How long depends on where you
+        // are (short of the target, a pause is a breath) and your pace.
+        closeCount(after: tally.quietWindow, reopenAfter: tally.repsStoppedAfter)
+    }
+
+    /// Once reps stop (`reopenAfter`), the live coach hears you again — it
+    /// isn't kept deaf for the whole close window. Another number mutes it
+    /// again; talking to it closes the set right away (see `liveHeard`).
+    private func closeCount(after seconds: TimeInterval, reopenAfter: TimeInterval? = nil) {
         closeCountTask?.cancel()
-        let wait: UInt64 = countedSet != nil ? 4 : 12
         closeCountTask = Task {
-            try? await Task.sleep(nanoseconds: wait * 1_000_000_000)
+            var waited: TimeInterval = 0
+            if let reopen = reopenAfter, reopen < seconds {
+                try? await Task.sleep(nanoseconds: UInt64(reopen * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                if live.isActive { live.setUplinkMuted(false) }
+                waited = reopen
+            }
+            try? await Task.sleep(nanoseconds: UInt64((seconds - waited) * 1_000_000_000))
             if !Task.isCancelled { finishCount() }
         }
     }
 
+    /// The live coach heard you while a set was still open (its mic reopens
+    /// once reps stop): you're talking, not counting, so the set's over now.
+    private func liveHeard(_ heard: String) {
+        guard live.isActive, !live.uplinkMuted, setCount != nil,
+              !heard.trimmingCharacters(in: .whitespaces).isEmpty,
+              !WorkoutVoice.looksLikeCounting(heard, running: true) else { return }
+        AudioHub.log("set closed: talking to the live coach")
+        finishCount()
+    }
+
     /// One side done on an each-side lift: count the other from one. If the
     /// other side never comes, the set is logged with the first side's reps.
-    private func switchSides(at count: Int) {
-        firstSide = count
-        repCount = 0
+    private func switchSides() {
         countBase = 0
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         show(notice: "Other side")
-        closeCountTask?.cancel()
-        closeCountTask = Task {
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
-            if !Task.isCancelled, repCount == 0 { finishCount() }
-        }
+        closeCount(after: setCount?.quietWindow ?? SetCount.quietBetweenSides)
         // A fresh transcript, so the other side's "one" counts as one.
         markRestartHandled()
         voiceInput.stop()
@@ -1643,18 +1666,9 @@ struct CoachStageView: View {
     private func finishCount() {
         closeCountTask?.cancel()
         closeCountTask = nil
-        // An each-side lift: the set is the fewer of the two sides, or the
-        // first side alone if the second was never counted.
-        if let side = firstSide {
-            repCount = repCount >= 3 ? min(side, repCount) : side
-            firstSide = nil
-        }
-        let finalCount = repCount
-        let alreadyLogged = countedSet
-        let countedIndex = alreadyLogged?.exercise ?? currentExerciseIndex
-        repCount = 0
+        let finished = setCount
+        setCount = nil
         countBase = 0
-        countedSet = nil
         voiceInput.holdOpen = false
         if live.isActive { live.setUplinkMuted(false) }
         // A stray "one, two" that never became a set: drop what was heard so
@@ -1665,22 +1679,14 @@ struct CoachStageView: View {
             voiceInput.stop()
             resumeListening()
         }
-        guard finalCount > 0 else { discardHeard(); return }
-
-        let target: Int
-        let setNumber: Int
-        if let done = alreadyLogged {
-            appModel.updateSetReps(exerciseIndex: done.exercise, setNumber: done.set, reps: finalCount)
-            target = appModel.activeWorkout?.exercises[done.exercise].targetReps ?? finalCount
-            setNumber = done.set
-        } else if finalCount >= 3, let index = currentExerciseIndex,
-                  let set = appModel.completeNextSet(exerciseIndex: index, reps: finalCount) {
-            target = appModel.activeWorkout?.exercises[index].targetReps ?? finalCount
-            setNumber = set
-        } else {
+        // An each-side lift logs the weaker side (or the first alone).
+        guard let finished, let finalCount = finished.repsToLog,
+              let setNumber = appModel.completeNextSet(exerciseIndex: finished.exercise, reps: finalCount) else {
             discardHeard()
             return
         }
+        let target = finished.target
+        let countedIndex: Int? = finished.exercise
         let head: String
         if finalCount > target {
             head = "Set \(setNumber) done. \(finalCount) reps, \(finalCount - target) over."
@@ -1690,7 +1696,7 @@ struct CoachStageView: View {
             head = "Set \(setNumber) done."
         }
         var line = setDoneLine(head, exerciseIndex: countedIndex)
-        line += restLine(afterSetOn: countedIndex)
+        line += restLine(afterSetOn: countedIndex, since: finished.lastRepAt)
         if let interrupted = interruptedSpeech, !interrupted.isEmpty {
             line += " Want the rest of what I was saying?"
             resumeOffered = true
@@ -1818,23 +1824,27 @@ struct CoachStageView: View {
 
     /// Starts the rest if there's more work after this set, and returns the
     /// words for it. Nothing if the workout is done.
-    private func restLine(afterSetOn index: Int?) -> String {
+    /// `since`: when the set really ended (the last rep), so rest counts
+    /// from there rather than from when the quiet stretch closed it.
+    private func restLine(afterSetOn index: Int?, since: Date? = nil) -> String {
         guard let workout = appModel.activeWorkout, let index, workout.exercises.indices.contains(index) else { return "" }
         let exercise = workout.exercises[index]
         let moreOnThis = exercise.completedSetCount < exercise.targetSets
         let moreToCome = workout.exercises.indices.contains(index + 1)
         guard moreOnThis || moreToCome else { return "" }
         let seconds = Self.restSeconds(for: exercise)
-        startRest(seconds: seconds)
+        startRest(seconds: seconds, from: since ?? Date())
         return tips == .quiet ? "" : " Rest \(seconds == 90 ? "ninety" : "sixty") seconds."
     }
 
-    private func startRest(seconds: Int) {
+    private func startRest(seconds: Int, from start: Date = Date()) {
         restTask?.cancel()
-        let ends = Date().addingTimeInterval(TimeInterval(seconds))
+        let began = min(Date(), start)
+        let ends = began.addingTimeInterval(TimeInterval(seconds))
+        restStartedAt = began
         restEndsAt = ends
         restTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
             guard !Task.isCancelled, restEndsAt == ends else { return }
             restEndsAt = nil
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -2545,9 +2555,8 @@ struct CoachStageView: View {
         swapChoice = nil
         closeCountTask?.cancel()
         closeCountTask = nil
-        repCount = 0
+        setCount = nil
         countBase = 0
-        countedSet = nil
         voiceInput.holdOpen = false
         conversationActive = false
         awaitingReplyAfter = nil

@@ -124,3 +124,15 @@ jobs:
           -configuration Debug
           build
           CODE_SIGNING_ALLOWED=NO
+
+      # Pure-logic unit tests (no app host, no backend): the rep-count state
+      # machine. Needs a concrete simulator, not the generic destination.
+      - name: Unit tests (IronBoiTests, iOS Simulator)
+        run: |
+          SIM=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for k,v in d.items() if "iOS" in k for x in v if x["name"].startswith("iPhone")))')
+          xcodebuild \
+            -project ios/IronBoi/IronBoi.xcodeproj \
+            -scheme IronBoiTests \
+            -destination "id=$SIM" \
+            test \
+            CODE_SIGNING_ALLOWED=NO

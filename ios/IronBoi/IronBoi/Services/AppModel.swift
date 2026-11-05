@@ -498,11 +498,14 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var restEndsAt: Date?
 
     /// The workout screen's rest timer started, changed or ended (nil).
-    func noteRest(endsAt: Date?) {
+    /// `startedAt`: when the rest really began (the last rep of the set,
+    /// which can be a few seconds before the set was closed).
+    func noteRest(endsAt: Date?, startedAt: Date? = nil) {
         if let endsAt {
             if restEndsAt == nil {
-                restStartedAt = Date()
-                restPlannedSec = Int(endsAt.timeIntervalSinceNow.rounded())
+                let start = min(startedAt ?? Date(), Date())
+                restStartedAt = start
+                restPlannedSec = Int(endsAt.timeIntervalSince(start).rounded())
             }
         } else {
             restStartedAt = nil
@@ -1111,20 +1114,6 @@ final class AppModel: NSObject, ObservableObject {
         workout.updatedAt = Self.isoString(from: Date())
         activeWorkout = workout
         return setIndex + 1
-    }
-
-    /// Raises a completed set's rep count — you kept counting past the
-    /// target. The extra reps are logged as done, so Coach sees you're
-    /// outgrowing the weight.
-    func updateSetReps(exerciseIndex: Int, setNumber: Int, reps: Int) {
-        let setIndex = setNumber - 1
-        guard var workout = activeWorkout,
-              workout.exercises.indices.contains(exerciseIndex),
-              workout.exercises[exerciseIndex].completedSets.indices.contains(setIndex)
-        else { return }
-        workout.exercises[exerciseIndex].completedSets[setIndex].reps = reps
-        workout.updatedAt = Self.isoString(from: Date())
-        activeWorkout = workout
     }
 
     /// The weight the user is actually working at for this exercise.
