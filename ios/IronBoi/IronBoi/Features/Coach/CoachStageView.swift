@@ -52,6 +52,8 @@ struct CoachStageView: View {
     @State private var captionReply: String?
     /// The Sound sheet: voice on/off, Coach's level, how much music dips.
     @State private var showSound = false
+    /// Captions mode: tap the caption for the whole thread; pull down to close.
+    @State private var showThread = false
     /// The message being handled was typed, not said.
     @State private var typedTurn = false
     /// Message ids that existed when a typed message went out; the first new
@@ -670,6 +672,18 @@ struct CoachStageView: View {
         }
     }
 
+    /// Under a caption: there's more above it.
+    private var threadHint: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "text.bubble").font(.caption2)
+            Text("Thread")
+        }
+        .myoStyle(.label)
+        .textCase(.uppercase)
+        .foregroundStyle(MyoColor.Text.tertiary.color)
+        .accessibilityLabel("Open the conversation")
+    }
+
     /// The plan's training days, in week order ("Mon", "Wed"…).
     private var trainingDayKeys: [String] {
         ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].filter { key in
@@ -705,23 +719,29 @@ struct CoachStageView: View {
                 .transition(.opacity)
         case .listening where !speaksReplies && captionReply != nil:
             // Captions mode: Coach's answer, then what you're saying now.
+            // A step under body size so a full answer fits; tap for the thread.
             VStack(spacing: MyoTheme.Spacing.sm) {
                 Text(captionReply ?? "")
-                    .myoStyle(.body)
+                    .font(.callout)
                     .foregroundStyle(MyoColor.Text.primary.color)
                     .multilineTextAlignment(.center)
-                    .lineLimit(6)
+                    .lineSpacing(2)
+                    .lineLimit(9)
                     .minimumScaleFactor(0.85)
-                    .onTapGesture { withAnimation(MyoTheme.Motion.fade) { captionReply = nil } }
                 if !voiceInput.transcript.isEmpty {
                     Text(voiceInput.transcript)
-                        .myoStyle(.body)
+                        .font(.footnote)
                         .foregroundStyle(MyoColor.Text.secondary.color)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                 }
+                threadHint
             }
             .frame(minHeight: 88, alignment: .top)
+            .contentShape(Rectangle())
+            .onTapGesture { showThread = true }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Shows the whole conversation")
             .transition(.opacity)
         case .listening:
             Text(voiceInput.transcript.isEmpty ? " " : voiceInput.transcript)
@@ -763,15 +783,21 @@ struct CoachStageView: View {
         case .rest:
             if !speaksReplies, let message = lastCoachMessage {
                 // Muted: text is the only way the reply reaches you.
-                ScrollView {
-                    Text(message.content)
-                        .myoStyle(.body)
-                        .foregroundStyle(MyoColor.Text.primary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: MyoTheme.Spacing.sm) {
+                    ScrollView {
+                        Text(message.content)
+                            .font(.callout)
+                            .lineSpacing(2)
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxHeight: 220)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Button { showThread = true } label: { threadHint }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows the whole conversation")
                 }
-                .scrollIndicators(.hidden)
-                .frame(maxHeight: 200)
-                .fixedSize(horizontal: false, vertical: true)
             } else if lastCoachMessage == nil {
                 Text("Tell Coach how training's going, ask about today's session, or say what hurts.")
                     .myoStyle(.body)
@@ -1115,6 +1141,13 @@ struct CoachStageView: View {
         }
         .animation(MyoTheme.Motion.fade, value: showIsolationTip)
         .sheet(isPresented: $showSound) { SoundMixSheet(canRetake: !live.isActive) }
+        // Pull down to close; the mic keeps listening underneath.
+        .sheet(isPresented: $showThread) {
+            NavigationStack { ConversationView() }
+                .environmentObject(appModel)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .onChange(of: speaksReplies) { _, on in voiceSettingChanged(on) }
     }
 
