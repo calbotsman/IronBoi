@@ -153,8 +153,7 @@ enum HeartZones {
     /// that's higher. Nil without an age: a peak alone would call the first
     /// reading of the day zone 5.
     static func zone(bpm: Int, ageYears: Int?, observedPeak: Int?) -> Int? {
-        guard let age = ageYears, (10...100).contains(age) else { return nil }
-        let max = Swift.max(208 - 0.7 * Double(age), Double(observedPeak ?? 0))
+        guard let max = maxHR(ageYears: ageYears, observedPeak: observedPeak) else { return nil }
         let share = Double(bpm) / max
         switch share {
         case ..<0.6: return 1
@@ -163,5 +162,11 @@ enum HeartZones {
         case ..<0.9: return 4
         default: return 5
         }
+    }
+
+    /// The max heart rate the zones are shares of (see `zone`).
+    static func maxHR(ageYears: Int?, observedPeak: Int?) -> Double? {
+        guard let age = ageYears, (10...100).contains(age) else { return nil }
+        return Swift.max(208 - 0.7 * Double(age), Double(observedPeak ?? 0))
     }
 }

@@ -138,6 +138,11 @@ final class OrbModel {
     private var agentPresence: Float = 0
     private var agentLevelSlow: Float = 0
     private var restBlend: Float = 0
+    private var breathPhase: Float = 0
+    private var bouncePhase: Float = 0
+    /// 0…1: how calm, and how pumped, you are mid-workout (0 outside one).
+    private var calmMood: Float = 0
+    private var pumpMood: Float = 0
 
     // x, y, radius, alive — the layout the shader reads.
     private var drops = [SIMD4<Float>](repeating: .zero, count: OrbModel.maxDrops)
@@ -211,8 +216,18 @@ final class OrbModel {
         // Resting between sets: a slower, deeper breath — the blob is the
         // rest timer you can see without looking at a number.
         restBlend += ((resting ? 1 : 0) - restBlend) * min(1, dt * 1.5)
+        // Mid-workout it mirrors you (EffortSignal, eased over ~10 s): calm
+        // slows and deepens the breath; pumping quickens it and adds a bounce.
+        let effort = inWorkout ? EffortSignal.shared.current(now: now) : 0.5
+        calmMood = max(0, (0.4 - effort) / 0.4)
+        pumpMood = max(0, (effort - 0.5) / 0.5)
+        // Phase accumulates, so a change of pace never jumps the breath.
+        breathPhase += dt * (0.9 - 0.5 * restBlend) * (1 - 0.3 * calmMood) * (1 + 1.1 * pumpMood)
+        if breathPhase > 2 * .pi * 1000 { breathPhase -= 2 * .pi * 1000 }
+        bouncePhase += dt * 2 * .pi * (1.5 + 0.6 * pumpMood)
+        if bouncePhase > 2 * .pi * 1000 { bouncePhase -= 2 * .pi * 1000 }
         let breathe: Float = reduceMotion ? 0
-            : (0.012 + 0.014 * restBlend) * sin(time * (0.9 - 0.5 * restBlend))
+            : (0.012 + 0.014 * restBlend + 0.008 * calmMood - 0.004 * pumpMood) * sin(breathPhase)
         // `scale` shrinks the body when a card takes the space below it.
         radius += ((baseR + agentLevelSlow * levelR + agent.peak * agentPresence * 0.05 + breathe) * scale - radius) * k
         // Talk mode: you're speaking to the coach and it's listening as a
@@ -225,7 +240,8 @@ final class OrbModel {
         // back with a small overshoot instead of sliding. Gym noise through
         // the open mic used to bob the whole person up and down mid-lift.
         let leanAmount = talkMode ? you.presence * (1 - form) : 0
-        let liftTarget = (0.05 - leanAmount * lean) * scale
+        let bounce = reduceMotion ? 0 : pumpMood * 0.028 * max(0, sin(bouncePhase)) * (1 - form)
+        let liftTarget = (0.05 - leanAmount * lean + bounce) * scale
         if reduceMotion {
             lift += (liftTarget - lift) * k
         } else {
@@ -359,7 +375,7 @@ final class OrbModel {
             } else if counting, let loop, !reduceMotion {
                 pose = loop.frame(at: time)
             } else if inWorkout {
-                if !reduceMotion, let alive = life.pose(motion: loop, setsDone: setsDone, time: time) {
+                if !reduceMotion, let alive = life.pose(motion: loop, setsDone: setsDone, time: time, calm: calmMood, pumped: pumpMood) {
                     pose = alive
                 }
             } else if ambient, phase == .rest, !reduceMotion {
