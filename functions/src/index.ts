@@ -37,6 +37,7 @@ import {
   WorkoutPlan,
 } from "./contracts/coach-agent.js";
 import { ingestHealthSamples as ingestHealthKitSamples } from "./health/ingest.js";
+import { forgetTurnRecovery } from "./health/recovery.js";
 import {
   recordAuditEvent,
   recordAuditEventBestEffort,
@@ -52,6 +53,7 @@ import {
   userRoot,
   workoutPlanPath,
   workoutLogPath,
+  coachSessionMessagePath,
 } from "./paths.js";
 import {
   FinishWorkoutSessionRequest,
@@ -602,6 +604,7 @@ export const startLiveCoachSession = onCall(
         userId,
         today,
         memoryBriefOnPhone: parsed.memoryBriefBuiltAt !== undefined,
+        recovery: parsed.recovery,
       });
       safeLogger.info("Live voice instruction built", {
         event: "live_voice_instruction_built",
@@ -1151,6 +1154,9 @@ export const onUserCoachMessageCreated = onDocumentCreated(
     const { userId, sessionId, messageId } = event.params;
     const turnId = randomUUID();
 
+    // Recovery (resting HR, HRV, sleep) is only for this one reply: it is
+    // removed from the stored message once the turn is done (or failed).
+    try {
     await orchestrateCoachTurn({
       db,
       coach,
@@ -1168,6 +1174,9 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
       openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });
+    } finally {
+      await forgetTurnRecovery(db, coachSessionMessagePath(userId, sessionId, messageId), data);
+    }
     // After every coach conversation turn: the phone's cached memory brief
     // refreshes from this (coach/memoryBrief.ts). Never throws.
     await rebuildMemoryBrief(db, userId, "coach_turn");

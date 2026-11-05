@@ -13,6 +13,7 @@
 		08454E67831E64CF5B0DA3AD /* DossierComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C5EE0407EB961F5B79622A /* DossierComponents.swift */; };
 		0EE131E31D5FEDA47CD239D6 /* IronBoiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5041EB6152324AB118525DA6 /* IronBoiApp.swift */; };
 		1015F45B673FF88BCFA8C97E /* TrainingReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */; };
+		11759AD3A5A7CD79E2A2F75F /* AppModel+Recovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8EF0ECFB7A3D918CAA7E92E /* AppModel+Recovery.swift */; };
 		11DF0BFE0E91A5583460C4C1 /* RestWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19BD1389B71AD03DD75E39A4 /* RestWidget.swift */; };
 		12EBE51165738CD08093CB14 /* FirebaseAppCheck in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5FCFEBC0D756CC3AF9E87B /* FirebaseAppCheck */; };
 		162BA5E9F7C261336EA5EB6F /* SoundMixControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01163A8F8C0914CB146F028C /* SoundMixControls.swift */; };
@@ -94,11 +95,13 @@
 		A4630ABB8889CE86DD9C0881 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 7F85ADB4B6951E8042F8DE17 /* Assets.xcassets */; };
 		A4C066E6104428EA4ED0200C /* WeightLoad.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7BD9122F027579370DAAE07 /* WeightLoad.swift */; };
 		A5B3271FB2AC4DB7A70C95F0 /* PhoneWorkoutSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D355FB209189C5896724E2A4 /* PhoneWorkoutSession.swift */; };
+		A9ECDE6D5BE30DC6D257D2F8 /* RecoveryBaselineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FA4ED854A7DF6FFF49CE800 /* RecoveryBaselineTests.swift */; };
 		AB77E950AC816BF6BF66C280 /* GoogleService-Info-Prod.plist in Resources */ = {isa = PBXBuildFile; fileRef = D7AE34CAB73168EAD8126F53 /* GoogleService-Info-Prod.plist */; };
 		AB88E520959883D65800468A /* MemoryReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 308987A1BEE7DAF86C626E66 /* MemoryReviewView.swift */; };
 		ACD5F19BBA05A59B6A96D94A /* ExerciseLesson.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D5993F87772C62C53440A56 /* ExerciseLesson.swift */; };
 		B967E07E086C0B4DF5053097 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FF453D8056596BC46261479F /* PrivacyInfo.xcprivacy */; };
 		BB6588CFAF60B960C39FA989 /* HeartStrapConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94B79E936F7D5DE0FAA86D63 /* HeartStrapConnector.swift */; };
+		C07D2ED66A8E2853B08F90A5 /* RecoveryBaseline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A608F4E3F8610931E7F27B /* RecoveryBaseline.swift */; };
 		C7C1099680A62E0502B3B230 /* AppModel+WorkoutWeight.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2AFA564B12B423FC0836691 /* AppModel+WorkoutWeight.swift */; };
 		CA21DCD00B3B658D44389F3B /* ExerciseSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = 444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */; };
 		CA375C8D58B1B03F67C2B93A /* SetupCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDC6CE12E7E58F297DFC0194 /* SetupCard.swift */; };
@@ -121,6 +124,7 @@
 		EB61595884711817A062E761 /* SetCount.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEEA001FBB612929063F327B /* SetCount.swift */; };
 		EEBCE27B100739C4DD490381 /* MicAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */; };
 		EECFA673703A34EBBCC48022 /* MoveLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */; };
+		F1CE67E9376886536D4FC62D /* RecoveryBaseline.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4A608F4E3F8610931E7F27B /* RecoveryBaseline.swift */; };
 		F2DC0ABA179AB96A355EECF4 /* MYOWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 7F8422FF7929970FA81E0EEF /* MYOWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FA5ED921350DA344444F6C3A /* HeartZones.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1588FF5ABB8A4406698E4F5A /* HeartZones.swift */; };
 		FAC3331659CDF488408A0A3B /* ExerciseMotionShim.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8BF537C304698B396A4D0BC /* ExerciseMotionShim.swift */; };
@@ -238,17 +242,20 @@
 		92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerativeLife.swift; sourceTree = "<group>"; };
 		94B79E936F7D5DE0FAA86D63 /* HeartStrapConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeartStrapConnector.swift; sourceTree = "<group>"; };
 		967C0EA1064A78AC0A10ABE0 /* IronBoi.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = IronBoi.entitlements; sourceTree = "<group>"; };
+		9FA4ED854A7DF6FFF49CE800 /* RecoveryBaselineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryBaselineTests.swift; sourceTree = "<group>"; };
 		A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryFact.swift; sourceTree = "<group>"; };
 		A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetCountTests.swift; sourceTree = "<group>"; };
 		A468463FE2879A9FF09B426B /* RestActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RestActivityAttributes.swift; sourceTree = "<group>"; };
 		A4734F76A950FA7C6ECA47EC /* WorkoutLogModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutLogModels.swift; sourceTree = "<group>"; };
 		A49F537763E309EA90847347 /* WatchWorkoutLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchWorkoutLink.swift; sourceTree = "<group>"; };
 		A74D3CCED1D05759C87442F7 /* PlanReviewCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanReviewCard.swift; sourceTree = "<group>"; };
+		A8EF0ECFB7A3D918CAA7E92E /* AppModel+Recovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Recovery.swift"; sourceTree = "<group>"; };
 		AA2F3AA8A5075B9B87679253 /* WatchMessages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchMessages.swift; sourceTree = "<group>"; };
 		ABA43A4CC6F8F82125648DD1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AC8A7F0156E886437433E203 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
 		B19DFF36DF7FD6738CB323A5 /* CoachMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachMessage.swift; sourceTree = "<group>"; };
 		B22248F2FDB989898C274F26 /* WeightLoadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeightLoadTests.swift; sourceTree = "<group>"; };
+		B4A608F4E3F8610931E7F27B /* RecoveryBaseline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryBaseline.swift; sourceTree = "<group>"; };
 		B4E60CD7DDA97B7D6E1C118C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C698900CF6774CF078D13616 /* HealthSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthSync.swift; sourceTree = "<group>"; };
 		C8BF537C304698B396A4D0BC /* ExerciseMotionShim.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseMotionShim.swift; sourceTree = "<group>"; };
@@ -357,6 +364,7 @@
 				DF08E19B82B68A9F1800268E /* EffortTests.swift */,
 				C8BF537C304698B396A4D0BC /* ExerciseMotionShim.swift */,
 				73551C805B0044EC1F0C4D06 /* LiveVoicePolicyTests.swift */,
+				9FA4ED854A7DF6FFF49CE800 /* RecoveryBaselineTests.swift */,
 				A404D09CD6F4C14ACA7EAFC8 /* SetCountTests.swift */,
 				B22248F2FDB989898C274F26 /* WeightLoadTests.swift */,
 			);
@@ -387,6 +395,7 @@
 				14B3B81CDDD9AE1C5E2F916F /* AnalyzerRecognition.swift */,
 				F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */,
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
+				A8EF0ECFB7A3D918CAA7E92E /* AppModel+Recovery.swift */,
 				2C07DF5449417A159375AD4C /* AppModel+Watch.swift */,
 				E2AFA564B12B423FC0836691 /* AppModel+WorkoutWeight.swift */,
 				7701CCF07727848BE39DE49A /* AudioHub.swift */,
@@ -401,6 +410,7 @@
 				57E02A95AC5A83BF0DDA0854 /* MemoryBriefCache.swift */,
 				7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */,
 				D355FB209189C5896724E2A4 /* PhoneWorkoutSession.swift */,
+				B4A608F4E3F8610931E7F27B /* RecoveryBaseline.swift */,
 				4F10C35335B09DF5C8E78766 /* RestActivity.swift */,
 				5468ED112F5211FF9C4AB806 /* TrainingReminders.swift */,
 				F6A47FA7EDB3DBFD24E70FCB /* VoiceCache.swift */,
@@ -740,6 +750,7 @@
 				4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */,
 				5D0502F7A2D1A4FB76B5FB5C /* AnalyzerRecognition.swift in Sources */,
 				40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */,
+				11759AD3A5A7CD79E2A2F75F /* AppModel+Recovery.swift in Sources */,
 				0649233C75E1DBC6749C2FA6 /* AppModel+Watch.swift in Sources */,
 				C7C1099680A62E0502B3B230 /* AppModel+WorkoutWeight.swift in Sources */,
 				8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */,
@@ -791,6 +802,7 @@
 				DDE287948E75C936D7F8D05A /* PlanReviewCard.swift in Sources */,
 				22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */,
 				5E959043BE8381E22181D226 /* RecordView.swift in Sources */,
+				C07D2ED66A8E2853B08F90A5 /* RecoveryBaseline.swift in Sources */,
 				7E148C16912BB7F38AACD81D /* RestActivity.swift in Sources */,
 				4EFF7681C8A26A5D67D5A922 /* RestActivityAttributes.swift in Sources */,
 				2A64E71009EB2332881D805A /* SessionAlternatives.swift in Sources */,
@@ -852,6 +864,8 @@
 				FAC3331659CDF488408A0A3B /* ExerciseMotionShim.swift in Sources */,
 				E12D9219931FCC256A09C96E /* LiveVoicePolicy.swift in Sources */,
 				7A2011631319A4C8C91958E6 /* LiveVoicePolicyTests.swift in Sources */,
+				F1CE67E9376886536D4FC62D /* RecoveryBaseline.swift in Sources */,
+				A9ECDE6D5BE30DC6D257D2F8 /* RecoveryBaselineTests.swift in Sources */,
 				071A7CE1BFDA0289D53B2D43 /* SessionAlternatives.swift in Sources */,
 				EB61595884711817A062E761 /* SetCount.swift in Sources */,
 				774C91A01115DF4BCCE7B596 /* SetCountTests.swift in Sources */,
@@ -1095,7 +1109,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-staging.cloudfunctions.net";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MYO connects to your heart rate strap so your coach can pace your rests.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "MYO reads your heart rate and active energy during workouts so your coach can pace your rests.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "MYO reads your heart rate and active energy during workouts so your coach can pace your rests, and, if you turn it on, your resting heart rate, HRV and sleep so your coach can offer a lighter session on low-recovery days.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MYO saves your finished workouts to Apple Health so they count toward your activity.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";
@@ -1164,7 +1178,7 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_IronBoiCallableBaseURL = "https://us-central1-ironboi-prod.cloudfunctions.net";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "MYO connects to your heart rate strap so your coach can pace your rests.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "MYO reads your heart rate and active energy during workouts so your coach can pace your rests.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "MYO reads your heart rate and active energy during workouts so your coach can pace your rests, and, if you turn it on, your resting heart rate, HRV and sleep so your coach can offer a lighter session on low-recovery days.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "MYO saves your finished workouts to Apple Health so they count toward your activity.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "MYO uses the microphone so you can speak to your coach.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "MYO uses speech recognition to turn your voice into coach messages.";

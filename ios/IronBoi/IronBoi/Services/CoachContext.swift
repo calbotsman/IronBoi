@@ -102,6 +102,11 @@ enum CoachContext {
             }
             parts.append(line)
         }
+        // Recovery changes once a day at most; only the verdict, no numbers.
+        if let recovery = context["recovery"] as? [String: Any], recovery["low"] as? Bool == true {
+            let signals = (recovery["signals"] as? [String] ?? []).map { $0.replacingOccurrences(of: "_", with: " ") }
+            parts.append("recovery low today (\(signals.joined(separator: ", ")))")
+        }
         if let delivery = context["delivery"] as? [String: Any] {
             if delivery["speaksReplies"] as? Bool == false { parts.append("they read you on screen, voice off") }
             if delivery["musicPlaying"] as? Bool == true {
