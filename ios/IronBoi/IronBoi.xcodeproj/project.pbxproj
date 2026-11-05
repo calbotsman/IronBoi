@@ -28,6 +28,7 @@
 		4FB63CA63AC0C23DEC7A3317 /* AmbientLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD07E5325615931462D65FF0 /* AmbientLife.swift */; };
 		517EC3482C4841986CFB46AD /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC8A7F0156E886437433E203 /* ConversationView.swift */; };
 		51CC2429FC9297B9C5409548 /* WorkoutVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE76DF2D83BD9ED92C5FE58D /* WorkoutVoice.swift */; };
+		526DA344085E2FB0CF1E223A /* CoachContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7475AB77513A49C9F500062D /* CoachContext.swift */; };
 		56407351422DBC9891A5C08B /* OneBodyMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58BF43C7EEB34DB74952D09E /* OneBodyMotion.swift */; };
 		572DFD05DB458C8C48B718DA /* WeightFollowUpCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3CF0CA6556F3BF1813F29B /* WeightFollowUpCard.swift */; };
 		5B5852D55FB5FD1BAE4B5C9D /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 241473A5576E7F94D3F1BA1E /* README.md */; };
@@ -108,6 +109,7 @@
 		6E9C398C5E87EDCE8863D1FE /* MoveLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MoveLibrary.swift; sourceTree = "<group>"; };
 		73C5EE0407EB961F5B79622A /* DossierComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DossierComponents.swift; sourceTree = "<group>"; };
 		7471B86DB66DD6B54955497F /* WorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutView.swift; sourceTree = "<group>"; };
+		7475AB77513A49C9F500062D /* CoachContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachContext.swift; sourceTree = "<group>"; };
 		7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicAnalyzer.swift; sourceTree = "<group>"; };
 		7701CCF07727848BE39DE49A /* AudioHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioHub.swift; sourceTree = "<group>"; };
 		77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseMotion.swift; sourceTree = "<group>"; };
@@ -211,6 +213,7 @@
 				F763B4CD6329C59A7EB310E4 /* AppCheckProviderFactory.swift */,
 				CAE8CC59433E740F466264C6 /* AppModel.swift */,
 				7701CCF07727848BE39DE49A /* AudioHub.swift */,
+				7475AB77513A49C9F500062D /* CoachContext.swift */,
 				040387C0316794F5C15D9648 /* CoachMix.swift */,
 				FE421758EDDAA0A1C46B3AFC /* CoachVoice.swift */,
 				C698900CF6774CF078D13616 /* HealthSync.swift */,
@@ -446,6 +449,7 @@
 				40D3D039704A6A80E4F0B92A /* AppCheckProviderFactory.swift in Sources */,
 				8D108E6F57C78A470F86E22F /* AppModel.swift in Sources */,
 				8C5D909199B021D18EB0BF09 /* AudioHub.swift in Sources */,
+				526DA344085E2FB0CF1E223A /* CoachContext.swift in Sources */,
 				7B3F736E2324263E075A613B /* CoachMessage.swift in Sources */,
 				E2611A41CD0A45F47F8F3234 /* CoachMix.swift in Sources */,
 				772BF83112E39339AC2E9561 /* CoachStageView.swift in Sources */,

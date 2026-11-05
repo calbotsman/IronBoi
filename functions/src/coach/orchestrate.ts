@@ -27,8 +27,9 @@ import {
   publishDraftProposals,
 } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
-import type { CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
-import { liveWorkoutRules } from "./liveWorkout.js";
+import type { CoachTips, CoachTone, LiveCoachContext, LiveWorkoutState } from "../contracts/coach-agent.js";
+import { liveContextRules, liveWorkoutRules } from "./liveWorkout.js";
+import { isCardioExercise } from "../workouts/exerciseCatalog.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
@@ -109,6 +110,8 @@ type OrchestrateCoachTurnArgs = {
   coachTone?: CoachTone;
   /** Mid-workout: where the user is right now. */
   liveWorkout?: LiveWorkoutState;
+  /** Rest, pace, heart rate, recent training, how the coach is heard. */
+  liveContext?: LiveCoachContext;
   geminiApiKey?: string;
   openRouterApiKey?: string;
 };
@@ -143,6 +146,7 @@ export async function orchestrateCoachTurn({
   coachTips,
   coachTone,
   liveWorkout,
+  liveContext,
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
@@ -272,6 +276,10 @@ export async function orchestrateCoachTurn({
       inputMode ? BODY_RULES : null,
       styleRules,
       liveWorkoutRules(liveWorkout),
+      liveContextRules(liveContext, {
+        inWorkout: Boolean(liveWorkout),
+        onCardio: liveWorkout ? isCardioExercise(liveWorkout.exercise) : false,
+      }),
     ].filter((part): part is string => Boolean(part)).join("\n\n");
     const userMessage = assembled.userMessage;
     const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });

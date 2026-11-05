@@ -91,6 +91,64 @@ export const LiveWorkoutState = z.object({
   exercises: z.array(z.string().min(1).max(80)).max(30),
 }).strict();
 export type LiveWorkoutState = z.infer<typeof LiveWorkoutState>;
+
+/**
+ * Everything else the coach should know about right now, computed on the
+ * phone and sent with each message: how the session is going (rest, pace),
+ * the heart rate when a wearable is streaming, how training has gone lately,
+ * and how the coach is being heard. Every field is optional — the phone only
+ * sends what it actually knows; numbers only, no free text.
+ * See docs/product/responsive-coach-plan.md.
+ */
+export const HeartSource = z.enum(["watch", "strap", "airpods"]);
+export const EffortRating = z.enum(["easy", "about_right", "too_much"]);
+export type EffortRating = z.infer<typeof EffortRating>;
+export const LiveCoachContext = z.object({
+  session: z.object({
+    minutesIn: z.number().int().min(0).max(600).optional(),
+    setsDone: z.number().int().min(0).max(300).optional(),
+    /** Resting right now: seconds since the last set ended / seconds planned. */
+    restElapsedSec: z.number().int().min(0).max(3600).optional(),
+    restPlannedSec: z.number().int().min(0).max(3600).optional(),
+    /** How long the last set took, start of count to logged. */
+    lastSetSec: z.number().int().min(0).max(900).optional(),
+    /** A timed block running right now: a cardio block (bike, run, rower) or a hold (plank). */
+    timed: z.object({
+      kind: z.enum(["cardio", "hold"]),
+      elapsedSec: z.number().int().min(0).max(4 * 3600),
+      plannedSec: z.number().int().min(0).max(4 * 3600),
+    }).strict().optional(),
+  }).strict().optional(),
+  heart: z.object({
+    source: HeartSource,
+    bpm: z.number().int().min(30).max(240),
+    /** How old the reading is. */
+    ageSec: z.number().int().min(0).max(600),
+    /** 1–5, from an estimated max heart rate. */
+    zone: z.number().int().min(1).max(5).optional(),
+    trend: z.enum(["rising", "steady", "falling"]).optional(),
+    /** Beats dropped in the first minute of the current rest. */
+    recoveryDrop60: z.number().int().min(-60).max(120).optional(),
+    sessionPeak: z.number().int().min(30).max(240).optional(),
+  }).strict().optional(),
+  rhythm: z.object({
+    sessionsLast7d: z.number().int().min(0).max(50),
+    sessionsLast28d: z.number().int().min(0).max(200),
+    /** Days since the last finished workout before today; absent = never. */
+    daysSinceLast: z.number().int().min(0).max(3650).optional(),
+    /** Most recent first. */
+    recentEfforts: z.array(EffortRating).max(3).optional(),
+  }).strict().optional(),
+  delivery: z.object({
+    /** False: the coach's replies are read on screen, not heard. */
+    speaksReplies: z.boolean(),
+    /** Their own music is playing under the coach. */
+    musicPlaying: z.boolean().optional(),
+    /** How much their music dips under the coach (Sound settings): none, light, full. */
+    musicDip: z.enum(["none", "light", "full"]).optional(),
+  }).strict().optional(),
+}).strict();
+export type LiveCoachContext = z.infer<typeof LiveCoachContext>;
 export type CoachTone = z.infer<typeof CoachTone>;
 export const OnboardingStatus = z.enum([
   "not_started",
@@ -796,6 +854,7 @@ export const CoachMessage = z.object({
   coachTips: CoachTips.optional(),
   coachTone: CoachTone.optional(),
   liveWorkout: LiveWorkoutState.optional(),
+  liveContext: LiveCoachContext.optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().optional(),
   toolCallIds: z.array(z.string()).default([]),

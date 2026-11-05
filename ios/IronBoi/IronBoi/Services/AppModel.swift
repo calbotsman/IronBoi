@@ -394,6 +394,7 @@ final class AppModel: NSObject, ObservableObject {
                 // holds the session — no review card, no weight to ask for.
                 if name == "swap_workout_exercise" { return await self.liveSwap(args) }
                 if name == "show_exercise" { return self.liveShow(args) }
+                if name == "extend_rest" { return self.liveExtendRest(args) }
                 guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
                 let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
                     "name": name,
@@ -456,6 +457,9 @@ final class AppModel: NSObject, ObservableObject {
             ]
             // Mid-workout: the exercise you're on, so "this one" means it.
             if let live = liveWorkoutState(repsCounted: repsCounted) { data["liveWorkout"] = live }
+            // Rest, heart rate, recent training, how Coach is heard.
+            let context = liveCoachContext()
+            if !context.isEmpty { data["liveContext"] = context }
             try await callCallable("sendCoachMessage", data: data)
         } catch {
             errorMessage = error.localizedDescription
@@ -484,6 +488,96 @@ final class AppModel: NSObject, ObservableObject {
         if let repsCounted, repsCounted > 0 { state["repsCountedThisSet"] = min(repsCounted, 200) }
         return state
     }
+
+    // MARK: - Coach live context (rest, heart rate, rhythm, delivery)
+
+    /// The rest timer, as the workout screen runs it: when this rest
+    /// started, how long it was meant to be, and when it ends now.
+    private var restStartedAt: Date?
+    private var restPlannedSec: Int?
+    @Published private(set) var restEndsAt: Date?
+
+    /// The workout screen's rest timer started, changed or ended (nil).
+    func noteRest(endsAt: Date?) {
+        if let endsAt {
+            if restEndsAt == nil {
+                restStartedAt = Date()
+                restPlannedSec = Int(endsAt.timeIntervalSinceNow.rounded())
+            }
+        } else {
+            restStartedAt = nil
+            restPlannedSec = nil
+        }
+        restEndsAt = endsAt
+    }
+
+    /// A timed block the workout screen is running: a cardio block or a hold.
+    struct TimedBlock: Equatable {
+        let cardio: Bool
+        let startedAt: Date
+        let plannedSec: Int
+    }
+    @Published private(set) var timedBlock: TimedBlock?
+
+    /// The workout screen's hold or cardio timer started, or ended (nil).
+    func noteTimedBlock(_ block: TimedBlock?) {
+        timedBlock = block
+    }
+
+    /// The live coach asked for more rest; the workout screen applies it.
+    struct RestExtension: Equatable {
+        let id = UUID()
+        let seconds: Int
+    }
+    @Published var restExtensionRequest: RestExtension?
+
+    func liveExtendRest(_ args: [String: Any]) -> [String: Any] {
+        guard activeWorkout != nil else { return ["ok": false, "error": "no_active_workout"] }
+        guard restEndsAt != nil else { return ["ok": false, "error": "not_resting", "hint": "Only while they rest between sets."] }
+        let asked = (args["seconds"] as? Int) ?? (args["seconds"] as? Double).map { Int($0) } ?? 30
+        let seconds = max(15, min(asked, 180))
+        restExtensionRequest = RestExtension(seconds: seconds)
+        return ["ok": true, "addedSeconds": seconds]
+    }
+
+    /// Everything the coach should know right now besides the exercise
+    /// (see CoachContext). Keys mirror LiveCoachContext on the server.
+    func liveCoachContext(now: Date = Date()) -> [String: Any] {
+        var context: [String: Any] = [:]
+        if let workout = activeWorkout {
+            var session: [String: Any] = [
+                "setsDone": min(workout.exercises.reduce(0) { $0 + $1.completedSetCount }, 300),
+            ]
+            if let started = Self.parseISO(workout.startedAt) {
+                session["minutesIn"] = max(0, min(Int(now.timeIntervalSince(started) / 60), 600))
+            }
+            if restEndsAt != nil, let restStartedAt {
+                session["restElapsedSec"] = max(0, min(Int(now.timeIntervalSince(restStartedAt)), 3600))
+                if let restPlannedSec { session["restPlannedSec"] = max(0, min(restPlannedSec, 3600)) }
+            }
+            if let block = timedBlock {
+                let cap = 4 * 3600
+                session["timed"] = [
+                    "kind": block.cardio ? "cardio" : "hold",
+                    "elapsedSec": max(0, min(Int(now.timeIntervalSince(block.startedAt)), cap)),
+                    "plannedSec": max(0, min(block.plannedSec, cap)),
+                ] as [String: Any]
+            }
+            context["session"] = session
+            let hub = HeartRateHub.shared
+            if let heart = CoachContext.heart(hub.latest, ageYears: profile.ageYears, peak: hub.sessionPeak, now: now) {
+                context["heart"] = heart
+            }
+        }
+        if workoutLogsLoaded || inPreview {
+            context["rhythm"] = CoachContext.rhythm(logs: workoutLogs, now: now)
+        }
+        context["delivery"] = CoachContext.delivery()
+        return context
+    }
+
+    /// The live context as one line for the live voice coach.
+    var liveContextNote: String? { CoachContext.voiceNote(liveCoachContext()) }
 
     func askCoachAboutWorkout(
         dayKey: String,
@@ -711,6 +805,10 @@ final class AppModel: NSObject, ObservableObject {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
+        // A new workout: no rest running, no heart readings from the last one.
+        noteRest(endsAt: nil)
+        noteTimedBlock(nil)
+        HeartRateHub.shared.reset()
         #if DEBUG
         // The preview has no backend: a small local session, enough to walk
         // through starting, teaching and counting.
