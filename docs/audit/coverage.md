@@ -62,4 +62,25 @@ Status values: not started, in PR #N, merged (#N), dropped.
 
 ## Not an idea, but tracked
 
-| Live voice "weird and laggy" (Josh, real workout) | PR #53 adds fallback + logging, but **L1 (main-thread decode) and L3 (mint wait) are not fixed** (F26). |
+| Live voice "weird and laggy" (Josh, real workout) | #53 (3b7e6c2) fixes L1 (off-main decode). L3 (mint wait) and L2 (half-duplex with music) are still open; #38 B2 may cause silent gaps after tools. |
+
+## Merged vs device-tested (2026-11-05, end of day)
+
+| PR | What | Merged | Device-tested | Open watchdog findings carried in |
+|---|---|---|---|---|
+| #39 | Health save | yes | **no** (3/3 checks unticked) | F7 |
+| #40 | Captions, mix | yes | no (PR says signing blocked) | — (and caused F40, now fixed) |
+| #41 | Cardio add | yes | no | F2 (F1 fixed by #51) |
+| #44 | Live context | yes | no (0/4) | F3, F5, F8, F9 |
+| #46 | Rep count past target | yes | no | — |
+| #47 | Weight / sides | yes | no | F36–F39 unless fixed after the audit |
+| #48 | Watch app | yes | no (0/12) | F30 (8 s Watch-end timeout still on main), F31, F32 |
+| #49 | Atmosphere | yes | no | F14, F15 (F13 mostly resolved by #48's real HR) |
+| #50 | Memory brief | yes | no | F16–F20 |
+| #51 | Session switch | yes | no (0/3) | F21–F25 |
+| #52 | Straps / AirPods | yes | no (0/10) | F33 now gated on `HealthSync.enabled` on main (partly fixed); F34, F35 |
+| #54 | F40 plist fix | yes | build-verified | — |
+| #38 | OpenAI Realtime live voice | **no** | no | B1–B3 |
+| #53 | Live voice reliability | **no** | no | B4, F27 |
+
+**Nothing has been device-tested.** Every merged feature has compiled and passed CI but has never run on a phone; the one device attempt (live-voice-fix) crashed on F40. Priority device run: a full workout with the Watch, Spotify on the speaker, and live voice on, to cover F30, L2, B2 and #46 together.

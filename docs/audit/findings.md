@@ -37,6 +37,38 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 **F9. #44: `extend_rest` reports success before anything happens. CONFIRMED**
 `AppModel.swift:534–539`: it returns `ok: true, addedSeconds` after setting `restExtensionRequest`. The timer only changes if `CoachStageView` is mounted to catch the `onChange`. Scenario: the user is on another tab and the live coach is still connected. The coach says "I've given you 30 more seconds" and the timer is unchanged. The server tells the coach not to cue the next set until HR drops, but the phone's own rest timer still says "Go." on schedule, so the coach and the app can disagree.
 
+## Final pre-merge: #38 OpenAI Realtime (ddc411f) + #53 on top (3b7e6c2)
+
+**Verdict: not yet. Both are close; the blockers are small and listed below.**
+
+Verified fine:
+- The OpenAI Realtime protocol is GA-consistent. The key is minted server-side at `/v1/realtime/client_secrets` from the Firebase secret, and the phone only gets a 10-minute `ek_`. Session config (`type:"realtime"`, 24 kHz PCM in and out, `semantic_vad`, voice, tools, instructions) is set in the mint, with no `OpenAI-Beta` header. Every client event name is valid. The phone accepts both GA and legacy audio/transcript delta names, so there's no silent-audio risk.
+- Every live tool is declared and handled: the 10 server tools including `recall_training_history`, plus phone-run `replace_session`, `add_session_add_on`, `swap_workout_exercise`, `extend_rest`, `show_exercise` and `set_workout_weight` (`liveSession.ts:233-296`, `AppModel.swift:443-455`). The memory brief goes in as the first `[app]` note.
+- **#53 fixes F26/L1:** messages are parsed and decoded on URLSession's queue, `receive` is re-armed before parsing, and only results hop to main, in order. A "message waited N ms for main" log was added.
+- **No regression to #46:** mic muting is centralised in `updateLiveUplink()` (`CoachStageView.swift:2693`), which keeps the `repsStoppedAfter` reopen. `liveHeard` still closes the set. The hand-over waits for `setCount == nil && closeCountTask == nil`. Design change from #38: the live mic is now closed for the whole set, not just while counting ("MYO, …" still passes through).
+
+**Blockers**
+
+**B1 (#38). The OpenAI client can rewrite its own coach, and staging makes OpenAI the default. CONFIRMED**
+OpenAI ephemeral secrets don't lock the session, so a client can `session.update` its instructions and tools. `liveOpenAI.ts:9-12` says so itself and calls the provider "opt-in… for testing, not the default". But `functions/.env.ironboi-staging:77` sets `IRONBOI_LIVE_PROVIDER=openai`, with `IRONBOI_LIVE_ALLOW_ANONYMOUS=true` (`:68`). The `handover` flag is client-asserted and draws a separate 200/day cap (`index.ts:576-579`, `liveSession.ts:52`). So one anonymous install can mint ~240 rewritable Realtime sessions a day on Josh's key. Prod has no LIVE_ vars, so it's off there. Fix: derive `handover` server-side (or count it against the main cap) and disallow anonymous for OpenAI. Then accept B1 as a known limit, since Josh chose OpenAI.
+
+**B2 (#38). Tool replies race the active response. PLAUSIBLE, high**
+`LiveVoiceSession.swift:816-820`: right after a `function_call_output`, `response.create` is sent without waiting for that response's `response.done`. Phone tools (`extend_rest`, `show_exercise`) return instantly, so OpenAI will often reject the request because a response is still active. The error is only logged, so the coach goes silent after a tool. `say()` has the same race. Also, tool calls from a cancelled or interrupted response still run (`function_call_arguments.done` is emitted on cancel), so `replace_session` could fire on a barge-in. Fix: queue `response.create` until `response.done`, and skip calls whose response status isn't `completed`.
+
+**B3 (#38). The privacy policy is wrong. CONFIRMED**
+It now names only OpenAI for live voice, but Gemini Live is still a selectable provider. It says live voice is "off by default", but `PreferencesView.swift:9` defaults `liveVoiceBeta = true`. The new Gemini/OpenAI text-to-speech path (`speech.ts`) isn't disclosed. This must be right before any external tester.
+
+**B4 (#53). The reconnect hold buffer is dead code. CONFIRMED**
+`LiveVoiceSession.swift:1101`: the mic tap does `guard let chunk = uplink.append(buffer), box.socket != nil else { return }`. During a reconnect `socketBox.socket` is nil (`:553`), so the tap returns before `box.send`, and `SocketBox.hold()`'s "up to ~6 s held" never receives audio. Only the ~2 s before the drop is replayed, so speech during the gap is lost. F28 is still open. One-line fix: drop `box.socket != nil` (`send` already handles nil and holding).
+
+**Not blocking (follow-ups)**
+- **F27 still open:** `handedOver()` still resets `failures = 0` (`LiveVoicePolicy.swift:105`). It's now bounded only by the daily mint caps.
+- **F29 mitigated:** a missed pong only counts once a pong has been seen; the 8 s ready timeout still includes the mint.
+- **L3 still open:** every start and reconnect awaits the mint. L2 (half-duplex with music on speaker) unchanged.
+- The phone's picker can show "Gemini" while staging serves OpenAI (`AppModel.swift:418` only sends `provider` when OpenAI is picked).
+- `liveSession.ts:136-195` holds a dead second OpenAI implementation (a different model default, voices and 15-min expiry). Delete it.
+- No test exercises the iOS OpenAI event handling, and no real OpenAI session has been run on a device.
+
 ## Process
 
 **F40. Main's committed Xcode project didn't bundle GoogleService-Info.plist, so builds crashed at launch. RESOLVED on main by #54** (the plist is now an `optional: true`, `buildPhase: resources` source and is excluded from the folder glob; main's pbxproj has the reference again). Open PRs still without it, as of 2026-11-05 (none rebased onto #54 yet): **#44, #48, #49, #50, #51**. #38, #46, #47, #52 and #53 have the pbxproj entry but not the project.yml fix. Every open PR must rebase onto main and **regenerate with xcodegen**, not hand-merge the pbxproj, so the entry survives.
