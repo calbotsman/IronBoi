@@ -168,7 +168,6 @@ targets:
         com.apple.developer.devicecheck.appattest-environment: production
         # Write-only: finished workouts go to Apple Health (Services/HealthSync.swift).
         com.apple.developer.healthkit: true
-        com.apple.developer.healthkit.access: []
 
 # A second scheme for tuning the blob's physics in the simulator: no backend,
 # no mic, the stunt reel on loop and the live tuner (DEBUG only). Pick
