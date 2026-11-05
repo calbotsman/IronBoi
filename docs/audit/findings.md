@@ -61,8 +61,14 @@ It now names only OpenAI for live voice, but Gemini Live is still a selectable p
 **B4 (#53). The reconnect hold buffer is dead code. CONFIRMED**
 `LiveVoiceSession.swift:1101`: the mic tap does `guard let chunk = uplink.append(buffer), box.socket != nil else { return }`. During a reconnect `socketBox.socket` is nil (`:553`), so the tap returns before `box.send`, and `SocketBox.hold()`'s "up to ~6 s held" never receives audio. Only the ~2 s before the drop is replayed, so speech during the gap is lost. F28 is still open. One-line fix: drop `box.socket != nil` (`send` already handles nil and holding).
 
+**B5 (#53). F27 is still open and worse on OpenAI. CONFIRMED**
+`handedOver()` still resets `failures = 0`. And after ready, an OpenAI socket close goes to `reconnect()` (`LiveVoiceSession.swift` receive failure branch: `ready, resumeHandle != nil || openAI`), not through the policy's backoff. A session that reaches ready and then dies each time reconnects immediately, minting every time until the 40/day cap. Fix: count ready-then-drop as a failure, and route post-ready closes through the backoff.
+
+**B6 (#53). The context note is skipped on a normal hand-over. CONFIRMED**
+`CoachStageView.swift:1634-1645`: `handOverToLive(); return` exits before `pushContextNote(appModel.liveContextNote)`, so the live coach starts without #44's rest/HR/rhythm context.
+
 **Not blocking (follow-ups)**
-- **F27 still open:** `handedOver()` still resets `failures = 0` (`LiveVoicePolicy.swift:105`). It's now bounded only by the daily mint caps.
+- PLAUSIBLE: `quietForCount` isn't reset on teardown (live dropped mid-count, later outside a workout, could stay silent). And "no mic" in `takeMic` runs `onEnded` before `handedOver()`, which can leave nothing listening outside a workout.
 - **F29 mitigated:** a missed pong only counts once a pong has been seen; the 8 s ready timeout still includes the mint.
 - **L3 still open:** every start and reconnect awaits the mint. L2 (half-duplex with music on speaker) unchanged.
 - The phone's picker can show "Gemini" while staging serves OpenAI (`AppModel.swift:418` only sends `provider` when OpenAI is picked).
