@@ -169,7 +169,7 @@ enum WorkoutEffort: String, CaseIterable, Identifiable {
 /// The list is server-ranked and server-validated: `swapExercise` re-checks
 /// the replacement against the same catalog, so nothing outside a returned
 /// option can be written into the plan.
-struct ExerciseSwapOption: Decodable, Equatable, Identifiable {
+struct ExerciseSwapOption: Codable, Equatable, Identifiable {
     var id: String { name }
 
     let name: String

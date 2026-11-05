@@ -19,6 +19,8 @@ struct CoachMessage: Identifiable, Equatable {
     var sources: [CoachSource] = []
     /// Voice mode: the part the voice reads (server-capped); nil = read it all.
     var spokenContent: String? = nil
+    /// Changes only the phone can make (switching today's session), applied once.
+    var clientActions: [CoachClientAction] = []
 
     /// What Coach says out loud for this reply.
     var speech: String { spokenContent ?? content }

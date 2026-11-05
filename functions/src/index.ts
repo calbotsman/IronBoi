@@ -74,6 +74,7 @@ import {
   swapExercise,
 } from "./workouts/exerciseSwap.js";
 import { ApplyExerciseBaselinesRequest } from "./workouts/exerciseBaselines.js";
+import { GetSessionAlternativesRequest, getSessionAlternatives } from "./workouts/sessionAlternatives.js";
 import { applyExerciseBaselines } from "./workouts/rebaseline.js";
 import { writeRegeneratedPlanAndProgram } from "./workouts/program.js";
 import { rolloverTrainingPrograms } from "./workouts/rollover.js";
@@ -708,6 +709,14 @@ export const getExerciseSwapOptionsCallable = onCall(CALLABLE_OPTS, async (reque
   const userId = requireUserId(request.auth);
   const parsed = GetExerciseSwapOptionsRequest.parse(request.data ?? {});
   return await getExerciseSwapOptions(db, userId, parsed);
+});
+
+// Every swap and whole-session alternative for the plan's days, banked on
+// the phone so changing the workout never waits on the network.
+export const getSessionAlternativesCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = GetSessionAlternativesRequest.parse(request.data ?? {});
+  return await getSessionAlternatives(db, userId, parsed);
 });
 
 export const swapExerciseCallable = onCall(CALLABLE_OPTS, async (request) => {

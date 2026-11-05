@@ -101,6 +101,41 @@ export type LiveWorkoutState = z.infer<typeof LiveWorkoutState>;
  * See docs/product/responsive-coach-plan.md.
  */
 export const HeartSource = z.enum(["watch", "strap", "airpods"]);
+/** What someone can switch today's session to (workouts/sessionAlternatives.ts). */
+export const SessionKind = z.enum([
+  "run", "walk", "cycle", "row", "swim", "hike", "yoga", "mobility", "bodyweight", "shorter",
+]);
+export type SessionKind = z.infer<typeof SessionKind>;
+/** The broad kind of training someone mainly does. */
+export const TrainingStyle = z.enum(["strength", "endurance", "mobility"]);
+export type TrainingStyle = z.infer<typeof TrainingStyle>;
+/** How a finished session is saved to Apple Health (ios HealthSync.activityType). */
+export const SessionActivity = z.enum([
+  "strength", "running", "walking", "cycling", "rowing", "swimming", "hiking", "yoga", "flexibility",
+]);
+export type SessionActivity = z.infer<typeof SessionActivity>;
+/**
+ * What the phone has banked for changing today's session, and whether the
+ * one-time add-on has been offered. Ids and enums only, no free text.
+ */
+export const SessionSwitchContext = z.object({
+  mainStyle: TrainingStyle,
+  addOnAsked: z.boolean(),
+  addOn: z.object({
+    style: TrainingStyle,
+    equipment: z.enum(["none", "dumbbell", "barbell", "kettlebell", "bench", "pullup_bar", "cable", "machine", "band", "club", "sandbag", "medball"]),
+    minutes: z.number().int().min(1).max(60),
+  }).strict().optional(),
+  /** Today's banked whole-session alternatives, best fit first. */
+  options: z.array(z.object({
+    id: z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/),
+    kind: SessionKind,
+    minutes: z.number().int().min(1).max(240),
+  }).strict()).max(6).optional(),
+  /** Today's session has already been switched to this. */
+  switchedTo: SessionKind.optional(),
+}).strict();
+export type SessionSwitchContext = z.infer<typeof SessionSwitchContext>;
 export const EffortRating = z.enum(["easy", "about_right", "too_much"]);
 export type EffortRating = z.infer<typeof EffortRating>;
 export const LiveCoachContext = z.object({
@@ -147,6 +182,7 @@ export const LiveCoachContext = z.object({
     /** How much their music dips under the coach (Sound settings): none, light, full. */
     musicDip: z.enum(["none", "light", "full"]).optional(),
   }).strict().optional(),
+  switching: SessionSwitchContext.optional(),
 }).strict();
 export type LiveCoachContext = z.infer<typeof LiveCoachContext>;
 export type CoachTone = z.infer<typeof CoachTone>;

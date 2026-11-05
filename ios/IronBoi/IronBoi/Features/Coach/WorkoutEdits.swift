@@ -126,9 +126,16 @@ enum WorkoutEdit: Equatable {
         guard let name = cardioName(t) else { return nil }
         let minutes = minutes(in: t)
         func has(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
+        // "I'm going for a run", "doing yoga instead", "not doing that": maybe
+        // a whole-session switch, maybe an add-on. The coach tells them apart
+        // (replace_session); only a plain "add it on" stays here.
+        let extra = has(#"\b(add|adding|added|throw in|tack on|squeeze in|also|too|as well|after this|afterwards|at the end|to finish|finish with|end with)\b"#)
+        if !extra, has(#"\b(instead|rather|not doing|don't want to do|dont want to do|skip (?:the|this|that|today)|go for|going for|gonna go|going to go)\b"#) {
+            return nil
+        }
         let adding = has(#"\b(add|adding|added|throw in|throwing in|tack on|tacking on|put in|squeeze in|squeezing in|also do|also doing|finish with|finishing with|end with|ending with|hop on|hopping on|jump on|get on|getting on)\b"#)
-            || has(#"^(?:ok |okay |so |and |then |let's |lets |i'll |ill |i'm gonna |im gonna |gonna |i want to |i wanna |i'd like to |i'm going to |im going to )?(?:do|doing|go for|going for)\b"#)
-            || has(#"\b(i'm doing|im doing|i'll do|ill do|i'm gonna do|gonna do|let's do|lets do|i want to do|i wanna do|i'm going to do|i'll go for|i'm going for)\b"#)
+            || has(#"^(?:ok |okay |so |and |then |let's |lets |i'll |ill |i'm gonna |im gonna |gonna |i want to |i wanna |i'd like to |i'm going to |im going to )?(?:do|doing)\b"#)
+            || has(#"\b(i'm doing|im doing|i'll do|ill do|i'm gonna do|gonna do|let's do|lets do|i want to do|i wanna do|i'm going to do)\b"#)
             || has(#"\b(at the end|to finish|after this|afterwards|to my workout|to the workout|to today's workout)\b"#)
         guard adding || minutes != nil else { return nil }
         let now = has(#"\b(now|right now|first|next)\b"#)

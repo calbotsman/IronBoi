@@ -34,6 +34,8 @@ final class AppModel: NSObject, ObservableObject {
         didSet {
             guard !inPreview, let days = currentWorkoutPlan?.days else { return }
             TrainingReminders.shared.update(trainingDays: days.filter { !$0.exercises.isEmpty }.map(\.dayKey))
+            // A new or changed plan: bank its swaps and alternatives now, not mid-workout.
+            if currentWorkoutPlan != oldValue { Task { await self.refreshAlternatives(force: true) } }
         }
     }
     @Published private(set) var activeWorkout: ActiveWorkoutSession? {
@@ -43,6 +45,8 @@ final class AppModel: NSObject, ObservableObject {
                 focusedExerciseIndex = nil
                 sessionChanges = []
                 skippedExercises = []
+                sessionReplacement = nil
+                addOnAsked = false
                 // An old workout you never logged a set in isn't one you're
                 // in the middle of — clear it rather than open on it. Nor is
                 // one with nothing in it (started on a rest day).
@@ -52,7 +56,7 @@ final class AppModel: NSObject, ObservableObject {
                     let id = workout.sessionId
                     Task {
                         // Only the session that prompted this — not one started since.
-                        guard self.activeWorkout?.sessionId == id else { return }
+                        guard self.activeWorkout?.sessionId == id, self.sessionReplacement == nil else { return }
                         await self.discardActiveWorkout()
                     }
                 }
@@ -65,6 +69,16 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var sessionChanges: [String] = [] { didSet { saveLocalWorkout() } }
     /// Lifts you skipped today; left out of the log.
     private var skippedExercises: Set<Int> = [] { didSet { saveLocalWorkout() } }
+    /// Today's session switched for something else ("going for a run instead").
+    @Published private(set) var sessionReplacement: SessionReplacement? { didSet { saveLocalWorkout() } }
+    /// The one-time "want a few minutes of your usual after?" has been offered.
+    private(set) var addOnAsked = false { didSet { saveLocalWorkout() } }
+    /// Swaps and whole-session alternatives for the plan, cached on the phone.
+    @Published private(set) var alternativesBank: AlternativesBank?
+    private var alternativesRefreshedAt: Date?
+    private var alternativesRefreshing = false
+    /// Coach replies whose phone actions were already applied.
+    private var appliedClientActionIds: [String] = UserDefaults.standard.stringArray(forKey: "coach.appliedClientActions") ?? []
 
     // MARK: - The workout in progress, kept on the phone
 
@@ -74,6 +88,8 @@ final class AppModel: NSObject, ObservableObject {
         let workout: ActiveWorkoutSession
         let changes: [String]
         let skipped: [Int]
+        var replacement: SessionReplacement?
+        var addOnAsked: Bool?
     }
 
     private static let localWorkoutKey = "localActiveWorkout"
@@ -86,7 +102,8 @@ final class AppModel: NSObject, ObservableObject {
             UserDefaults.standard.removeObject(forKey: Self.localWorkoutKey)
             return
         }
-        let local = LocalWorkout(workout: workout, changes: sessionChanges, skipped: Array(skippedExercises))
+        let local = LocalWorkout(workout: workout, changes: sessionChanges, skipped: Array(skippedExercises),
+                                 replacement: sessionReplacement, addOnAsked: addOnAsked)
         if let data = try? JSONEncoder().encode(local) {
             UserDefaults.standard.set(data, forKey: Self.localWorkoutKey)
         }
@@ -395,6 +412,15 @@ final class AppModel: NSObject, ObservableObject {
                 if name == "swap_workout_exercise" { return await self.liveSwap(args) }
                 if name == "show_exercise" { return self.liveShow(args) }
                 if name == "extend_rest" { return self.liveExtendRest(args) }
+                if name == "replace_session" { return await self.liveReplaceSession(args) }
+                if name == "add_session_add_on" { return self.addSessionAddOn() }
+                // Banked swaps answer instantly; anything not banked asks the server.
+                if name == "find_exercise_swaps", args["availableEquipment"] == nil,
+                   let options = self.bankedSwaps(for: args["exerciseName"] as? String) {
+                    return ["ok": true, "options": options.map {
+                        ["name": $0.name, "primary": $0.primary, "equipment": $0.equipment, "reason": $0.reason] as [String: Any]
+                    }]
+                }
                 guard Auth.auth().currentUser != nil else { throw CoachAuthError.missingFirebaseUser }
                 let result = try await self.callableFunctions.httpsCallable("coachLiveToolCallable").call([
                     "name": name,
@@ -573,6 +599,7 @@ final class AppModel: NSObject, ObservableObject {
             context["rhythm"] = CoachContext.rhythm(logs: workoutLogs, now: now)
         }
         context["delivery"] = CoachContext.delivery()
+        if let switching = switchingContext() { context["switching"] = switching }
         return context
     }
 
@@ -809,6 +836,7 @@ final class AppModel: NSObject, ObservableObject {
         noteRest(endsAt: nil)
         noteTimedBlock(nil)
         HeartRateHub.shared.reset()
+        Task { await self.refreshAlternatives(force: false) }
         #if DEBUG
         // The preview has no backend: a small local session, enough to walk
         // through starting, teaching and counting.
@@ -952,6 +980,176 @@ final class AppModel: NSObject, ObservableObject {
         if swapped != index || currentExerciseIndex == index { focusedExerciseIndex = swapped }
         return ["ok": true, "swapped": from, "to": name, "weightLb": weight,
                 "note": weight > 0 ? "Starting weight set." : "No starting weight known: they pick one."]
+    }
+
+    // MARK: - Switching the whole session
+
+    /// Fetches the swap/alternatives bank for the plan and keeps it on disk.
+    /// `force` skips the one-minute throttle (the plan just changed).
+    func refreshAlternatives(force: Bool) async {
+        #if DEBUG
+        if isPreviewSession { return }
+        #endif
+        guard let userId = Auth.auth().currentUser?.uid else { return }
+        if alternativesBank == nil { alternativesBank = SessionBank.load(userId: userId) }
+        if alternativesRefreshing { return }
+        if !force, let last = alternativesRefreshedAt, Date().timeIntervalSince(last) < 60 { return }
+        alternativesRefreshing = true
+        defer { alternativesRefreshing = false }
+        do {
+            let response: SessionAlternativesResponse = try await callCallable(
+                "getSessionAlternativesCallable", data: ["clientDate": Self.currentDateISO()])
+            alternativesBank = response.bank
+            alternativesRefreshedAt = Date()
+            SessionBank.save(response.bank, userId: userId)
+        } catch {
+            // The cached bank stays; it's still right for everything but a brand-new plan.
+            AudioHub.log("alternatives refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Banked swaps for a lift in today's workout (or the plan), if any.
+    func bankedSwaps(for exerciseName: String?) -> [ExerciseSwapOption]? {
+        let name = exerciseName.flatMap { $0.isEmpty ? nil : $0 }
+            ?? currentExerciseIndex.flatMap { activeWorkout?.exercises[$0].name }
+        guard let name else { return nil }
+        return SessionBank.swaps(in: alternativesBank, dayKey: activeWorkout?.dayKey, exerciseName: name,
+                                 excluding: activeWorkout?.exercises.map(\.name) ?? [])
+    }
+
+    /// Today's banked alternatives, best fit first.
+    var todaysAlternatives: [SessionAlternative] {
+        alternativesBank?.day(activeWorkout?.dayKey ?? Self.currentDayKey())?.sessions ?? []
+    }
+
+    /// What the coach needs to switch the session (LiveCoachContext.switching).
+    func switchingContext() -> [String: Any]? {
+        guard let bank = alternativesBank else { return nil }
+        var switching: [String: Any] = ["mainStyle": bank.mainStyle.rawValue, "addOnAsked": addOnAsked]
+        if let addOn = bank.addOn {
+            switching["addOn"] = ["style": addOn.style.rawValue, "equipment": addOn.equipment, "minutes": min(max(addOn.minutes, 1), 60)]
+        }
+        let options = todaysAlternatives.prefix(6).map { ["id": $0.id, "kind": $0.kind.rawValue, "minutes": min(max($0.minutes, 1), 240)] as [String: Any] }
+        if !options.isEmpty { switching["options"] = Array(options) }
+        if let replaced = sessionReplacement { switching["switchedTo"] = replaced.kind.rawValue }
+        return switching
+    }
+
+    /// The live coach's replace_session.
+    func liveReplaceSession(_ args: [String: Any]) async -> [String: Any] {
+        guard let kind = (args["kind"] as? String).flatMap(SessionKind.init(rawValue:)) else {
+            return ["ok": false, "error": "kind_required"]
+        }
+        let minutes = (args["minutes"] as? Int) ?? (args["minutes"] as? Double).map { Int($0) }
+        return await replaceSession(kind: kind, minutes: minutes, alternativeId: args["alternativeId"] as? String, offerAddOn: nil)
+    }
+
+    /// Switches today's session for `kind`: a banked alternative when there
+    /// is one, else a timed block of it. Sets already done stay logged.
+    /// Starts today's workout first when none is running. `offerAddOn` nil
+    /// decides here (live voice); the text coach's server already decided.
+    func replaceSession(kind: SessionKind, minutes: Int?, alternativeId: String?, offerAddOn: Bool?) async -> [String: Any] {
+        if activeWorkout == nil, alternativesBank != nil { await startWorkout(dayKey: Self.currentDayKey()) }
+        guard var workout = activeWorkout else { return ["ok": false, "error": "no_active_workout"] }
+        guard let bank = alternativesBank else {
+            return ["ok": false, "error": "no_alternatives_yet", "hint": "Nothing is banked on the phone yet. Suggest they swap exercises one at a time for now."]
+        }
+        let sessions = bank.day(workout.dayKey)?.sessions ?? []
+        let info = bank.kinds.first { $0.kind == kind }
+        let banked = sessions.first { $0.id == alternativeId && $0.kind == kind } ?? sessions.first { $0.kind == kind }
+        let alternative: SessionAlternative
+        if let banked {
+            alternative = SessionBank.resized(banked, minutes: minutes)
+        } else if let info, let item = info.timedItem {
+            // Not banked for today (yoga on a lifting day): one timed block,
+            // as long as they said, else as long as the planned session.
+            let length = minutes ?? sessions.first { $0.items.count == 1 && $0.items[0].timed }?.minutes
+                ?? max(10, workout.exercises.reduce(0) { $0 + $1.targetSets } * 5 / 2)
+            alternative = SessionAlternative(id: "\(workout.dayKey)_\(kind.rawValue)", kind: kind, style: info.style,
+                                             activity: info.activity, title: item, minutes: length,
+                                             items: [BankedItem(name: item, sets: 1, reps: length * 60, weight: 0, timed: true)])
+        } else if kind == .shorter, let info {
+            let left = workout.exercises.filter { !$0.exerciseDone && $0.completedSetCount == 0 }
+            let keep = left.prefix(max(1, (left.count + 1) / 2))
+            alternative = SessionAlternative(id: "\(workout.dayKey)_shorter", kind: kind, style: info.style, activity: info.activity,
+                                             title: workout.workoutName, minutes: minutes ?? 0,
+                                             items: keep.map { BankedItem(name: $0.name, sets: $0.targetSets, reps: $0.targetReps, weight: $0.targetWeight, timed: ExerciseKnowledge.isTimed($0.name)) })
+        } else {
+            return ["ok": false, "error": "not_banked_for_today", "options": sessions.map { ["id": $0.id, "kind": $0.kind.rawValue] }]
+        }
+
+        // What's been done stays logged; everything not started is replaced.
+        let done = workout.exercises.filter { $0.completedSetCount > 0 }.map { exercise -> ActiveWorkoutExercise in
+            var kept = exercise
+            kept.completedSets = exercise.completedSets.filter(\.completed)
+            kept.targetSets = kept.completedSets.count
+            kept.exerciseDone = true
+            return kept
+        }
+        let reindexed = done.enumerated().map { index, exercise in
+            ActiveWorkoutExercise(exerciseIndex: index, name: exercise.name, targetSets: exercise.targetSets,
+                                  targetReps: exercise.targetReps, targetWeight: exercise.targetWeight,
+                                  completedSets: exercise.completedSets, exerciseDone: true, notes: exercise.notes)
+        }
+        workout.exercises = reindexed + SessionBank.exercises(alternative.items, from: reindexed.count)
+        workout.updatedAt = Self.isoString(from: Date())
+        skippedExercises = []
+        sessionReplacement = SessionReplacement(kind: alternative.kind, style: alternative.style,
+                                                activity: alternative.activity, title: alternative.title)
+        activeWorkout = workout
+        // Not a sessionChanges entry: a one-day switch isn't something to keep in the plan.
+        focusedExerciseIndex = reindexed.count
+
+        let offer: Bool
+        if let offerAddOn { offer = offerAddOn } else {
+            offer = !addOnAsked && bank.addOn != nil && alternative.style != bank.mainStyle
+        }
+        var result: [String: Any] = ["ok": true, "switchedTo": alternative.title, "kind": alternative.kind.rawValue,
+                                     "minutes": alternative.minutes, "items": alternative.items.map(\.name)]
+        if offer {
+            addOnAsked = true
+            if offerAddOn == nil, let addOn = bank.addOn {
+                result["offerAddOn"] = ["equipment": addOn.equipment, "style": addOn.style.rawValue, "minutes": addOn.minutes]
+                result["hint"] = "After confirming, offer this once in a few words. On yes call add_session_add_on; on no, drop it."
+            }
+        }
+        return result
+    }
+
+    /// They said yes to the add-on: it goes on the end of today's session.
+    func addSessionAddOn() -> [String: Any] {
+        guard var workout = activeWorkout else { return ["ok": false, "error": "no_active_workout"] }
+        guard let addOn = alternativesBank?.addOn, !addOn.items.isEmpty else { return ["ok": false, "error": "no_add_on"] }
+        addOnAsked = true
+        let first = workout.exercises.count
+        workout.exercises += SessionBank.exercises(addOn.items, from: first)
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        return ["ok": true, "added": addOn.items.map(\.name), "minutes": addOn.minutes]
+    }
+
+    /// Applies the phone actions on recent coach replies, each once.
+    private func applyNewClientActions() async {
+        let recent = messages.filter {
+            $0.role == .coach && !$0.clientActions.isEmpty && $0.status == .complete
+                && Date().timeIntervalSince($0.timestamp) < 10 * 60
+                && !appliedClientActionIds.contains($0.id)
+        }
+        for message in recent {
+            appliedClientActionIds.append(message.id)
+            appliedClientActionIds = Array(appliedClientActionIds.suffix(50))
+            UserDefaults.standard.set(appliedClientActionIds, forKey: "coach.appliedClientActions")
+            for action in message.clientActions {
+                switch action.type {
+                case .replaceSession:
+                    guard let kind = action.kind else { continue }
+                    _ = await replaceSession(kind: kind, minutes: action.minutes, alternativeId: action.alternativeId,
+                                             offerAddOn: action.offeredAddOn)
+                case .addSessionAddOn:
+                    _ = addSessionAddOn()
+                }
+            }
+        }
     }
 
     /// Replaces a lift with another, keeping its sets and reps. If sets were
@@ -1227,21 +1425,27 @@ final class AppModel: NSObject, ObservableObject {
 
         do {
             let completedAt = Self.isoString(from: Date())
-            let response: FinishWorkoutResponse = try await callCallable("finishWorkoutSessionCallable", data: [
-                    "sessionId": activeWorkout.sessionId,
-                    "completedAt": completedAt,
-                    "clientDate": Self.currentDateISO(),
-                    "exercises": try Self.jsonObject(from: performed),
-                ]
-            )
+            var finish: [String: Any] = [
+                "sessionId": activeWorkout.sessionId,
+                "completedAt": completedAt,
+                "clientDate": Self.currentDateISO(),
+                "exercises": try Self.jsonObject(from: performed),
+            ]
+            // Switched for something else: logged as that kind of workout.
+            if let replaced = sessionReplacement {
+                finish["replacedWith"] = ["kind": replaced.kind.rawValue, "activity": replaced.activity,
+                                          "title": String(replaced.title.prefix(80))]
+            }
+            let response: FinishWorkoutResponse = try await callCallable("finishWorkoutSessionCallable", data: finish)
             // Set before the workout closes: the coach screen reads it the
             // moment activeWorkout goes nil.
             lastRecap = response.recap
             pendingEffortSessionId = activeWorkout.sessionId
             TrainingReminders.shared.markTrainedToday()
             if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
-                let (id, name) = (activeWorkout.sessionId, activeWorkout.workoutName)
-                Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, start: start, end: end) }
+                let (id, name) = (activeWorkout.sessionId, sessionReplacement?.title ?? activeWorkout.workoutName)
+                let activity = sessionReplacement?.activity
+                Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, activity: activity, start: start, end: end) }
             }
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
             pendingSessionChanges = changes
@@ -1302,6 +1506,15 @@ final class AppModel: NSObject, ObservableObject {
             )
         }
         #endif
+
+        // Banked on the phone: instant, and works with no signal. The bank
+        // refreshes behind it.
+        if availableEquipment == nil,
+           let banked = SessionBank.swaps(in: alternativesBank, dayKey: dayKey, exerciseName: exerciseName,
+                                          excluding: activeWorkout?.exercises.map(\.name) ?? []) {
+            Task { await refreshAlternatives(force: false) }
+            return .loaded(banked)
+        }
 
         do {
             var data: [String: Any] = [
@@ -1494,6 +1707,7 @@ final class AppModel: NSObject, ObservableObject {
                     }
 
                     self?.messages = snapshot?.documents.compactMap(Self.makeCoachMessage) ?? []
+                    await self?.applyNewClientActions()
                 }
             }
     }
@@ -1760,6 +1974,8 @@ final class AppModel: NSObject, ObservableObject {
                         self.activeWorkout = local.workout
                         self.sessionChanges = local.changes
                         self.skippedExercises = Set(local.skipped)
+                        self.sessionReplacement = local.replacement
+                        self.addOnAsked = local.addOnAsked ?? false
                         return
                     }
                     self.activeWorkout = workout
@@ -2008,7 +2224,8 @@ final class AppModel: NSObject, ObservableObject {
             timestamp: timestampString.flatMap(Self.parseISODate) ?? Date(),
             riskLevel: data["riskLevel"] as? String,
             sources: sources,
-            spokenContent: (data["spokenContent"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            spokenContent: (data["spokenContent"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+            clientActions: (data["clientActions"] as? [[String: Any]] ?? []).compactMap(CoachClientAction.init)
         )
     }
 

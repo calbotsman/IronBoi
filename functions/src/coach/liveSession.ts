@@ -13,7 +13,8 @@ import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.
 import { executeTool } from "../tools/executor.js";
 import { findLatestPendingProposal, publishDraftProposals, severeMarkerHit } from "../workouts/planAdjustments.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
-import type { CoachModelProvider } from "./modelProvider.js";
+import type { CoachModelProvider, CoachToolDeclaration } from "./modelProvider.js";
+import { ADD_SESSION_ADD_ON_DECLARATION, REPLACE_SESSION_DECLARATION } from "./sessionSwitch.js";
 
 /**
  * Live voice (beta), milestone 1 of docs/design/live-voice-brain.md: the
@@ -164,7 +165,9 @@ export type LiveToolName = (typeof LIVE_TOOL_NAMES)[number];
  * LIVE_TOOL_NAMES, so coachLiveToolCallable refuses them if one ever
  * arrives here.
  */
-export const PHONE_TOOL_DECLARATIONS = [
+export const PHONE_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
+  REPLACE_SESSION_DECLARATION,
+  ADD_SESSION_ADD_ON_DECLARATION,
   {
     name: "swap_workout_exercise",
     description:
@@ -230,6 +233,7 @@ const LIVE_RULES = [
   "- Heart rate is one signal: mention it at most once per rest, and only when it changes what they should do. High at the end of a set (zone 4–5) or slow to come down in rest: give them more rest with extend_rest and say so in a few words. Low through a set they finished at full reps: you may offer a bit more next set; never push past the plan.",
   "- On a cardio block (Context says \"on cardio\"), heart rate is the pace guide instead: zone 4–5 for a while, suggest easing a notch; zone 1–2, they can pick it up if they want. No rest is running, so never call extend_rest then.",
   "- Coming back after a week or more off, or two workouts in a row that felt like too much: keep today a little lighter and say why once. Two that felt easy: offer a little more.",
+  "- Not doing today's session at all (\"I'm going for a run instead\", \"just mobility today\"): call replace_session with the closest kind, before or during the workout, then confirm in one sentence. If it returns offerAddOn, offer that once in a few words; on yes call add_session_add_on; on no, drop it for the rest of the session. Adding a run on top of the workout is not a replacement.",
   "- Swapping an exercise in a workout: call find_exercise_swaps, offer two or three, and the moment they pick one call swap_workout_exercise. Don't use adapt_plan for it and never ask for a weight. Then say what they're doing now in one sentence.",
 ].join("\n");
 
