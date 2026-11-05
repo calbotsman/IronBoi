@@ -3,6 +3,14 @@ options:
   bundleIdPrefix: com.thecombinationrule
   deploymentTarget:
     iOS: "17.0"
+    watchOS: "10.0"
+# Shared by the phone app and the Watch app: an embedded Watch app must carry
+# the same version and build number as its iPhone app, or install fails.
+# scripts/ios-bump-build.sh edits this line.
+settings:
+  base:
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 70
 packages:
   Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
@@ -13,14 +21,26 @@ targets:
     platform: iOS
     sources:
       - path: IronBoi
+        excludes:
+          - GoogleService-Info.plist
       # The lock-screen rest countdown's data, shared with the widget.
       - path: RestWidget/RestActivityAttributes.swift
+      # Written by the prebuild script below and gitignored, so a fresh
+      # checkout doesn't have it when xcodegen runs. Listed on its own as
+      # optional so the project always bundles it; without it Firebase
+      # aborts at launch (crash on 2026-11-05).
+      - path: IronBoi/GoogleService-Info.plist
+        optional: true
+        buildPhase: resources
+      - path: MYOShared
     info:
       path: IronBoi/Info.plist
       properties:
         # Coach keeps talking and listening with the screen off or the
         # phone in a pocket; the audio session carries the app.
-        UIBackgroundModes: [audio]
+        # bluetooth-central: a heart-rate strap keeps streaming with the
+        # screen off (Services/HeartStrapConnector.swift).
+        UIBackgroundModes: [audio, bluetooth-central]
         # The rest countdown on the lock screen (RestWidget).
         NSSupportsLiveActivities: true
     preBuildScripts:
@@ -107,6 +127,8 @@ targets:
           - $(PROJECT_DIR)/IronBoi/GoogleService-Info.plist
     dependencies:
       - target: RestWidget
+      # The Watch app, embedded in Watch/ (docs/product/responsive-coach-plan.md §2).
+      - target: MYOWatch
       - package: Firebase
         product: FirebaseAppCheck
       - package: Firebase
@@ -127,8 +149,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.thecombinationrule.ironboi
         PRODUCT_NAME: IronBoi
         GENERATE_INFOPLIST_FILE: YES
-        MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 70
         INFOPLIST_KEY_CFBundleDisplayName: MYO
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
@@ -138,6 +158,9 @@ targets:
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_NSMicrophoneUsageDescription: MYO uses the microphone so you can speak to your coach.
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: MYO saves your finished workouts to Apple Health so they count toward your activity.
+        # Read: live heart rate and active energy from a Watch workout (Services/WatchWorkoutLink.swift).
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: MYO connects to your heart rate strap so your coach can pace your rests.
+        INFOPLIST_KEY_NSHealthShareUsageDescription: MYO reads your heart rate and active energy during workouts so your coach can pace your rests.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: MYO uses speech recognition to turn your voice into coach messages.
         SWIFT_VERSION: 5.10
         TARGETED_DEVICE_FAMILY: 1
@@ -171,7 +194,8 @@ targets:
         # App Store. The Firebase AppAttestProvider reads this and routes
         # to Apple's matching attestation endpoint.
         com.apple.developer.devicecheck.appattest-environment: production
-        # Write-only: finished workouts go to Apple Health (Services/HealthSync.swift).
+        # Finished workouts go to Apple Health (Services/HealthSync.swift); a
+        # Watch workout's heart rate and energy are read live (WatchWorkoutLink).
         com.apple.developer.healthkit: true
 
   # The rest countdown on the lock screen and Dynamic Island.
@@ -193,11 +217,70 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.thecombinationrule.ironboi.RestWidget
         PRODUCT_NAME: RestWidget
         GENERATE_INFOPLIST_FILE: YES
-        MARKETING_VERSION: 0.1.0
-        CURRENT_PROJECT_VERSION: 70
         SWIFT_VERSION: 5.10
         TARGETED_DEVICE_FAMILY: 1
         SKIP_INSTALL: YES
+
+  # The Watch app: started by the phone's Start (HKHealthStore.startWatchApp),
+  # runs the HKWorkoutSession, mirrors it to the phone and saves the workout.
+  # Single target, SwiftUI, no Firebase: the phone is the only thing that
+  # talks to the backend. docs/product/responsive-coach-plan.md §2.
+  MYOWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: MYOWatch
+      - path: MYOShared
+    info:
+      path: MYOWatch/Info.plist
+      properties:
+        CFBundleDisplayName: MYO
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.thecombinationrule.ironboi
+        # Keeps the app running through the workout session.
+        WKBackgroundModes: [workout-processing]
+        NSHealthShareUsageDescription: MYO reads your heart rate and active energy during workouts so your coach can pace your rests.
+        NSHealthUpdateUsageDescription: MYO saves your workouts to Apple Health with heart rate and active energy.
+    settings:
+      base:
+        DEVELOPMENT_TEAM: SGQ2WLB6M9
+        CODE_SIGN_STYLE: Automatic
+        PRODUCT_BUNDLE_IDENTIFIER: com.thecombinationrule.ironboi.watchkitapp
+        PRODUCT_NAME: MYOWatch
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.10
+        TARGETED_DEVICE_FAMILY: 4
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # Shared scheme so CI can build the Watch app on its own.
+    scheme: {}
+    entitlements:
+      path: MYOWatch/MYOWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+
+  # Logic tests that need no app, simulator audio or backend: they compile
+  # the few pure files they test directly. Run the "IronBoiTests" scheme.
+  IronBoiTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: IronBoiTests
+      - path: IronBoi/Features/Coach/SetCount.swift
+      - path: IronBoi/Features/Coach/Atmosphere/Effort.swift
+      - path: IronBoi/Models/UserProfile.swift
+      # Weights, sides and workout commands (WeightLoadTests.swift).
+      - path: IronBoi/Models/WeightLoad.swift
+      - path: IronBoi/Models/WorkoutModels.swift
+      - path: IronBoi/Models/ExerciseKnowledge.swift
+      - path: IronBoi/Models/CoachWorkoutAction.swift
+      - path: IronBoi/Features/Coach/WorkoutEdits.swift
+      - path: IronBoi/Features/Coach/WorkoutVoice.swift
+      - path: IronBoi/Models/SessionAlternatives.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.10
 
 # A second scheme for tuning the blob's physics in the simulator: no backend,
 # no mic, the stunt reel on loop and the live tuner (DEBUG only). Pick
@@ -224,4 +307,33 @@ schemes:
           isEnabled: true
         - variable: MYO_TUNER
           value: "1"
+          isEnabled: true
+  IronBoiTests:
+    build:
+      targets:
+        IronBoiTests: all
+    test:
+      targets:
+        - IronBoiTests
+  # The workout screen's atmosphere without a Watch: the preview straight
+  # into a workout, a pretend heart rate rising and falling (DEBUG only;
+  # MYO_HR_SIM=calm|pumped|follow|wave, see HeartRateSimulator.swift).
+  IronBoi Heart:
+    build:
+      targets:
+        IronBoi: all
+    run:
+      config: Debug
+      environmentVariables:
+        - variable: FIRAAppCheckDebugToken
+          value: 7B49E8DA-2CDA-4A4C-8C9E-93D1C5A40F11
+          isEnabled: true
+        - variable: MYO_PREVIEW
+          value: "1"
+          isEnabled: true
+        - variable: MYO_NO_MIC
+          value: "1"
+          isEnabled: true
+        - variable: MYO_HR_SIM
+          value: wave
           isEnabled: true

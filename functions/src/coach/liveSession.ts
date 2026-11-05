@@ -6,14 +6,18 @@ import { todayUtcDateKey, usagePath } from "../usage/cap.js";
 import { coachSessionMessagePath, coachSessionPath, planAdjustmentProposalPath } from "../paths.js";
 import { loadCoachContext } from "./context.js";
 import { buildCoachContextBundle } from "./contextBundle.js";
-import { assembleCoachPrompt, type CoachConfig } from "./prompt.js";
+import { assembleCoachPrompt, type CoachConfig, type PromptMemoryBrief } from "./prompt.js";
+import { memoryBriefPath } from "../paths.js";
+import { LIVE_REBUILD_AFTER_MINUTES, buildMemoryBrief, memoryBriefAge, parseMemoryBrief, rebuildMemoryBriefIfOlder } from "./memoryBrief.js";
 import { VOICE_MODE_RULES } from "./orchestrate.js";
 import { CoachVoiceChoice } from "../voice/speech.js";
 import { COACH_TOOL_DECLARATIONS, buildCoachToolRegistry } from "./toolRegistry.js";
 import { executeTool } from "../tools/executor.js";
 import { findLatestPendingProposal, publishDraftProposals, severeMarkerHit } from "../workouts/planAdjustments.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
-import type { CoachModelProvider } from "./modelProvider.js";
+import type { CoachModelProvider, CoachToolDeclaration } from "./modelProvider.js";
+import { ADD_SESSION_ADD_ON_DECLARATION, REPLACE_SESSION_DECLARATION } from "./sessionSwitch.js";
+import { SET_WORKOUT_WEIGHT } from "./workoutWeightTool.js";
 
 /**
  * Live voice (beta), milestone 1 of docs/design/live-voice-brain.md: the
@@ -35,6 +39,10 @@ export const StartLiveCoachSessionRequest = z.object({
   // A seamless handover to a fresh connection mid-conversation: counted
   // against its own, larger cap so a long workout never runs out.
   handover: z.boolean().optional(),
+  // The phone has a cached memory brief (coach/memoryBrief.ts) built at this
+  // time and sends it as the session's first [app] line, so the server
+  // skips reading memory. Absent: the server puts its own copy in.
+  memoryBriefBuiltAt: z.string().datetime().optional(),
 }).strict();
 
 export const LIVE_MODEL_DEFAULT = "gemini-3.8-live";
@@ -232,6 +240,7 @@ export const LIVE_TOOL_NAMES = [
   "update_training_setup",
   "forget_user_fact",
   "find_exercise_swaps",
+  "recall_training_history",
 ] as const;
 export type LiveToolName = (typeof LIVE_TOOL_NAMES)[number];
 
@@ -241,7 +250,9 @@ export type LiveToolName = (typeof LIVE_TOOL_NAMES)[number];
  * LIVE_TOOL_NAMES, so coachLiveToolCallable refuses them if one ever
  * arrives here.
  */
-export const PHONE_TOOL_DECLARATIONS = [
+export const PHONE_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
+  REPLACE_SESSION_DECLARATION,
+  ADD_SESSION_ADD_ON_DECLARATION,
   {
     name: "swap_workout_exercise",
     description:
@@ -259,6 +270,18 @@ export const PHONE_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: "extend_rest",
+    description:
+      "During a workout, while they're resting between sets: add time to the rest timer on their phone. Use it when their heart rate is still high, they sound gassed, or they ask for longer.",
+    parameters: {
+      type: "object",
+      properties: {
+        seconds: { type: "integer", description: "Seconds to add, 15 to 180. Usually 30." },
+      },
+      required: ["seconds"],
+    },
+  },
+  {
     name: "show_exercise",
     description:
       "Have your body on their screen demonstrate an exercise: a few slow reps. Call it whenever they ask you to show them, or when seeing it would help. Omit exerciseName for the one they're on.",
@@ -269,6 +292,7 @@ export const PHONE_TOOL_DECLARATIONS = [
       },
     },
   },
+  SET_WORKOUT_WEIGHT,
 ];
 
 export function liveToolDeclarations() {
@@ -292,9 +316,46 @@ const LIVE_RULES = [
   "- You remember everything in <conversation>, <memory_facts> and <coach_notes>. Never ask them for something they already told you there; use it.",
   "- When a tool changes the plan, say what changed in one sentence. A proposal is only applied when they say yes AFTER hearing it.",
   "- Lines in the conversation that start with [app] are notes from the app about what's on screen or what they just did, not the user speaking. Don't read them out.",
-  "- In a workout the app handles counting, \"set done\" and weight changes itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- In a workout the app handles counting, \"set done\" and exact weight commands (\"40 pounds\") itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- Any other talk of changing the weight (\"I'm going up\", \"going heavier on this one\"): call set_workout_weight. No number yet: call it without one and ask \"Up to what?\".",
+  "- [app] lines starting \"Context:\" carry the latest rest, heart rate and recent-training numbers. The newest one is the truth about right now; older ones are history. Never quote a heart rate that isn't in the newest Context line, and never guess one.",
+  "- Heart rate is one signal: mention it at most once per rest, and only when it changes what they should do. High at the end of a set (zone 4–5) or slow to come down in rest: give them more rest with extend_rest and say so in a few words. Low through a set they finished at full reps: you may offer a bit more next set; never push past the plan.",
+  "- On a cardio block (Context says \"on cardio\"), heart rate is the pace guide instead: zone 4–5 for a while, suggest easing a notch; zone 1–2, they can pick it up if they want. No rest is running, so never call extend_rest then.",
+  "- Coming back after a week or more off, or two workouts in a row that felt like too much: keep today a little lighter and say why once. Two that felt easy: offer a little more.",
+  "- Not doing today's session at all (\"I'm going for a run instead\", \"just mobility today\"): call replace_session with the closest kind, before or during the workout, then confirm in one sentence. If it returns offerAddOn, offer that once in a few words; on yes call add_session_add_on; on no, drop it for the rest of the session. Adding a run on top of the workout is not a replacement.",
   "- Swapping an exercise in a workout: call find_exercise_swaps, offer two or three, and the moment they pick one call swap_workout_exercise. Don't use adapt_plan for it and never ask for a weight. Then say what they're doing now in one sentence.",
 ].join("\n");
+
+/** Off switch for the memory brief in live voice: back to the raw sections. */
+export function liveMemoryBriefEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.IRONBOI_LIVE_MEMORY_BRIEF !== "off";
+}
+
+/**
+ * The memory the live instruction carries. With the brief on, memory comes
+ * from the budgeted brief: the phone's cached copy (sent as the first [app]
+ * line, nothing read here) or the server's stored copy (one doc read; built
+ * on the spot the first time). Safety facts are always read fresh.
+ */
+async function liveMemory(args: {
+  db: Firestore;
+  userId: string;
+  today: string;
+  briefOnPhone: boolean;
+  now: Date;
+}): Promise<PromptMemoryBrief> {
+  if (args.briefOnPhone) return { text: null, age: null };
+  const stored = parseMemoryBrief(
+    (await args.db.doc(memoryBriefPath(args.userId)).get().catch(() => null))?.data(),
+  );
+  const brief = stored ?? (await buildMemoryBrief(args.db, args.userId, args.now, args.today).catch(() => null));
+  if (!stored && brief) {
+    await args.db.doc(memoryBriefPath(args.userId)).set(brief).catch(() => undefined);
+  }
+  return brief
+    ? { text: brief.text, age: memoryBriefAge(brief.builtAt, args.now) }
+    : { text: "No memory brief could be built; rely on <memory_facts> and <conversation>.", age: null };
+}
 
 /** The whole coach brain as one locked system instruction for a live session. */
 export async function buildLiveSystemInstruction(args: {
@@ -302,17 +363,29 @@ export async function buildLiveSystemInstruction(args: {
   coach: CoachConfig;
   userId: string;
   today: string;
+  /** The phone will send its cached brief as the first [app] line. */
+  memoryBriefOnPhone?: boolean;
+  now?: Date;
+  env?: NodeJS.ProcessEnv;
 }): Promise<string> {
-  const context = await loadCoachContext(args.db, args.userId, LIVE_SESSION_ID, {
-    includePlanChanges: true,
-    includeProgress: true,
-  });
+  const useBrief = liveMemoryBriefEnabled(args.env);
+  const now = args.now ?? new Date();
+  const [context, memoryBrief] = await Promise.all([
+    loadCoachContext(args.db, args.userId, LIVE_SESSION_ID, {
+      includePlanChanges: true,
+      includeProgress: true,
+      memory: useBrief ? "safety_only" : "full",
+    }),
+    useBrief
+      ? liveMemory({ db: args.db, userId: args.userId, today: args.today, briefOnPhone: args.memoryBriefOnPhone === true, now })
+      : Promise.resolve(undefined),
+  ]);
   const bundle = buildCoachContextBundle(context, {
     userId: args.userId,
     sessionId: LIVE_SESSION_ID,
     today: args.today,
   });
-  const assembled = assembleCoachPrompt(args.coach, bundle, "", { toolsEnabled: true });
+  const assembled = assembleCoachPrompt(args.coach, bundle, "", { toolsEnabled: true, memoryBrief });
   const data = assembled.userMessage.split("<current_user_message>")[0].trim();
   return [
     assembled.system,
@@ -397,6 +470,9 @@ export async function recordLiveTurn(args: {
       });
     }
   }
+  // After live conversation too, not just text turns (debounced: live
+  // records every exchange). Facts and notes have their own triggers.
+  await rebuildMemoryBriefIfOlder(db, userId, LIVE_REBUILD_AFTER_MINUTES, "live_turn", args.now);
   return severe ? { saved: true, stop: true, line: LIVE_SAFETY_LINE } : { saved: true, stop: false };
 }
 

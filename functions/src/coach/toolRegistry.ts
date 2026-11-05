@@ -6,6 +6,7 @@ import {
   ClearPlanOverridesToolRequest,
   FindExerciseSwapsRequest,
   ForgetUserFactToolRequest,
+  RecallTrainingHistoryRequest,
   SetPreferredNameToolRequest,
   RejectPlanAdjustmentToolRequest,
   RememberUserFactToolRequest,
@@ -25,7 +26,14 @@ import {
 import { safeLogger } from "../logging/safeLogger.js";
 import { TrainingSetupChange, updateTrainingSetup } from "../workouts/trainingSetup.js";
 import type { ToolRegistry } from "../tools/executor.js";
+import { recallTrainingHistory } from "./recall.js";
 import type { CoachToolDeclaration } from "./modelProvider.js";
+import type { SessionSwitchContext } from "../contracts/coach-agent.js";
+import {
+  ADD_SESSION_ADD_ON_DECLARATION,
+  REPLACE_SESSION_DECLARATION,
+  sessionSwitchHandlers,
+} from "./sessionSwitch.js";
 
 // Gemini function declarations — a hand-written mirror of the Zod args
 // schemas below. Gemini's function-calling API takes an OpenAPI-3.0-subset
@@ -316,6 +324,20 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
     },
   },
   {
+    name: "recall_training_history",
+    description:
+      "READ-ONLY look-up of the user's own logged workouts, further back than <recent_workouts> or the memory brief: 'what did I bench last spring?', 'when did I last squat?', 'how heavy was my row in March?'. Give the exercise name as they said it and/or a date range (their dates, YYYY-MM-DD; 'last spring' = the most recent March–May that has already ended before <today>; 'last month' = the calendar month before <today>). Answer only from what it returns — sessionsFound 0 means nothing was logged, so say that and never guess a number.",
+    parameters: {
+      type: "object",
+      properties: {
+        exerciseName: { type: "string", description: "e.g. 'bench', 'back squat'. Every word must appear in the logged name. Omit to see whole sessions." },
+        from: { type: "string", description: "Earliest date, YYYY-MM-DD." },
+        to: { type: "string", description: "Latest date, YYYY-MM-DD." },
+        limit: { type: "integer", description: "Sessions to return, newest first. Default 10, at most 20." },
+      },
+    },
+  },
+  {
     name: "ask_follow_up_question",
     description:
       "End your turn on one specific clarifying question instead of guessing — use this when you need a detail before proposing a plan change or answering safely.",
@@ -337,6 +359,8 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       required: ["reason", "question"],
     },
   },
+  REPLACE_SESSION_DECLARATION,
+  ADD_SESSION_ADD_ON_DECLARATION,
 ];
 
 // The envelope fields on ToolCallBase (toolCallId, requestedAt, tool
@@ -389,6 +413,12 @@ const ForgetUserFactArgs = ForgetUserFactToolRequest.omit({
   tool: true,
 });
 
+const RecallTrainingHistoryArgs = RecallTrainingHistoryRequest.omit({
+  toolCallId: true,
+  requestedAt: true,
+  tool: true,
+});
+
 const FindExerciseSwapsArgs = FindExerciseSwapsRequest.omit({
   toolCallId: true,
   requestedAt: true,
@@ -428,6 +458,9 @@ export type CoachToolRegistryContext = {
   // The triggering message id — remembered facts are keyed to it so a fact
   // can always be traced to the message that produced it.
   sourceMessageId?: string;
+  // What the phone has banked for switching today's session, and whether
+  // the one-time add-on was already offered (liveContext.switching).
+  switching?: SessionSwitchContext;
 };
 
 const MAX_LIVE_MEMORY_FACTS = 100;
@@ -449,6 +482,7 @@ export function buildCoachToolRegistry(
   // one turn from overwriting each other.
   let rememberedThisTurn = 0;
   return {
+    ...sessionSwitchHandlers(context.switching),
     adapt_plan: async (rawArgs) => {
       // executeTool injects userId onto every handler's args — strip it
       // before validating against AdaptPlanArgs, which doesn't declare it.
@@ -845,6 +879,15 @@ export function buildCoachToolRegistry(
           reason: option.reason,
         })),
       };
+    },
+    recall_training_history: async (rawArgs) => {
+      const { userId, ...args } = rawArgs;
+      const parsed = RecallTrainingHistoryArgs.safeParse(args);
+      if (!parsed.success) {
+        logToolValidationFailure(userId, "recall_training_history", parsed.error.issues);
+        return { ok: false, error: "invalid_recall_training_history_args" };
+      }
+      return recallTrainingHistory(db, userId, parsed.data);
     },
     ask_follow_up_question: (rawArgs) => {
       const { userId, ...args } = rawArgs;

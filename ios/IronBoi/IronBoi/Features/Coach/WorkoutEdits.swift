@@ -15,7 +15,8 @@ enum WorkoutEdit: Equatable {
     case swapForSomething(Int)
     case skip(Int)
     case jump(Int)
-    case targets(Int, sets: Int?, reps: Int?)
+    /// `eachSide`: "10 reps each side" — the reps are per side.
+    case targets(Int, sets: Int?, reps: Int?, eachSide: Bool = false)
     case finish
 
     static func parse(_ transcript: String, exercises: [ActiveWorkoutExercise], current: Int?) -> WorkoutEdit? {
@@ -108,12 +109,14 @@ enum WorkoutEdit: Equatable {
            let index = find(m[0]), index != current {
             return .jump(index)
         }
+        // "10 reps each side", "do 8 per leg": the reps are per side.
+        let perSide = first(#"\b(?:each|per|a|on each) (?:side|leg|arm)\b"#) != nil
         if let current, first(#"\b(make it|make that|let's do|lets do|i'll do|do|change (?:it|this|that) to|switch to|going to do|gonna do)\b"#) != nil
-            || t.contains("instead") {
+            || t.contains("instead") || perSide {
             let (sets, reps) = setsAndReps(in: t)
             if sets != nil || reps != nil {
                 let target = first(#"\bfor (?:the )?([a-z -]+)$"#).flatMap { find($0[0]) } ?? current
-                return .targets(target, sets: sets, reps: reps)
+                return .targets(target, sets: sets, reps: reps, eachSide: perSide && reps != nil)
             }
         }
         return nil
@@ -121,21 +124,29 @@ enum WorkoutEdit: Equatable {
 
     // MARK: - Cardio
 
-    /// A cardio block they're adding: what, how long (20 minutes when they
-    /// don't say), and whether it's now. Needs a cardio word and something
-    /// that makes it a plan for today — a verb like "add" or "do", a length,
-    /// or "at the end" — so "I went for a run this morning" stays a chat.
+    /// A cardio block they're explicitly adding on: what, how long (20
+    /// minutes when they don't say), and whether it's now. Only an add verb
+    /// or "at the end" makes it one here. Anything looser ("I'm going for a
+    /// run", "let's do the bike", "yoga instead") might be a whole-session
+    /// switch, so it goes to the coach, which decides (replace_session).
     static func cardioRequest(_ t: String) -> (name: String, minutes: Int, now: Bool)? {
         guard let name = cardioName(t) else { return nil }
-        let minutes = minutes(in: t)
         func has(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
-        let adding = has(#"\b(add|adding|added|throw in|throwing in|tack on|tacking on|put in|squeeze in|squeezing in|also do|also doing|finish with|finishing with|end with|ending with|hop on|hopping on|jump on|get on|getting on)\b"#)
-            || has(#"^(?:ok |okay |so |and |then |let's |lets |i'll |ill |i'm gonna |im gonna |gonna |i want to |i wanna |i'd like to |i'm going to |im going to )?(?:do|doing|go for|going for)\b"#)
-            || has(#"\b(i'm doing|im doing|i'll do|ill do|i'm gonna do|gonna do|let's do|lets do|i want to do|i wanna do|i'm going to do|i'll go for|i'm going for)\b"#)
+        let adding = has(#"\b(add|adding|added|throw in|throwing in|tack on|tacking on|put in|squeeze in|squeezing in|also do|also doing|finish with|finishing with|end with|ending with)\b"#)
             || has(#"\b(at the end|to finish|after this|afterwards|to my workout|to the workout|to today's workout)\b"#)
-        guard adding || minutes != nil else { return nil }
+        guard adding else { return nil }
         let now = has(#"\b(now|right now|first|next)\b"#)
-        return (name, minutes ?? 20, now)
+        return (name, minutes(in: t) ?? 20, now)
+    }
+
+    /// Names an activity someone might switch the whole session to (a
+    /// cardio word, or a session kind like "yoga" or "mobility"). Quick
+    /// commands ("go", "ready") step aside for these: "let's go for a run"
+    /// is for the coach, not the rest timer.
+    static func namesActivity(_ t: String) -> Bool {
+        if ExerciseKnowledge.isCardio(t) { return true }
+        let words = Set(t.lowercased().split { !$0.isLetter }.map(String.init))
+        return SessionKind.allCases.contains { words.contains($0.rawValue) }
     }
 
     /// "indoor cycling" → Indoor Cycling, "the bike" → Bike, "a run" → Run.

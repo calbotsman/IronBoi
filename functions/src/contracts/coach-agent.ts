@@ -88,9 +88,105 @@ export const LiveWorkoutState = z.object({
   targetReps: z.number().int().min(0).max(200),
   weightLb: z.number().min(0).max(2000).optional(),
   repsCountedThisSet: z.number().int().min(0).max(200).optional(),
+  /** Reps are per side: the set is a left and a right. */
+  eachSide: z.boolean().optional(),
   exercises: z.array(z.string().min(1).max(80)).max(30),
 }).strict();
 export type LiveWorkoutState = z.infer<typeof LiveWorkoutState>;
+
+/**
+ * Everything else the coach should know about right now, computed on the
+ * phone and sent with each message: how the session is going (rest, pace),
+ * the heart rate when a wearable is streaming, how training has gone lately,
+ * and how the coach is being heard. Every field is optional — the phone only
+ * sends what it actually knows; numbers only, no free text.
+ * See docs/product/responsive-coach-plan.md.
+ */
+export const HeartSource = z.enum(["watch", "strap", "airpods"]);
+/** What someone can switch today's session to (workouts/sessionAlternatives.ts). */
+export const SessionKind = z.enum([
+  "run", "walk", "cycle", "row", "swim", "hike", "yoga", "mobility", "bodyweight", "shorter",
+]);
+export type SessionKind = z.infer<typeof SessionKind>;
+/** The broad kind of training someone mainly does. */
+export const TrainingStyle = z.enum(["strength", "endurance", "mobility"]);
+export type TrainingStyle = z.infer<typeof TrainingStyle>;
+/** How a finished session is saved to Apple Health (ios HealthSync.activityType). */
+export const SessionActivity = z.enum([
+  "strength", "running", "walking", "cycling", "rowing", "swimming", "hiking", "yoga", "flexibility",
+]);
+export type SessionActivity = z.infer<typeof SessionActivity>;
+/**
+ * What the phone has banked for changing today's session, and whether the
+ * one-time add-on has been offered. Ids and enums only, no free text.
+ */
+export const SessionSwitchContext = z.object({
+  mainStyle: TrainingStyle,
+  addOnAsked: z.boolean(),
+  addOn: z.object({
+    style: TrainingStyle,
+    equipment: z.enum(["none", "dumbbell", "barbell", "kettlebell", "bench", "pullup_bar", "cable", "machine", "band", "club", "sandbag", "medball"]),
+    minutes: z.number().int().min(1).max(60),
+  }).strict().optional(),
+  /** Today's banked whole-session alternatives, best fit first. */
+  options: z.array(z.object({
+    id: z.string().min(1).max(80).regex(/^[A-Za-z0-9_-]+$/),
+    kind: SessionKind,
+    minutes: z.number().int().min(1).max(240),
+  }).strict()).max(6).optional(),
+  /** Today's session has already been switched to this. */
+  switchedTo: SessionKind.optional(),
+}).strict();
+export type SessionSwitchContext = z.infer<typeof SessionSwitchContext>;
+export const EffortRating = z.enum(["easy", "about_right", "too_much"]);
+export type EffortRating = z.infer<typeof EffortRating>;
+export const LiveCoachContext = z.object({
+  session: z.object({
+    minutesIn: z.number().int().min(0).max(600).optional(),
+    setsDone: z.number().int().min(0).max(300).optional(),
+    /** Resting right now: seconds since the last set ended / seconds planned. */
+    restElapsedSec: z.number().int().min(0).max(3600).optional(),
+    restPlannedSec: z.number().int().min(0).max(3600).optional(),
+    /** How long the last set took, start of count to logged. */
+    lastSetSec: z.number().int().min(0).max(900).optional(),
+    /** A timed block running right now: a cardio block (bike, run, rower) or a hold (plank). */
+    timed: z.object({
+      kind: z.enum(["cardio", "hold"]),
+      elapsedSec: z.number().int().min(0).max(4 * 3600),
+      plannedSec: z.number().int().min(0).max(4 * 3600),
+    }).strict().optional(),
+  }).strict().optional(),
+  heart: z.object({
+    source: HeartSource,
+    bpm: z.number().int().min(30).max(240),
+    /** How old the reading is. */
+    ageSec: z.number().int().min(0).max(600),
+    /** 1–5, from an estimated max heart rate. */
+    zone: z.number().int().min(1).max(5).optional(),
+    trend: z.enum(["rising", "steady", "falling"]).optional(),
+    /** Beats dropped in the first minute of the current rest. */
+    recoveryDrop60: z.number().int().min(-60).max(120).optional(),
+    sessionPeak: z.number().int().min(30).max(240).optional(),
+  }).strict().optional(),
+  rhythm: z.object({
+    sessionsLast7d: z.number().int().min(0).max(50),
+    sessionsLast28d: z.number().int().min(0).max(200),
+    /** Days since the last finished workout before today; absent = never. */
+    daysSinceLast: z.number().int().min(0).max(3650).optional(),
+    /** Most recent first. */
+    recentEfforts: z.array(EffortRating).max(3).optional(),
+  }).strict().optional(),
+  delivery: z.object({
+    /** False: the coach's replies are read on screen, not heard. */
+    speaksReplies: z.boolean(),
+    /** Their own music is playing under the coach. */
+    musicPlaying: z.boolean().optional(),
+    /** How much their music dips under the coach (Sound settings): none, light, full. */
+    musicDip: z.enum(["none", "light", "full"]).optional(),
+  }).strict().optional(),
+  switching: SessionSwitchContext.optional(),
+}).strict();
+export type LiveCoachContext = z.infer<typeof LiveCoachContext>;
 export type CoachTone = z.infer<typeof CoachTone>;
 export const OnboardingStatus = z.enum([
   "not_started",
@@ -333,6 +429,9 @@ export const WorkoutLog = z.object({
             z.object({
               reps: z.number().int().nonnegative().optional(),
               loadKg: z.number().nonnegative().optional(),
+              // One side at a time: each side's reps (`reps` is the fewer).
+              leftReps: z.number().int().nonnegative().optional(),
+              rightReps: z.number().int().nonnegative().optional(),
               durationSec: z.number().int().nonnegative().optional(),
               distanceM: z.number().nonnegative().optional(),
               rpe: z.number().min(1).max(10).optional(),
@@ -450,6 +549,9 @@ export const ActiveWorkoutSet = z.object({
   completed: z.boolean().default(false),
   reps: z.number().int().nonnegative().optional(),
   weight: z.number().nonnegative().optional(),
+  // A one-side-at-a-time lift: each side's reps (`reps` is the fewer).
+  leftReps: z.number().int().nonnegative().max(500).optional(),
+  rightReps: z.number().int().nonnegative().max(500).optional(),
 }).strict();
 
 export const ActiveWorkoutExercise = z.object({
@@ -461,6 +563,9 @@ export const ActiveWorkoutExercise = z.object({
   completedSets: z.array(ActiveWorkoutSet).default([]),
   exerciseDone: z.boolean().default(false),
   notes: z.string().optional(),
+  // Reps are per side ("10 reps each side"), set by the user mid-workout;
+  // absent = the exercise's own default (catalog `unilateral`).
+  eachSide: z.boolean().optional(),
 }).strict();
 
 export const ActiveWorkoutSession = z.object({
@@ -813,6 +918,7 @@ export const CoachMessage = z.object({
   coachTips: CoachTips.optional(),
   coachTone: CoachTone.optional(),
   liveWorkout: LiveWorkoutState.optional(),
+  liveContext: LiveCoachContext.optional(),
   structuredAnswer: z.record(z.string(), z.unknown()).optional(),
   turnId: z.string().optional(),
   toolCallIds: z.array(z.string()).default([]),

@@ -377,7 +377,7 @@ private struct PlannedWorkoutDayCard: View {
     }
 
     private func targetText(for exercise: PlannedExercise) -> String {
-        let weight = exercise.weight > 0 ? " · \(Int(exercise.weight)) lb" : ""
+        let weight = exercise.weight > 0 ? " · \(WeightLoad.label(exercise.weight, for: exercise.name))" : ""
         return "\(exercise.sets)x\(exercise.reps)\(weight)"
     }
 }
@@ -477,7 +477,7 @@ private struct PlannedExerciseDetailSheet: View {
         HStack(spacing: 10) {
             StatTile(label: "Sets", value: "\(exercise.sets)")
             StatTile(label: isTimed ? "Sec" : "Reps", value: "\(exercise.reps)")
-            StatTile(label: "Weight", value: exercise.weight > 0 ? "\(Int(exercise.weight)) lb" : "BW")
+            StatTile(label: "Weight", value: exercise.weight > 0 ? WeightLoad.label(exercise.weight, for: exercise.name) : "BW")
         }
     }
 
@@ -580,7 +580,7 @@ private struct PlannedExerciseDetailSheet: View {
 
     private var detailSubtitle: String {
         let repLabel = isTimed ? "seconds" : "reps"
-        let weight = exercise.weight > 0 ? " at \(Int(exercise.weight)) lb" : " bodyweight"
+        let weight = exercise.weight > 0 ? " at \(WeightLoad.label(exercise.weight, for: exercise.name))" : " bodyweight"
         return "\(exercise.sets) sets x \(exercise.reps) \(repLabel)\(weight)"
     }
 
@@ -766,6 +766,7 @@ private struct WorkoutExerciseCard: View {
             if exercise.targetWeight > 0 {
                 WorkoutWeightStepper(
                     weight: appModel.workingWeight(for: exercise),
+                    basis: WeightLoad.basis(for: exercise.name),
                     isPrescribed: appModel.workingWeight(for: exercise) == exercise.targetWeight
                 ) { newWeight in
                     appModel.setWorkoutExerciseWeight(
@@ -817,7 +818,7 @@ private struct WorkoutExerciseCard: View {
     }
 
     private var targetText: String {
-        let weight = exercise.targetWeight > 0 ? " · \(Int(exercise.targetWeight)) lb" : ""
+        let weight = exercise.targetWeight > 0 ? " · \(WeightLoad.label(exercise.targetWeight, for: exercise.name))" : ""
         return "\(exercise.targetSets)x\(exercise.targetReps)\(weight)"
     }
 }
@@ -909,7 +910,7 @@ private struct ExerciseDetailSheet: View {
         HStack(spacing: 10) {
             StatTile(label: "Sets", value: "\(exercise.targetSets)")
             StatTile(label: isTimed ? "Sec" : "Reps", value: "\(exercise.targetReps)")
-            StatTile(label: "Weight", value: exercise.targetWeight > 0 ? "\(Int(exercise.targetWeight)) lb" : "BW")
+            StatTile(label: "Weight", value: exercise.targetWeight > 0 ? WeightLoad.label(exercise.targetWeight, for: exercise.name) : "BW")
         }
     }
 
@@ -957,7 +958,7 @@ private struct ExerciseDetailSheet: View {
 
     private var detailSubtitle: String {
         let repLabel = isTimed ? "seconds" : "reps"
-        let weight = exercise.targetWeight > 0 ? " at \(Int(exercise.targetWeight)) lb" : " bodyweight"
+        let weight = exercise.targetWeight > 0 ? " at \(WeightLoad.label(exercise.targetWeight, for: exercise.name))" : " bodyweight"
         return "\(exercise.targetSets) sets x \(exercise.targetReps) \(repLabel)\(weight)"
     }
 
@@ -1271,8 +1272,8 @@ struct ExerciseSwapSheet: View {
             return "Bodyweight — or set your own weight"
         }
         return option.weightFromBaseline
-            ? "\(Int(option.suggestedWeightLb)) lb · your usual"
-            : "Starting at \(Int(option.suggestedWeightLb)) lb"
+            ? "\(WeightLoad.label(option.suggestedWeightLb, for: option.name)) · your usual"
+            : "Starting at \(WeightLoad.label(option.suggestedWeightLb, for: option.name))"
     }
 
     private func reload() async {
@@ -1394,7 +1395,7 @@ struct BaselineUpdateSheet: View {
 
                 Spacer(minLength: 8)
 
-                Text("\(Int(suggestion.fromLb)) → \(Int(suggestion.toLb)) lb")
+                Text(WeightLoad.change(from: suggestion.fromLb, to: suggestion.toLb, for: suggestion.exerciseName))
                     .font(.subheadline.monospacedDigit().weight(.bold))
                     .foregroundStyle(MyoTheme.Colors.ink.opacity(0.75))
             }
@@ -1662,6 +1663,8 @@ private struct MuscleChipGroup: View {
 /// accepts anything for dumbbells and machines that don't.
 struct WorkoutWeightStepper: View {
     let weight: Double
+    /// Per dumbbell, one bell, or the whole load: said on the label.
+    var basis: LoadBasis = .total
     let isPrescribed: Bool
     let onChange: (Double) -> Void
 
@@ -1708,12 +1711,12 @@ struct WorkoutWeightStepper: View {
                     isEditing = true
                     fieldFocused = true
                 } label: {
-                    Text("\(Int(weight)) lb")
+                    Text(WeightLoad.label(weight, basis: basis))
                         .font(.subheadline.monospacedDigit().weight(.bold))
                         .frame(minWidth: 68, minHeight: 40)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Weight \(Int(weight)) pounds. Double tap to type an exact value.")
+                .accessibilityLabel("Weight \(WeightLoad.label(weight, basis: basis).replacingOccurrences(of: "lb", with: "pounds")). Double tap to type an exact value.")
             }
 
             Button {

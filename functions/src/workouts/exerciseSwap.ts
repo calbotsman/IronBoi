@@ -42,8 +42,9 @@ import {
   suggestSwaps,
   suggestedLoadForSwap,
   type Equipment,
+  type SwapCandidate,
 } from "./exerciseCatalog.js";
-import { loadBaselines, resolvePrescribedWeight, roundToPlate } from "./exerciseBaselines.js";
+import { loadBaselines, resolvePrescribedWeight, roundToPlate, type BaselineMap } from "./exerciseBaselines.js";
 import { currentDateISO, nextOccurrenceOfWeekday } from "./planAdjustments.js";
 import {
   ensureTrainingProgram,
@@ -127,23 +128,34 @@ export async function getExerciseSwapOptions(
   });
 
   const baselines = await loadBaselines(db, userId);
-  const options: SwapOption[] = candidates.map((candidate) => {
-    const baseline = baselines.get(normalizeExerciseKey(candidate.name));
-    const suggested = baseline
-      ? resolvePrescribedWeight({ name: candidate.name, weight: 0 }, baselines, today)
-      : suggestedLoadForSwap(request.exerciseName, candidate.name, originalWeight);
-    return {
-      name: candidate.name,
-      primary: candidate.primary,
-      secondary: candidate.secondary,
-      equipment: candidate.equipment,
-      reason: candidate.reason,
-      suggestedWeightLb: roundToPlate(suggested),
-      weightFromBaseline: baseline !== undefined,
-    };
-  });
+  const options: SwapOption[] = candidates.map((candidate) =>
+    toSwapOption(candidate, request.exerciseName, originalWeight, baselines, today),
+  );
 
   return { ok: true, exerciseName: request.exerciseName, options };
+}
+
+/** One ranked candidate as the app shows it: their own weight for it if they have one. */
+export function toSwapOption(
+  candidate: SwapCandidate,
+  originalName: string,
+  originalWeight: number,
+  baselines: BaselineMap,
+  today: string,
+): SwapOption {
+  const baseline = baselines.get(normalizeExerciseKey(candidate.name));
+  const suggested = baseline
+    ? resolvePrescribedWeight({ name: candidate.name, weight: 0 }, baselines, today)
+    : suggestedLoadForSwap(originalName, candidate.name, originalWeight);
+  return {
+    name: candidate.name,
+    primary: candidate.primary,
+    secondary: candidate.secondary,
+    equipment: candidate.equipment,
+    reason: candidate.reason,
+    suggestedWeightLb: roundToPlate(suggested),
+    weightFromBaseline: baseline !== undefined,
+  };
 }
 
 // The day the swap is happening in — the live session's exercises when one is
@@ -178,7 +190,7 @@ async function loadDayContext(
   return day ? { exercises: day.exercises } : null;
 }
 
-function resolvePlanDay(
+export function resolvePlanDay(
   planData: FirebaseFirestore.DocumentData | undefined,
   dayKey: string,
   today: string,

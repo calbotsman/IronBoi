@@ -6,6 +6,8 @@ import {
   ActiveWorkoutExercise,
   ActiveWorkoutSession,
   PlannedWorkoutDay,
+  SessionActivity,
+  SessionKind,
   WorkoutLog,
 } from "../contracts/coach-agent.js";
 import {
@@ -59,6 +61,13 @@ export const FinishWorkoutSessionRequest = z.object({
   exercises: z.array(ActiveWorkoutExercise),
   // The client's local date, for "next up: Thursday" in the recap.
   clientDate: z.string().date().optional(),
+  // The planned session was switched for something else ("going for a run
+  // instead"): logged as that, under the name the phone showed.
+  replacedWith: z.object({
+    kind: SessionKind,
+    activity: SessionActivity,
+    title: z.string().trim().min(1).max(80),
+  }).strict().optional(),
 });
 
 type StartWorkoutSessionRequest = z.infer<typeof StartWorkoutSessionRequest>;
@@ -208,7 +217,7 @@ export async function finishWorkoutSession(
   const source = (activeSnap.exists ? activeSnap.data() : sessionSnap.data()) ?? {};
 
   const workoutName =
-    stringOr(source.workoutName, `Workout ${request.completedAt.slice(0, 10)}`);
+    request.replacedWith?.title ?? stringOr(source.workoutName, `Workout ${request.completedAt.slice(0, 10)}`);
   const startedAt = stringOr(source.startedAt, request.completedAt);
   const dayKey = stringOr(source.dayKey, "Workout");
   const duration = sessionDuration(request.durationSec, startedAt, request.completedAt);
@@ -243,6 +252,8 @@ export async function finishWorkoutSession(
           return {
             reps,
             ...(loadKg !== undefined ? { loadKg } : {}),
+            ...(set.leftReps !== undefined ? { leftReps: set.leftReps } : {}),
+            ...(set.rightReps !== undefined ? { rightReps: set.rightReps } : {}),
             // A hold, a carry or a cardio block is done for time: its reps
             // are seconds, so the log says so too ("Indoor Cycling", 1200 s).
             ...(isTimedExercise(exercise.name) ? { durationSec: reps } : {}),
@@ -288,6 +299,11 @@ export async function finishWorkoutSession(
     ),
     db.doc(workoutLogPath(userId, request.sessionId)).set({
       ...log,
+      // Server-written only (not part of the client-writable WorkoutLog):
+      // the planned session was switched for something else that day.
+      ...(request.replacedWith
+        ? { sessionKind: request.replacedWith.kind, activity: request.replacedWith.activity }
+        : {}),
       serverRecordedAt: FieldValue.serverTimestamp(),
     }),
   ]);

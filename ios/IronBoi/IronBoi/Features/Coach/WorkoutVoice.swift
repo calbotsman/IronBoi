@@ -1,14 +1,9 @@
 import Foundation
 
 /// What you say mid-workout that the phone handles itself, instantly,
-/// without a round trip to the coach: counting reps out loud, calling a set
-/// done, and changing the weight.
+/// without a round trip to the coach: counting reps out loud and calling a
+/// set done. Weight is WeightLoad.request (Models/WeightLoad.swift).
 enum WorkoutVoice {
-    enum WeightChange: Equatable {
-        case to(Double)
-        case by(Double)
-    }
-
     // MARK: - Counting
 
     static let numberWords: [String: Int] = [
@@ -182,11 +177,89 @@ enum WorkoutVoice {
     }
 
     /// A lift done one side at a time, counted to the target on each side:
-    /// "single-arm row", "Bulgarian split squat", "side plank".
+    /// "single-arm row", "Bulgarian split squat", "side plank" (the
+    /// `unilateral` flag in ExerciseKnowledge, else the name).
     static func isEachSide(_ name: String) -> Bool {
-        name.lowercased().range(
-            of: #"\b(single|one)[- ]?(arm|leg|side)|each (side|arm|leg)|per (side|arm|leg)|unilateral|lunges?|split squat|bulgarian|step[- ]?ups?|suitcase|side plank|pistol|cossack|\b(left|right) and (left|right)"#,
-            options: .regularExpression) != nil
+        ExerciseKnowledge.isUnilateral(name)
+    }
+
+    /// The same for a lift in today's workout, where "10 reps each side"
+    /// can turn it on.
+    static func isEachSide(_ exercise: ActiveWorkoutExercise) -> Bool {
+        exercise.eachSide ?? isEachSide(exercise.name)
+    }
+
+    enum Side: String, Equatable {
+        case left, right
+        var other: Side { self == .left ? .right : .left }
+    }
+
+    /// One side of a set is over: "left side done", "done with the left",
+    /// "switching sides", "other side", "right side now", "on to the left
+    /// arm". `finished` is the side just done when it can be told.
+    struct SideSwitch: Equatable {
+        let finished: Side?
+    }
+
+    /// Both sides of a set from the two counts: `first` and `second` in
+    /// the order done, `firstName` the first side if it was said (else
+    /// taken as the left). The set's reps are the fewer. A second side
+    /// under 3 reps was never really counted: only the first is logged.
+    static func sides(first: Int, second: Int, firstName: Side?) -> (left: Int?, right: Int?, reps: Int) {
+        guard second >= 3 else {
+            return firstName == .right ? (nil, first, first) : (first, nil, first)
+        }
+        let (left, right) = firstName == .right ? (second, first) : (first, second)
+        return (left, right, min(first, second))
+    }
+
+    /// Sides said instead of counted: "10 left, 9 right", "right 8 left
+    /// 10", "10 each side", "8 per leg".
+    static func sideReps(in transcript: String) -> (left: Int, right: Int)? {
+        let t = normalized(transcript)
+        let n = #"(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)"#
+        func value(_ s: String) -> Int? { Int(s) ?? numberWords[s] }
+        func groups(_ pattern: String) -> [String]? {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let m = regex.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) else { return nil }
+            return (1..<m.numberOfRanges).compactMap { Range(m.range(at: $0), in: t).map { String(t[$0]) } }
+        }
+        let side = #"(?: reps?)?(?: on| with)?(?: the| my)? (left|right)\b"#
+        if let g = groups(n + side + #".*?\b"# + n + side), g.count == 4, g[1] != g[3],
+           let a = value(g[0]), let b = value(g[2]) {
+            return g[1] == "left" ? (a, b) : (b, a)
+        }
+        let sideFirst = #"\b(left|right)(?: side| arm| leg)?,? "# + n
+        if let g = groups(sideFirst + #".*?"# + sideFirst), g.count == 4, g[0] != g[2],
+           let a = value(g[1]), let b = value(g[3]) {
+            return g[0] == "left" ? (a, b) : (b, a)
+        }
+        if let g = groups(n + #"(?: reps?)? (?:each|per|a|on each) (?:side|leg|arm)\b"#), let a = value(g[0]) {
+            return (a, a)
+        }
+        return nil
+    }
+
+    static func sideSwitch(in transcript: String) -> SideSwitch? {
+        let t = normalized(transcript)
+        func side(_ pattern: String) -> Side? {
+            guard let range = t.range(of: pattern, options: .regularExpression) else { return nil }
+            return t[range].contains("left") ? .left : t[range].contains("right") ? .right : nil
+        }
+        let limb = #"(?: side| arm| leg| hand)?"#
+        if let done = side(#"\b(left|right)"# + limb + #"(?: is| was|'s)? (?:done|finished|complete|over)\b"#)
+            ?? side(#"\b(?:done with|finished|finished with|that's) (?:the |my )?(left|right)\b"#) {
+            return SideSwitch(finished: done)
+        }
+        if let next = side(#"\b(?:now|on to|onto|switch(?:ing)? to|swap(?:ping)? to|start(?:ing)?(?: on| with)?|over to|go to|going to) (?:the |my )?(left|right)\b"#)
+            ?? side(#"\b(left|right)"# + limb + #" now\b"#) {
+            return SideSwitch(finished: next.other)
+        }
+        if t.range(of: #"\b(?:switch(?:ing)?|swap(?:ping)?|chang(?:e|ing)) (?:sides|arms|legs|hands)\b|\bother (?:side|arm|leg|hand)\b|\bnext side\b"#,
+                   options: .regularExpression) != nil {
+            return SideSwitch(finished: nil)
+        }
+        return nil
     }
 
     /// Is this word a number or something that sounds like one.
@@ -250,48 +323,6 @@ enum WorkoutVoice {
             with: "set done", options: .regularExpression)
     }
 
-    // MARK: - Weight
-
-    /// A weight change, if that's what you said. Pounds unless you say kilos.
-    /// `timed`: the lift is a hold or carry. Then a bare number ("at 60",
-    /// "make it 45") is its time, never a weight — only a unit makes it one.
-    static func weightChange(in transcript: String, timed: Bool = false) -> WeightChange? {
-        // "Go to 12 reps", "3 sets of 10" — those numbers are reps or sets,
-        // so they're set aside; "3 sets of 10 with 50 pounds" still has 50.
-        let t = normalized(transcript)
-            .replacingOccurrences(of: #"\b(\d+|[a-z]+)\s+sets?\s+(of|at|for)\s+\d+(\s*reps?)?"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\b\d+\s*(reps?|sets?|times|rounds?)\b"#, with: "", options: .regularExpression)
-        guard let number = firstNumber(in: t), number >= 2.5, number <= 1000 else { return nil }
-        // "60 seconds", "two minutes" — that number is time, not weight.
-        if t.range(of: #"\b\d+\s*(s|secs?|seconds?|minutes?|mins?|second hold)\b"#, options: .regularExpression) != nil { return nil }
-        if t.range(of: #"\b(seconds?|secs?|minutes?|mins?|hold|longer|shorter)\b"#, options: .regularExpression) != nil,
-           t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?)\b"#, options: .regularExpression) == nil {
-            return nil
-        }
-        if timed, t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?|heavier|lighter)\b"#, options: .regularExpression) == nil {
-            return nil
-        }
-        let isKilos = t.range(of: #"\b(kg|kgs|kilo|kilos|kilograms?)\b"#, options: .regularExpression) != nil
-        let pounds = isKilos ? (number * 2.20462 / 2.5).rounded() * 2.5 : number
-        let mentionsWeight = t.range(of: #"\b(pounds?|lbs?|kg|kgs|kilos?|kilograms?|weight|plates?|heavier|lighter)\b"#,
-                                     options: .regularExpression) != nil
-        let saysUp = t.range(of: #"\b(up|increase|increased|add|added|bump|bumped|raise|raised|heavier|go up|went up)\b"#,
-                         options: .regularExpression) != nil
-        let saysDown = t.range(of: #"\b(down|decrease|decreased|drop|dropped|lower|lowered|reduce|reduced|lighter|take off|took off)\b"#,
-                           options: .regularExpression) != nil
-        let absolute = t.range(of: #"\b(to|at|using|use|used|with|make it|it's|its|now|was)\s+(a\s+|the\s+)?\d"#, options: .regularExpression) != nil
-
-        // "More"/"less" only mean weight when a unit says so ("ten more
-        // pounds") — "five more" is reps.
-        let up = saysUp || (mentionsWeight && t.contains("more"))
-        let down = saysDown || (mentionsWeight && t.contains("less"))
-        if up || down {
-            if absolute { return .to(pounds) }
-            return .by(up ? pounds : -pounds)
-        }
-        if mentionsWeight || absolute { return .to(pounds) }
-        return nil
-    }
 
     // MARK: - Helpers
 
@@ -354,16 +385,6 @@ enum WorkoutVoice {
             guard chars.count > width, String(chars.prefix(width)) == String(start),
                   let run = walk(width, start, [start]), run.count >= 2 else { continue }
             return run
-        }
-        return nil
-    }
-
-    private static func firstNumber(in text: String) -> Double? {
-        if let range = text.range(of: #"\d+(\.\d+)?"#, options: .regularExpression) {
-            return Double(text[range])
-        }
-        for token in tokens(text) {
-            if let value = numberWords[token] { return Double(value) }
         }
         return nil
     }

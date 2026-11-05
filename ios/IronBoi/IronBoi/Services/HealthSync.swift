@@ -3,9 +3,11 @@ import HealthKit
 
 /// Saves finished workouts to Apple Health, when you've turned it on.
 ///
-/// Write-only: MYO asks to save workouts and reads nothing back. Each saved
+/// This is the phone's own save, for workouts without a Watch. When the
+/// Watch ran the workout it saves it instead, with heart rate and energy,
+/// and this is skipped (WatchWorkoutLink / AppModel+Watch). Each saved
 /// workout carries the session id as its sync identifier, so Health replaces
-/// rather than duplicates if the same session is ever saved twice.
+/// rather than duplicates if the same app saves the same session twice.
 ///
 /// No calories: MYO doesn't measure them, and Health would show a guess as
 /// if it were a reading. Duration and the workout type are what we know.
@@ -33,7 +35,12 @@ final class HealthSync: ObservableObject {
     func enable() async -> Bool {
         guard isAvailable else { return false }
         do {
-            try await store.requestAuthorization(toShare: [HKObjectType.workoutType()], read: [])
+            // Workouts, plus heart rate: what a Watch or AirPods workout
+            // reads live and saves with the workout (PhoneWorkoutSession
+            // only runs when this was granted, so it never asks mid-workout).
+            try await store.requestAuthorization(
+                toShare: [HKObjectType.workoutType(), HKQuantityType(.heartRate)],
+                read: [HKQuantityType(.heartRate)])
         } catch {
             AudioHub.log("health auth failed: \(error.localizedDescription)")
             return false
@@ -52,12 +59,12 @@ final class HealthSync: ObservableObject {
 
     /// Saves one finished session. Quietly does nothing when off, and never
     /// throws: a workout that didn't reach Health isn't worth an error card.
-    func saveWorkout(sessionId: String, name: String, start: Date, end: Date) async {
+    func saveWorkout(sessionId: String, name: String, activity: String? = nil, start: Date, end: Date) async {
         guard enabled, end > start,
               store.authorizationStatus(for: HKObjectType.workoutType()) == .sharingAuthorized else { return }
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = Self.activityType(for: name)
-        configuration.locationType = .indoor
+        configuration.activityType = Self.activityType(for: name, activity: activity)
+        configuration.locationType = activity.map { ["running", "walking", "cycling", "hiking"].contains($0) } == true ? .unknown : .indoor
         let builder = HKWorkoutBuilder(healthStore: store, configuration: configuration, device: .local())
         do {
             try await builder.beginCollection(at: start)
@@ -73,8 +80,22 @@ final class HealthSync: ObservableObject {
         }
     }
 
-    /// The plan names its mobility days; everything else MYO builds is strength.
-    static func activityType(for name: String) -> HKWorkoutActivityType {
-        name.localizedCaseInsensitiveContains("mobility") ? .flexibility : .traditionalStrengthTraining
+    /// A switched session says what it was ("running", "yoga"; the server's
+    /// SessionActivity). Otherwise the plan names its mobility days and
+    /// everything else MYO builds is strength.
+    static func activityType(for name: String, activity: String? = nil) -> HKWorkoutActivityType {
+        switch activity {
+        case "running": return .running
+        case "walking": return .walking
+        case "cycling": return .cycling
+        case "rowing": return .rowing
+        case "swimming": return .swimming
+        case "hiking": return .hiking
+        case "yoga": return .yoga
+        case "flexibility": return .flexibility
+        case "strength": return .traditionalStrengthTraining
+        default:
+            return name.localizedCaseInsensitiveContains("mobility") ? .flexibility : .traditionalStrengthTraining
+        }
     }
 }

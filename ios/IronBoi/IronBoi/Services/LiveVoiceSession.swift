@@ -58,7 +58,11 @@ final class LiveVoiceSession: ObservableObject {
     /// The server, as the session needs it.
     struct Backend {
         /// `handover`: a fresh connection mid-conversation (its own cap).
-        var mint: (_ resumeHandle: String?, _ handover: Bool) async throws -> Ticket
+        /// `memoryBriefBuiltAt`: we hold a cached brief and will send it as
+        /// the first [app] line, so the server skips reading memory.
+        var mint: (_ resumeHandle: String?, _ handover: Bool, _ memoryBriefBuiltAt: String?) async throws -> Ticket
+        /// The memory brief cached on disk (MemoryBriefCache), if any.
+        var memoryBrief: () -> MemoryBrief?
         var recordTurn: (_ user: String, _ coach: String, _ startedAt: Date, _ interrupted: Bool) async throws -> TurnResult
         var runTool: (_ name: String, _ args: [String: Any], _ turnId: String, _ rawUserText: String) async throws -> [String: Any]
     }
@@ -127,6 +131,15 @@ final class LiveVoiceSession: ObservableObject {
     private var turnStartedAt = Date()
     private var coachTurnDone = true
 
+    // Memory brief: the cached copy waits for setupComplete, then goes in as
+    // the first [app] line; a newer one arriving mid-session follows it.
+    private var briefToSend: MemoryBrief?
+    private var briefInSession: MemoryBrief?
+    private var briefObserver: NSObjectProtocol?
+
+    // Time to first coach word, from start(): logged once per session.
+    private var startedAt = Date()
+    private var firstAudioLogged = false
     /// Connects and starts listening. False if it couldn't (the caller
     /// falls back to the regular coach).
     func start(_ backend: Backend) async -> Bool {
@@ -137,8 +150,32 @@ final class LiveVoiceSession: ObservableObject {
         heard = ""
         resetTurn()
         state = .connecting
+        startedAt = Date()
+        firstAudioLogged = false
+        briefInSession = nil
+        observeBriefUpdates()
         watchNetwork()
         return await connect(resume: nil)
+    }
+
+    private func observeBriefUpdates() {
+        if let briefObserver { NotificationCenter.default.removeObserver(briefObserver) }
+        briefObserver = NotificationCenter.default.addObserver(forName: MemoryBriefCache.updated, object: nil, queue: .main) { [weak self] note in
+            guard let brief = note.object as? MemoryBrief else { return }
+            Task { @MainActor in self?.briefUpdated(brief) }
+        }
+    }
+
+    /// Background refresh landed mid-session: pass on a brief newer than
+    /// what the coach has (or, if the server supplied it, newer than the
+    /// session itself).
+    private func briefUpdated(_ brief: MemoryBrief) {
+        guard state != .idle, let built = brief.builtDate else { return }
+        let have = briefInSession?.builtDate ?? startedAt
+        guard built > have else { return }
+        if socketBox.socket == nil { briefToSend = brief; return }
+        note(brief.appLine(replacing: true))
+        briefInSession = brief
     }
 
     private func watchNetwork() {
@@ -193,7 +230,20 @@ final class LiveVoiceSession: ObservableObject {
         state = .idle
         caption = ""
         reconnecting = false
+        briefToSend = nil
+        briefInSession = nil
+        if let briefObserver { NotificationCenter.default.removeObserver(briefObserver) }
+        briefObserver = nil
         hub.stop()
+    }
+
+    /// The cached memory brief goes in as the first [app] line once the
+    /// connection is up.
+    private func sendBriefIfAny() {
+        guard let brief = briefToSend else { return }
+        note(brief.appLine())
+        briefInSession = brief
+        briefToSend = nil
     }
 
     /// A reconnect finished: how long you were without the coach.
@@ -221,7 +271,14 @@ final class LiveVoiceSession: ObservableObject {
         let mine = connection
         do {
             let handover = handle != nil || gapStartedAt != nil
-            let ticket = try await withDeadline(5) { try await backend.mint(handle, handover) }
+            // A fresh session (Gemini new, or any OpenAI one) opens with the
+            // cached brief; a resumed one already has it in its context.
+            let cached = handle == nil ? backend.memoryBrief() : nil
+            if handle == nil { briefToSend = cached }
+            let briefAt = cached?.builtAt ?? (handle != nil ? briefInSession?.builtAt : nil)
+            let mintStarted = Date()
+            let ticket = try await withDeadline(5) { try await backend.mint(handle, handover, briefAt) }
+            AudioHub.log("live timing: mint \(Self.ms(since: mintStarted))ms (memory \(cached != nil ? "from phone cache, \(cached!.ageLabel())" : handle != nil ? "resumed" : "from server"))")
             guard mine == connection else { return false }
             model = ticket.model
             activeProvider = Provider(rawValue: ticket.provider ?? "") ?? .gemini
@@ -330,7 +387,8 @@ final class LiveVoiceSession: ObservableObject {
             // Gemini resumes the same session; OpenAI starts a fresh one,
             // minted with the whole conversation so far.
             let handle = openAI ? nil : resumeHandle
-            let ticket = try await withDeadline(5) { try await backend.mint(handle, true) }
+            let briefAt = openAI ? nil : briefInSession?.builtAt
+            let ticket = try await withDeadline(5) { try await backend.mint(handle, true, briefAt) }
             guard mine == connection, state != .idle else { return }
             standbyReady = false
             let task = try await openSocket(ticket, resume: openAI ? nil : resumeHandle, connection: mine, standby: true)
@@ -460,8 +518,10 @@ final class LiveVoiceSession: ObservableObject {
         }
         if message["setupComplete"] != nil {
             AudioHub.log("live: ready")
+            AudioHub.log("live timing: ready \(Self.ms(since: startedAt))ms after start")
             endGap()
             socketBox.attach(task)
+            sendBriefIfAny()
             onReconnected?()
             if state == .connecting { state = .listening }
             installTap()
@@ -508,6 +568,10 @@ final class LiveVoiceSession: ObservableObject {
                       let pcm = Data(base64Encoded: b64),
                       let buffer = Self.buffer(fromPCM16: pcm) else { continue }
                 if coachTurnDone { caption = ""; coachTurnDone = false }
+                if !firstAudioLogged {
+                    firstAudioLogged = true
+                    AudioHub.log("live timing: first coach audio \(Self.ms(since: startedAt))ms after start, \(Self.ms(since: turnStartedAt))ms after you started speaking")
+                }
                 play(buffer)
             }
         }
@@ -539,6 +603,7 @@ final class LiveVoiceSession: ObservableObject {
             AudioHub.log("live: ready (OpenAI)")
             endGap()
             socketBox.attach(task)
+            sendBriefIfAny()
             onReconnected?()
             if state == .connecting { state = .listening }
             installTap()
@@ -857,6 +922,8 @@ final class LiveVoiceSession: ObservableObject {
         AudioHub.log("probe: said \"\(text)\"")
     }
     #endif
+
+    private static func ms(since date: Date) -> Int { Int((Date().timeIntervalSince(date) * 1000).rounded()) }
 
     private static func json(_ object: [String: Any]) throws -> String {
         String(data: try JSONSerialization.data(withJSONObject: object), encoding: .utf8) ?? "{}"

@@ -27,10 +27,12 @@ import {
   publishDraftProposals,
 } from "../workouts/planAdjustments.js";
 import { executeTool } from "../tools/executor.js";
-import type { CoachTips, CoachTone, LiveWorkoutState } from "../contracts/coach-agent.js";
-import { liveWorkoutRules } from "./liveWorkout.js";
+import type { CoachTips, CoachTone, LiveCoachContext, LiveWorkoutState } from "../contracts/coach-agent.js";
+import { liveContextRules, liveWorkoutRules } from "./liveWorkout.js";
 import { HONESTY_RETRY_NOTE, claimsPlanChange } from "./honesty.js";
+import { isCardioExercise } from "../workouts/exerciseCatalog.js";
 import { refreshCoachNotesIfDue } from "./coachNotes.js";
+import { SET_WORKOUT_WEIGHT, runSetWorkoutWeight } from "./workoutWeightTool.js";
 
 // Feature flag for the Gemini function-calling loop (adapt_plan,
 // ask_follow_up_question). Exported because it gates BOTH sides of the
@@ -113,6 +115,8 @@ type OrchestrateCoachTurnArgs = {
   coachTone?: CoachTone;
   /** Mid-workout: where the user is right now. */
   liveWorkout?: LiveWorkoutState;
+  /** Rest, pace, heart rate, recent training, how the coach is heard. */
+  liveContext?: LiveCoachContext;
   geminiApiKey?: string;
   openRouterApiKey?: string;
 };
@@ -147,6 +151,7 @@ export async function orchestrateCoachTurn({
   coachTips,
   coachTone,
   liveWorkout,
+  liveContext,
   geminiApiKey,
   openRouterApiKey,
 }: OrchestrateCoachTurnArgs) {
@@ -207,6 +212,7 @@ export async function orchestrateCoachTurn({
   // real proposal, and stranding it makes the user re-ask for a change that
   // was already settled.
   const ownDraftProposalIds: string[] = [];
+  const clientActions: Array<Record<string, unknown>> = [];
 
   try {
     const usageCap = await checkDailyUsageCap(db, userId);
@@ -276,6 +282,10 @@ export async function orchestrateCoachTurn({
       inputMode ? BODY_RULES : null,
       styleRules,
       liveWorkoutRules(liveWorkout),
+      liveContextRules(liveContext, {
+        inWorkout: Boolean(liveWorkout),
+        onCardio: liveWorkout ? isCardioExercise(liveWorkout.exercise) : false,
+      }),
     ].filter((part): part is string => Boolean(part)).join("\n\n");
     const userMessage = assembled.userMessage;
     const provider = selectCoachModelProvider({ geminiApiKey, openRouterApiKey });
@@ -320,6 +330,7 @@ export async function orchestrateCoachTurn({
           clientDate,
           rawUserText: userContent,
           sourceMessageId: messageId,
+          switching: liveContext?.switching,
         })
       : undefined;
     // Tools that did something this turn: a reply claiming a plan change
@@ -327,6 +338,12 @@ export async function orchestrateCoachTurn({
     const succeededTools = new Set<string>();
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
       ? async (toolName, toolArgs) => {
+          if (toolName === SET_WORKOUT_WEIGHT.name) {
+            const { result, action } = runSetWorkoutWeight(toolArgs, liveWorkout);
+            // Same channel as replace_session: the phone applies it once.
+            if (action) clientActions.push(action);
+            return result;
+          }
           try {
             const toolResult = await executeTool(toolRegistry, toolName, toolArgs, {
               authenticatedUserId: userId,
@@ -342,6 +359,11 @@ export async function orchestrateCoachTurn({
             // running concurrently with this one.
             if (typeof record.proposalId === "string") {
               ownDraftProposalIds.push(record.proposalId);
+            }
+            // Changes only the phone can make (switching today's session):
+            // carried on the reply for the phone to apply once.
+            if (record.ok === true && typeof record.clientAction === "object" && record.clientAction !== null) {
+              clientActions.push(record.clientAction as Record<string, unknown>);
             }
             return record;
           } catch (error) {
@@ -379,7 +401,9 @@ export async function orchestrateCoachTurn({
         // Phase 1.1 — userContent on the wire is the XML-tagged userMessage,
         // not the raw user turn. The boundary contract is in `system`.
         userContent: userMessage,
-        tools: toolLoopEnabled ? COACH_TOOL_DECLARATIONS : undefined,
+        tools: toolLoopEnabled
+          ? (liveWorkout ? [...COACH_TOOL_DECLARATIONS, SET_WORKOUT_WEIGHT] : COACH_TOOL_DECLARATIONS)
+          : undefined,
         executeTool: executeCoachTool,
         signal: modelAbort.signal,
         onText: async (partialContent) => {
@@ -475,6 +499,7 @@ export async function orchestrateCoachTurn({
         ...(result.toolCalls.length > 0
           ? { toolNames: result.toolCalls.map((call) => call.name) }
           : {}),
+        ...(clientActions.length > 0 ? { clientActions } : {}),
         serverCompletedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },
