@@ -1,7 +1,7 @@
 # Watchdog findings
 
 *Updated 2026-11-05. Most severe first. CONFIRMED = read in the code. PLAUSIBLE = depends on runtime data or a device.*
-Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable).
+Audited: #39, #40, #41 (merged), #44 (open; rebased to 86e8a6a, mergeable), #46 (open, own commit 3d9bee2).
 
 ## High
 
@@ -36,6 +36,18 @@ The PR body only mentions dropping `verbosity`. These are also gone: `paceSecPer
 
 **F9. #44: `extend_rest` reports success before anything happens. CONFIRMED**
 `AppModel.swift:534–539`: it returns `ok: true, addedSeconds` after setting `restExtensionRequest`. The timer only changes if `CoachStageView` is mounted to catch the `onChange`. Scenario: the user is on another tab and the live coach is still connected. The coach says "I've given you 30 more seconds" and the timer is unchanged. The server tells the coach not to cue the next set until HR drops, but the phone's own rest timer still says "Go." on schedule, so the coach and the app can disagree.
+
+## #46 rep counting past target (3d9bee2)
+
+Verdict: **the fix is real and well tested.** The bug cause in the PR body matches the old code: the set was logged at the target, and the 4 s close window was flat. `SetCount` is a clean pure struct, and the 12 tests exercise real behaviour, not a copy of the code: grinding, dropped words, each side, stray numbers. The constants have stated reasons and aren't tuned to Josh's set. No scope drift.
+
+**F10. #46: the new tests never run in CI. CONFIRMED**
+`.github/workflows/ci.yml` only builds the `IronBoi` scheme. The `IronBoiTests` scheme/target isn't in any job, so "12/12 pass" was a local run, and the first regression will go unnoticed.
+
+**F11. #46: live voice stays muted up to 20 s after the last rep. PLAUSIBLE**
+`CoachStageView.swift` (`trackReps` / `finishCount`, around line 1650 on the branch): the uplink is muted at the first number and only reopens in `finishCount`. Before, the set closed 4 s after the target. Now it's `quietWindow`: at least 6 s, up to 20 s when an earlier rep in the set was slow (one 10 s breath at rep 5 → 20 s window). Scenario: live voice, last rep at 10, then "that was brutal, how long do I rest?" The coach can't hear it for up to 20 s, and the rest timer (and #44's `restElapsed`) starts that late too. Device check 3 covers the grind; add one for talking to the coach right after racking.
+
+**F12. #46: `AppModel.updateSetReps` is now dead code** (`AppModel.swift:1119` on the branch). Nothing calls it. Delete it, or keep it on purpose.
 
 ## Low
 

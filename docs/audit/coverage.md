@@ -29,7 +29,8 @@ Status values: not started, in PR #N, merged (#N), dropped.
 **Ideas the plan silently leaves out:** I3 live stats pill, I4/I5/I7 HR atmosphere (colour, grain, MYO mirroring, colour-blind safe), I9 voice workout replacement, I10 ask-once suggestion, I11–I13 cached memory brief, I14 deep recall, I15–I18 opt-in social. None of these has a phase, an owner or an estimate.
 
 | I19 | Bank alternatives so swaps are instant (new, 2026-11-05) | No | building (workout-replace) | — |
-| I20 | Rep counter must count past target (new, 2026-11-05) | No | building (rep-overcount) | — |
+| I20 | Rep counter must count past target (new, 2026-11-05) | No | in PR #46 | F10–F12 |
+| I22 | "10 reps each side": unilateral lifts counted and logged per side (new, 2026-11-05) | No | building (weight-fix) | #46 still logs the weaker side as one number. |
 | I21 | Voice weight changes, total vs per-side (bug) | No | building (weight-fix) | — |
 
 **Deferred, not dropped:** Phase 4 recovery reads, social (I15–I18), deep-recall vector search.
