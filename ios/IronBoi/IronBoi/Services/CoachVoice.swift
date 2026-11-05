@@ -61,6 +61,9 @@ final class CoachVoice: NSObject, ObservableObject {
     var allowsDeviceVoice = true
     /// A line that couldn't be spoken in the coach's voice (shown instead).
     var onUnspoken: ((String) -> Void)?
+    /// A spoken message was just sent: when you stopped talking, and when it
+    /// went. The reply's first audio logs the gap (the regular coach's lag).
+    static var latencyClock: (speechEnd: Date, sent: Date)?
 
     /// One sentence's audio: from the phone if it's there, else fetched —
     /// within 4 s all told (one quick retry if the first fails fast). A
@@ -209,10 +212,21 @@ final class CoachVoice: NSObject, ObservableObject {
             let units = chunks.enumerated().flatMap { line, text in
                 Self.sentences(text).map { (text: $0, line: line) }
             }
-            let pending = units.map { self.audio(for: $0.text) }
+            // Decoded off the main thread too: the WAV decode (a file write
+            // and read) used to run on main, so a busy stage delayed it.
+            let began = Date()
+            let fetches = units.map { self.audio(for: $0.text) }
+            let pending = fetches.map { fetch in
+                Task.detached { () -> AVAudioPCMBuffer? in
+                    guard let data = await fetch.value else { return nil }
+                    return try? AudioHub.buffer(fromWAV: data)
+                }
+            }
             for (index, unit) in units.enumerated() {
-                guard gen == self.generation else { pending.forEach { $0.cancel() }; return }
-                guard let data = await pending[index].value, let buffer = try? AudioHub.buffer(fromWAV: data) else {
+                guard gen == self.generation else { fetches.forEach { $0.cancel() }; return }
+                let ready = await pending[index].value
+                if index == 0, ready != nil { AudioHub.log("voice timing: first sentence ready in \(Int(Date().timeIntervalSince(began) * 1000)) ms") }
+                guard let buffer = ready else {
                     guard gen == self.generation else { return }
                     if self.allowsDeviceVoice {
                         AudioHub.log("voice: no audio, on-device fallback")
@@ -239,7 +253,14 @@ final class CoachVoice: NSObject, ObservableObject {
                 }
                 self.caption = unit.text
                 self.lineIndex = unit.line
-                if index == 0 { AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))") }
+                if index == 0 {
+                    AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))")
+                    if let clock = Self.latencyClock, Date().timeIntervalSince(clock.speechEnd) < 120 {
+                        Self.latencyClock = nil
+                        let ms = { (from: Date) in Int(Date().timeIntervalSince(from) * 1000) }
+                        AudioHub.log("latency: speech end → coach audio \(ms(clock.speechEnd)) ms (pause wait \(Int(clock.sent.timeIntervalSince(clock.speechEnd) * 1000)) ms, reply + voice \(ms(clock.sent)) ms)")
+                    }
+                }
                 await self.hub.play(buffer)
             }
             if gen == self.generation { self.finish() }

@@ -277,6 +277,8 @@ targets:
       - path: IronBoi/Features/Coach/WorkoutEdits.swift
       - path: IronBoi/Features/Coach/WorkoutVoice.swift
       - path: IronBoi/Models/SessionAlternatives.swift
+      # Live voice reconnect rules (LiveVoicePolicyTests.swift).
+      - path: IronBoi/Services/LiveVoicePolicy.swift
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
