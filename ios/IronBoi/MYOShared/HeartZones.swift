@@ -25,3 +25,51 @@ enum HeartZones {
         return Swift.max(208 - 0.7 * Double(age), Double(observedPeak ?? 0))
     }
 }
+
+/// A heart-rate zone that doesn't flicker. Optical heart rate during
+/// lifting is noisy (wrist flexion on presses), so the zone comes from the
+/// last 10 s of readings averaged, and only changes once the new zone has
+/// held for 15 s. The first zone of a workout is taken at once.
+/// docs/product/responsive-coach-plan.md, Risks: "Coach overreacting to HR".
+struct ZoneTracker {
+    static let smoothing: TimeInterval = 10
+    static let hysteresis: TimeInterval = 15
+
+    private(set) var zone: Int?
+    private var window: [(at: Date, bpm: Int)] = []
+    private var candidate: (zone: Int, since: Date)?
+
+    /// The last 10 s of readings, averaged. Nil before any reading.
+    var smoothedBpm: Int? {
+        guard !window.isEmpty else { return nil }
+        return Int((Double(window.map(\.bpm).reduce(0, +)) / Double(window.count)).rounded())
+    }
+
+    /// Adds a reading; returns the (possibly unchanged) zone.
+    @discardableResult
+    mutating func add(bpm: Int, at: Date, ageYears: Int?, observedPeak: Int?) -> Int? {
+        window.append((at, bpm))
+        window.removeAll { at.timeIntervalSince($0.at) > Self.smoothing }
+        guard let smoothed = smoothedBpm,
+              let next = HeartZones.zone(bpm: smoothed, ageYears: ageYears, observedPeak: observedPeak) else {
+            return zone
+        }
+        guard let current = zone else {
+            zone = next
+            return zone
+        }
+        if next == current {
+            candidate = nil
+        } else if let pending = candidate, pending.zone == next {
+            if at.timeIntervalSince(pending.since) >= Self.hysteresis {
+                zone = next
+                candidate = nil
+            }
+        } else {
+            candidate = (next, at)
+        }
+        return zone
+    }
+
+    mutating func reset() { self = ZoneTracker() }
+}

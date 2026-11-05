@@ -622,7 +622,7 @@ final class AppModel: NSObject, ObservableObject {
             }
             context["session"] = session
             let hub = HeartRateHub.shared
-            if let heart = CoachContext.heart(hub.latest, ageYears: profile.ageYears, peak: hub.sessionPeak, now: now) {
+            if let heart = CoachContext.heart(hub.latest, zone: hub.zone, peak: hub.sessionPeak, now: now) {
                 context["heart"] = heart
             }
         }

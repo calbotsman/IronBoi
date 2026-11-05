@@ -53,12 +53,13 @@ enum CoachContext {
     }
 
     /// The live heart rate, if one is fresh enough to send at all.
-    static func heart(_ sample: HeartSample?, ageYears: Int?, peak: Int?, now: Date = Date()) -> [String: Any]? {
+    /// `zone` is the hub's smoothed, hysteresis-held zone (HeartRateHub.zone).
+    static func heart(_ sample: HeartSample?, zone: Int?, peak: Int?, now: Date = Date()) -> [String: Any]? {
         guard let sample else { return nil }
         let age = Int(now.timeIntervalSince(sample.at).rounded())
         guard age >= 0, age <= 600, (30...240).contains(sample.bpm) else { return nil }
         var heart: [String: Any] = ["source": sample.source.rawValue, "bpm": sample.bpm, "ageSec": age]
-        if let zone = HeartZones.zone(bpm: sample.bpm, ageYears: ageYears, observedPeak: peak) { heart["zone"] = zone }
+        if let zone, (1...5).contains(zone) { heart["zone"] = zone }
         if let trend = sample.trend { heart["trend"] = trend.rawValue }
         if let drop = sample.recoveryDrop60 { heart["recoveryDrop60"] = max(-60, min(drop, 120)) }
         if let peak, (30...240).contains(peak) { heart["sessionPeak"] = peak }
@@ -130,7 +131,7 @@ struct HeartSample: Equatable {
 /// The coach context reads `latest`; nothing reads a device directly.
 ///
 /// Interface other code relies on (the atmosphere visuals read it): `latest`,
-/// `sessionPeak`, `activeEnergyKcal`, `publish(_:)`, `reset()`. `latest`
+/// `sessionPeak`, `zone`, `activeEnergyKcal`, `publish(_:)`, `reset()`. `latest`
 /// carries `trend` and `recoveryDrop60`, computed here when the source
 /// doesn't send them.
 @MainActor
@@ -139,6 +140,13 @@ final class HeartRateHub: ObservableObject {
     @Published private(set) var latest: HeartSample?
     /// Highest reading this workout.
     @Published private(set) var sessionPeak: Int?
+    /// Heart-rate zone 1–5, from the last 10 s averaged and held 15 s
+    /// before it changes (ZoneTracker), so wrist noise doesn't flip it.
+    /// Nil without an age on the profile.
+    @Published private(set) var zone: Int?
+    /// From the profile, for zones (kept current by WatchWorkoutLink).
+    var ageYears: Int?
+    private var zoneTracker = ZoneTracker()
     /// Active energy this workout so far, as the Watch measures it. Kept
     /// for the coach and visuals; not shown as a number in the app.
     @Published private(set) var activeEnergyKcal: Double?
@@ -157,6 +165,7 @@ final class HeartRateHub: ObservableObject {
         if sample.recoveryDrop60 == nil { sample.recoveryDrop60 = recoveryDrop(sample) }
         latest = sample
         sessionPeak = max(sessionPeak ?? 0, sample.bpm)
+        zone = zoneTracker.add(bpm: sample.bpm, at: sample.at, ageYears: ageYears, observedPeak: sessionPeak)
     }
 
     func publishActiveEnergy(kcal: Double) {
@@ -181,6 +190,8 @@ final class HeartRateHub: ObservableObject {
         latest = nil
         sessionPeak = nil
         activeEnergyKcal = nil
+        zone = nil
+        zoneTracker.reset()
         recent = []
         restStart = nil
         restDrop60 = nil

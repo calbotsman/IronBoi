@@ -121,6 +121,10 @@ jobs:
       - name: Ensure watchOS platform
         run: xcrun simctl list runtimes | grep -q watchOS || xcodebuild -downloadPlatform watchOS
 
+      # Plain-Swift checks (Watch messages, zones, BLE parsing); no simulator.
+      - name: Host tests
+        run: scripts/ios-host-tests.sh
+
       - name: Build (Debug, iOS Simulator)
         run: >-
           xcodebuild

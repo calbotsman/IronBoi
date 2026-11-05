@@ -73,9 +73,7 @@ private struct HeartReadout: View {
     var body: some View {
         // A reading older than 15 s is not "now": show nothing rather than a stale number.
         let fresh = workout.bpmAt.map { now.timeIntervalSince($0) <= 15 } ?? false
-        let zone = fresh ? workout.bpm.flatMap {
-            HeartZones.zone(bpm: $0, ageYears: workout.state?.ageYears, observedPeak: workout.peakBpm)
-        } : nil
+        let zone = fresh ? workout.zone : nil
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             Text(fresh ? "\(workout.bpm ?? 0)" : "--")
                 .font(.system(size: 48, weight: .semibold, design: .rounded))

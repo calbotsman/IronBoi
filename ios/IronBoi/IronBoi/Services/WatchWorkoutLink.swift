@@ -34,6 +34,10 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
     /// The phone workout the mirrored session belongs to.
     private var mirroredWorkoutId: String?
     private var lastSent: WatchWorkoutState?
+    /// The phone workout whose Watch session ended on the Watch's side (the
+    /// Watch's own End fallback). The Watch saved or discarded it already,
+    /// by the same Health setting the phone would use.
+    private var watchEndedWorkoutId: String?
     private var bindings: Set<AnyCancellable> = []
     private weak var appModel: AppModel?
 
@@ -77,6 +81,12 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
         .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
         .sink { [weak self] in self?.pushState() }
         .store(in: &bindings)
+        // Heart-rate zones need the profile's age, whichever device streams.
+        appModel.$profile
+            .map(\.ageYears)
+            .removeDuplicates()
+            .sink { HeartRateHub.shared.ageYears = $0 }
+            .store(in: &bindings)
     }
 
     // MARK: - Start
@@ -93,8 +103,10 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
             // Asked here, at the first Watch workout, not at onboarding.
             // iOS shows the sheet once; after that this returns at once.
             do {
+                // The same set the Watch asks for, so the Watch's own request
+                // finds nothing new to ask and doesn't stall on its screen.
                 try await store.requestAuthorization(
-                    toShare: [HKObjectType.workoutType()],
+                    toShare: [HKObjectType.workoutType(), Self.heartRate, Self.activeEnergy],
                     read: [Self.heartRate, Self.activeEnergy])
             } catch {
                 AudioHub.log("watch: health auth failed: \(error.localizedDescription)")
@@ -148,8 +160,10 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
             }
         case .endRequested:
             guard let appModel, appModel.activeWorkout != nil else { return }
+            // Tell the Watch at once; the finish below waits on the backend.
+            send(.endAccepted)
             Task { await appModel.finishActiveWorkout() }
-        case .state, .end:
+        case .state, .end, .endAccepted:
             break // Phone → Watch only.
         }
     }
@@ -174,6 +188,8 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
     /// true when the Watch takes care of Health: it was running this
     /// workout and got the message, so the phone must not save it too.
     func endWorkout(sessionId: String, save: Bool) async -> Bool {
+        // The Watch already ended this one itself and took care of Health.
+        if watchEndedWorkoutId == sessionId { return true }
         guard let mirrored, isMirroring, mirroredWorkoutId == nil || mirroredWorkoutId == sessionId,
               let data = WatchMessage.end(sessionId: sessionId, save: save).encoded() else { return false }
         do {
@@ -193,7 +209,9 @@ extension WatchWorkoutLink: HKWorkoutSessionDelegate {
                                     from fromState: HKWorkoutSessionState, date: Date) {
         guard toState == .ended else { return }
         Task { @MainActor in
-            if workoutSession === self.mirrored { self.detach() }
+            guard workoutSession === self.mirrored else { return }
+            self.watchEndedWorkoutId = self.mirroredWorkoutId
+            self.detach()
         }
     }
 

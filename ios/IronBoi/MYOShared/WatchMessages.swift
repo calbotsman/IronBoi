@@ -22,6 +22,10 @@ enum WatchMessage: Codable, Equatable {
     /// workout. The Watch ends its session and saves or discards the
     /// HKWorkout; the phone then skips its own Health save.
     case end(sessionId: String, save: Bool)
+    /// The phone got the Watch's End and is finishing the workout (the
+    /// backend call can take a while). The Watch then waits for `.end`
+    /// instead of ending on its own.
+    case endAccepted
 
     func encoded() -> Data? { try? JSONEncoder().encode(self) }
 

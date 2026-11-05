@@ -29,6 +29,11 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     @Published private(set) var bpm: Int?
     @Published private(set) var bpmAt: Date?
     @Published private(set) var peakBpm: Int?
+    /// Zone from the last 10 s averaged, held 15 s before changing.
+    @Published private(set) var zone: Int?
+    private var zoneTracker = ZoneTracker()
+    /// The phone said it's finishing the workout after our End.
+    private var endAccepted = false
     /// What the phone says to show. Nil until the phone's first message.
     @Published private(set) var state: WatchWorkoutState?
 
@@ -52,6 +57,9 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         bpm = nil
         bpmAt = nil
         peakBpm = nil
+        zone = nil
+        zoneTracker.reset()
+        endAccepted = false
         state = nil
         endRequest = nil
         Task { await begin(configuration: configuration) }
@@ -134,11 +142,15 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         guard let session, phase == .running || phase == .paused else { return }
         send(.endRequested)
         phase = .ending
+        endAccepted = false
         Task {
-            // The phone normally answers within a second or two.
+            // The phone accepts at once, then finishes with the backend
+            // (which can take a while) and sends `.end`. With no accept in
+            // 8 s there's no phone to answer; once accepted, give it 2 min.
             try? await Task.sleep(nanoseconds: 8_000_000_000)
+            if self.endAccepted { try? await Task.sleep(nanoseconds: 112_000_000_000) }
             guard self.phase == .ending, self.session === session else { return }
-            self.log("phone didn't answer End; ending on the Watch")
+            self.log("phone didn't finish the workout; ending on the Watch")
             self.endRequest = self.state.map { ($0.sessionId, $0.saveToHealth) }
             session.end()
         }
@@ -160,6 +172,8 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             endRequest = (sessionId, save)
             phase = .ending
             session?.end()
+        case .endAccepted:
+            endAccepted = true
         case .heart, .setDone, .endRequested:
             break // Watch → phone only.
         }
@@ -277,6 +291,7 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
         self.bpm = bpm
         bpmAt = at
         peakBpm = max(peakBpm ?? 0, bpm)
+        zone = zoneTracker.add(bpm: bpm, at: at, ageYears: state?.ageYears, observedPeak: peakBpm)
         // About every 5 s to the phone; the Watch screen updates on every reading.
         if let last = lastHeartSentAt, Date().timeIntervalSince(last) < 4.5 { return }
         lastHeartSentAt = Date()
