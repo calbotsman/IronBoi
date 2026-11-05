@@ -479,16 +479,26 @@ struct WorkoutLife {
         case blob(until: Float)
         case demo(start: Float, reps: Int)
         case cheer(start: Float, style: Int)
+        case stretch(start: Float, style: Int)
     }
 
     private var act: Act = .blob(until: 1.5)
     private var lastMotion: ExerciseMotion?
     private var lastSetsDone: Int?
     static let cheerSeconds: Float = 2.8
+    static let stretchSeconds: Float = 6
+    /// How calm (0…1) and how pumped (0…1) you are, from EffortSignal: it
+    /// mirrors you. Pumped, it cheers more often, harder, with less waiting
+    /// between; calm, it waits longer and stretches.
+    private var calm: Float = 0
+    private var pumped: Float = 0
 
     /// The pose for this moment. `setsDone` is the session's completed-set
     /// count; a rise means you just finished one.
-    mutating func pose(motion: ExerciseMotion?, setsDone: Int, time t: Float) -> BodyPose? {
+    mutating func pose(motion: ExerciseMotion?, setsDone: Int, time t: Float,
+                       calm: Float = 0, pumped: Float = 0) -> BodyPose? {
+        self.calm = min(max(calm, 0), 1)
+        self.pumped = min(max(pumped, 0), 1)
         // A finished set: celebrate now, whatever was happening.
         if let last = lastSetsDone, setsDone > last {
             act = .cheer(start: t, style: Int.random(in: 0...1))
@@ -508,18 +518,27 @@ struct WorkoutLife {
             guard let motion else { act = .blob(until: t + 2); return nil }
             let length = Float(reps) * motion.repDuration
             if t - start >= length {
-                act = .blob(until: t + Float.random(in: 5...10))
+                act = .blob(until: t + Float.random(in: 5...10) * pause)
                 return nil
             }
             return motion.frame(at: t - start)
         case .cheer(let start, let style):
             if t - start >= Self.cheerSeconds {
-                act = .blob(until: t + Float.random(in: 4...8))
+                act = .blob(until: t + Float.random(in: 4...8) * pause)
                 return nil
             }
-            return Self.cheer(at: t - start, style: style)
+            return Self.cheer(at: t - start, style: style, energy: 1 + 0.6 * pumped)
+        case .stretch(let start, let style):
+            if t - start >= Self.stretchSeconds {
+                act = .blob(until: t + Float.random(in: 4...8) * pause)
+                return nil
+            }
+            return Self.stretch(at: t - start, style: style, time: t)
         }
     }
+
+    /// Longer waits when you're calm, shorter when you're going for it.
+    private var pause: Float { 1 + 0.8 * calm - 0.5 * pumped }
 
     /// Hold as a blob (you're talking); pick back up a beat after.
     mutating func rest(until t: Float) {
@@ -527,16 +546,54 @@ struct WorkoutLife {
     }
 
     private func next(after t: Float, motion: ExerciseMotion?) -> Act {
+        // Shares of what comes next. Neutral effort keeps the old mix
+        // (70% demo, 15% cheer, 15% blob; 85% cheer with no lift to show); pumped swaps demo time for
+        // cheering, calm for slow stretches.
+        let stretchShare = 0.4 * calm
+        let cheerShare = min(1 - stretchShare, (motion == nil ? 0.85 : 0.15) + 0.35 * pumped)
+        let demoShare = motion == nil ? 0 : max(0, 0.7 - stretchShare - 0.35 * pumped)
         let roll = Float.random(in: 0..<1)
-        if motion != nil, roll < 0.7 { return .demo(start: t, reps: Int.random(in: 2...3)) }
-        if roll < 0.85 { return .cheer(start: t, style: Int.random(in: 0...1)) }
-        return .blob(until: t + Float.random(in: 4...8))
+        if roll < stretchShare { return .stretch(start: t, style: Int.random(in: 0...1)) }
+        if roll < stretchShare + demoShare { return .demo(start: t, reps: Int.random(in: 2...3)) }
+        if roll < stretchShare + demoShare + cheerShare { return .cheer(start: t, style: Int.random(in: 0...1)) }
+        return .blob(until: t + Float.random(in: 4...8) * pause)
+    }
+
+    /// A slow stretch while you're calm: arms float overhead and the body
+    /// lengthens (style 0), or reaches up and leans side to side (style 1).
+    /// Six seconds: up over 1.6, held, down over the last 1.6.
+    static func stretch(at s: Float, style: Int, time: Float) -> BodyPose {
+        var j = OneBodyMotion.standing(time)
+        func smooth(_ x: Float) -> Float { let c = min(max(x, 0), 1); return c * c * (3 - 2 * c) }
+        let rise: Float = 1.6
+        let env = smooth(s / rise) * (1 - smooth((s - (stretchSeconds - rise)) / rise))
+        // Taller: head and chest up, a little up on the toes.
+        j[0].y += 0.035 * env
+        j[1].y += 0.02 * env
+        for i in [0, 1, 2, 3, 6] { j[i].y += 0.012 * env }
+        // Arms from hanging to overhead, elbows soft.
+        func blend(_ a: Joint, _ b: Joint) -> Joint { a + (b - a) * env }
+        j[4] = blend(j[4], Joint(-0.17, 0.55, 0.10)); j[5] = blend(j[5], Joint(-0.11, 0.78, 0.095))
+        j[7] = blend(j[7], Joint(0.17, 0.55, 0.10));  j[8] = blend(j[8], Joint(0.11, 0.78, 0.095))
+        if style == 1 {
+            // One slow lean each way through the hold, bending from the hips.
+            let x = (s - rise) / (stretchSeconds - 2 * rise)
+            let lean = sin(min(max(x, 0), 1) * 2 * .pi) * 0.11 * env
+            let hipY = j[2].y
+            for i in [0, 1, 3, 4, 5, 6, 7, 8] {
+                let up = max(0, j[i].y - hipY)
+                j[i].x += lean * up
+                j[i].y -= abs(lean) * up * 0.12
+            }
+        }
+        return BodyPose(joints: j, form: 1, side: 0, label: "")
     }
 
     /// A quick dip to wind up, then arms up in a V with a couple of hops
     /// that die away, or a fist pumped twice. The body's springs supply the
     /// overshoot; these are just the targets.
-    static func cheer(at t: Float, style: Int) -> BodyPose {
+    /// `energy` scales the hops and punches: above 1 when you're pumped.
+    static func cheer(at t: Float, style: Int, energy: Float = 1) -> BodyPose {
         var j = OneBodyMotion.standing(t)
         let windUp: Float = 0.22
         if t < windUp {
@@ -551,8 +608,8 @@ struct WorkoutLife {
         let decay = exp(-s * 1.5)
         let wave = sin(s * 8.5)
         // Off the ground on the up half, knees soaking it up on the landing.
-        let hop = max(0, wave) * 0.045 * decay
-        let land = min(0, wave) * 0.025 * decay
+        let hop = max(0, wave) * 0.045 * decay * energy
+        let land = min(0, wave) * 0.025 * decay * energy
         for i in j.indices { j[i].y += hop }
         for i in 0...8 { j[i].y += land }
         if style == 0 {

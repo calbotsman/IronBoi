@@ -125,7 +125,7 @@ final class AppModel: NSObject, ObservableObject {
         return local
     }
 
-    private static func parseISO(_ string: String) -> Date? {
+    static func parseISO(_ string: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f.date(from: string) ?? ISO8601DateFormatter().date(from: string)

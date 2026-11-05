@@ -7,6 +7,14 @@ struct CoachView: View {
     @StateObject private var bodyDirector = BodyDirector()
     @AppStorage("coachSpeaksReplies") private var speaksReplies = true
     @State private var showKeyboard = false
+    /// Heart rate, calories, recovery: the workout screen's atmosphere and
+    /// stats pill. Held, not observed: it publishes every second, and only
+    /// the pill should redraw for that, not the whole coach screen.
+    @State private var vitals = WorkoutVitals()
+    @AppStorage(CoachingStyle.tipsKey) private var tipsSetting = CoachingStyle.Tips.full.rawValue
+    #if DEBUG
+    @State private var heartSim = HeartRateSimulator()
+    #endif
     /// The last typed message, handed to the coach screen.
     @State private var typed: TypedLine?
     /// Bumped when a typed message asks for today's workout; the stage shows the card.
@@ -32,9 +40,42 @@ struct CoachView: View {
                         ProfileButton()
                             .padding(.trailing, MyoTheme.Spacing.sm)
                     }
+                    .overlay(alignment: .topLeading) {
+                        if appModel.activeWorkout != nil {
+                            LiveStatsPill(vitals: vitals, onRecovered: sayRecovered)
+                                .padding(.leading, MyoTheme.Spacing.md)
+                                .padding(.top, 5)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(MyoTheme.Motion.fade, value: appModel.activeWorkout == nil)
                 }
             }
-            .background(PaperBackground())
+            .background {
+                ZStack {
+                    PaperBackground()
+                    WorkoutAtmosphere(active: appModel.activeWorkout != nil)
+                }
+            }
+            // Once a second through a workout: heart rate in, effort, calories
+            // and recovery out. Runs once more as it ends, to clear them.
+            .task(id: appModel.activeWorkout?.sessionId) {
+                repeat {
+                    #if DEBUG
+                    heartSim.step(appModel)
+                    #endif
+                    vitals.tick(appModel)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                } while !Task.isCancelled && appModel.activeWorkout != nil
+            }
+            #if DEBUG
+            // MYO_HR_SIM with the preview: straight into a workout, so the
+            // atmosphere can be seen without starting one by hand.
+            .task(id: appModel.isPreviewSession) {
+                guard HeartRateSimulator.mode != nil, appModel.isPreviewSession, appModel.activeWorkout == nil else { return }
+                await appModel.startTodaysWorkout()
+            }
+            #endif
             // No title or toolbar: the coach's body is the screen. Account
             // actions live on the You tab; the voice toggle in Conversation.
             .toolbar(.hidden, for: .navigationBar)
@@ -255,6 +296,16 @@ struct CoachView: View {
 
     /// What you typed goes to the coach — and, like talking, arrives as a
     /// little run of your-colour bloops the body takes in, a word or two each.
+    /// Rest by recovery: your heart rate's back down, so say so — once per
+    /// rest, never over Coach or over you, and not when Coach is set quiet
+    /// or to captions (the pill turns to "Recovered" either way).
+    private func sayRecovered() {
+        guard appModel.activeWorkout != nil, speaksReplies,
+              CoachingStyle.Tips(rawValue: tipsSetting) != .quiet,
+              !coachVoice.isSpeaking, voiceInput.transcript.isEmpty else { return }
+        coachVoice.speak("Heart rate's back down. You're recovered.", messageId: "local-recovered-\(UUID().uuidString)")
+    }
+
     private func sendTyped(_ text: String) {
         typed = TypedLine(text: text)
         let meter = voiceInput.meter
