@@ -106,7 +106,9 @@ The bank only refreshes on a plan change or at workout start (`AppModel.swift:~3
 `AppModel.swift:~1445` saves start→finish as Running, including the lifting done before the switch; if a Watch or Strava also records the run, Health gets a duplicate.
 Fine: every tool declared has a handler; the HealthKit activity types exist; no live-voice latency added; server tests check real behaviour. No iOS tests for the new routing, which is where F21 lives. Device checks unticked.
 
-## #46 rep counting past target (3d9bee2)
+## #46 rep counting past target (3d9bee2, re-push bd3e36b)
+
+**Re-push bd3e36b resolves F10–F12. CONFIRMED.** CI now runs `IronBoiTests` (green on the PR). The live mic reopens once reps stop (`repsStoppedAfter`: 1.5× the slowest rep, at least 3 s, never past the close window), and talking to the coach then closes the set at once. Rest counts from the last rep. `updateSetReps` is removed. Three new tests cover the reopen timing. Small leftovers: when the mic reopens, a late "twelve" reaches the coach before the phone mutes it again. #44's `noteRest` records the planned rest as `endsAt − now`, so a back-dated rest reports e.g. 84 s planned instead of 90.
 
 Verdict: **the fix is real and well tested.** The bug cause in the PR body matches the old code: the set was logged at the target, and the 4 s close window was flat. `SetCount` is a clean pure struct, and the 12 tests exercise real behaviour, not a copy of the code: grinding, dropped words, each side, stray numbers. The constants have stated reasons and aren't tuned to Josh's set. No scope drift.
 
