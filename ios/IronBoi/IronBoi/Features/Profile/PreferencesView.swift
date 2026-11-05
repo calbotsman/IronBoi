@@ -394,6 +394,11 @@ struct PreferencesView: View {
                 .pickerStyle(.menu)
             }
 
+            // Coach's voice against your music; also on the speaker button
+            // next to the mic during a workout.
+            SoundMixControls()
+                .padding(.bottom, MyoTheme.Spacing.xs)
+
             MyoValueRow(label: "Live voice (beta)") {
                 Toggle("Live voice (beta)", isOn: $liveVoiceBeta).labelsHidden()
             }

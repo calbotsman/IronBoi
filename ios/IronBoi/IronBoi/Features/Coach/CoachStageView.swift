@@ -47,6 +47,11 @@ struct CoachStageView: View {
     /// A short on-screen note under the coach ("Your workout's ready…"),
     /// for when it isn't spoken, or as well as.
     @State private var notice: String?
+    /// Captions mode (Coach doesn't talk): the last reply, on screen above
+    /// what you're saying, since it isn't heard.
+    @State private var captionReply: String?
+    /// The Sound sheet: voice on/off, Coach's level, how much music dips.
+    @State private var showSound = false
     /// The message being handled was typed, not said.
     @State private var typedTurn = false
     /// Message ids that existed when a typed message went out; the first new
@@ -652,6 +657,19 @@ struct CoachStageView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Voice turned off mid-conversation: stop talking now; live voice
+    /// only talks, so the regular coach takes over in captions.
+    private func voiceSettingChanged(_ on: Bool) {
+        guard !on else { captionReply = nil; return }
+        if live.isActive {
+            endConversation()
+            talkTapped(fromMic: true)
+        } else if voice.isSpeaking {
+            captionReply = voice.spokenText
+            voice.stop()
+        }
+    }
+
     /// The plan's training days, in week order ("Mon", "Wed"…).
     private var trainingDayKeys: [String] {
         ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].filter { key in
@@ -685,6 +703,26 @@ struct CoachStageView: View {
                 .multilineTextAlignment(.center)
                 .frame(minHeight: 88, alignment: .top)
                 .transition(.opacity)
+        case .listening where !speaksReplies && captionReply != nil:
+            // Captions mode: Coach's answer, then what you're saying now.
+            VStack(spacing: MyoTheme.Spacing.sm) {
+                Text(captionReply ?? "")
+                    .myoStyle(.body)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(6)
+                    .minimumScaleFactor(0.85)
+                    .onTapGesture { withAnimation(MyoTheme.Motion.fade) { captionReply = nil } }
+                if !voiceInput.transcript.isEmpty {
+                    Text(voiceInput.transcript)
+                        .myoStyle(.body)
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+            }
+            .frame(minHeight: 88, alignment: .top)
+            .transition(.opacity)
         case .listening:
             Text(voiceInput.transcript.isEmpty ? " " : voiceInput.transcript)
                 .myoStyle(.title)
@@ -1066,6 +1104,7 @@ struct CoachStageView: View {
             // Scrolled pills slide under the keyboard's glass, not over it.
             .zIndex(1)
             micButton.zIndex(1)
+            soundButton.zIndex(1)
             // Mid-workout the mic is usually open, so the pills stay up then too.
             if phase == .rest || (phase == .listening && currentExerciseIndex != nil) {
                 quickTaps.transition(.opacity)
@@ -1075,6 +1114,17 @@ struct CoachStageView: View {
         }
         }
         .animation(MyoTheme.Motion.fade, value: showIsolationTip)
+        .sheet(isPresented: $showSound) { SoundMixSheet(canRetake: !live.isActive) }
+        .onChange(of: speaksReplies) { _, on in voiceSettingChanged(on) }
+    }
+
+    /// Coach's voice against your music, one tap away mid-set. Shows
+    /// captions when Coach is set not to talk.
+    private var soundButton: some View {
+        sideButton(systemImage: speaksReplies ? "speaker.wave.2" : "captions.bubble",
+                   label: speaksReplies ? "Sound: Coach talks" : "Sound: captions only") {
+            showSound = true
+        }
     }
 
     /// iOS's Voice Isolation mic mode filters out everyone but you — kids,
@@ -1191,7 +1241,8 @@ struct CoachStageView: View {
             endConversation()
             return
         }
-        if LiveVoiceSession.enabled, !conversationActive {
+        // Live voice only talks: in captions mode the regular coach listens.
+        if LiveVoiceSession.enabled, speaksReplies, !conversationActive {
             startLive()
             return
         }
@@ -2543,7 +2594,14 @@ struct CoachStageView: View {
             try? AudioHub.shared.start()
             voiceInput.listen()
         } else {
-            // Muted: the reply is on screen; go straight back to listening.
+            // Captions mode: the reply is on screen; straight back to listening.
+            let shown = CoachVoice.speakable(reply.content)
+            withAnimation(MyoTheme.Motion.fade) { captionReply = shown }
+            // Long enough to read between reps, then out of the way.
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(min(45, 12 + Double(shown.count) / 12) * 1_000_000_000))
+                if captionReply == shown { withAnimation(MyoTheme.Motion.fade) { captionReply = nil } }
+            }
             resumeListening()
         }
     }
