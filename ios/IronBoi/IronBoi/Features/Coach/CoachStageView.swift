@@ -109,6 +109,12 @@ struct CoachStageView: View {
     /// A reply that arrived while you were mid-sentence, or mid-count.
     @State private var heldReply: CoachMessage?
     @State private var heldReplyAt: Date?
+    /// Live voice: who has the mic and when live is tried again.
+    @State private var livePolicy = LiveVoicePolicy()
+    @State private var liveRetryTask: Task<Void, Never>?
+    @State private var liveHandOverTask: Task<Void, Never>?
+    /// When you last said something the mic caught (for the latency line).
+    @State private var lastHeardAt: Date?
     /// Reps counted out loud in the current utterance.
     @State private var repCount = 0
     /// The set this count already closed (exercise index, 1-based set) —
@@ -242,7 +248,9 @@ struct CoachStageView: View {
         .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
         .onChange(of: liveWorkoutNote) { _, note in
-            if live.isActive, let note { live.note(note) }
+            // Connecting or standing by, it queues: the live coach is
+            // current the moment it takes over.
+            if live.isRunning, let note { live.note(note) }
         }
         .onDisappear {
             live.stop()
@@ -380,9 +388,12 @@ struct CoachStageView: View {
             }
             if conversationActive, !heldUtterances.isEmpty {
                 // What you added while Coach was thinking, now that it has
-                // answered the first part — one message, in order.
+                // answered the first part — one message, in order. A reply
+                // still waiting is to something you've since talked past:
+                // drop it, or the send would be held behind it again.
                 let text = heldUtterances.joined(separator: " ")
                 heldUtterances = []
+                heldReply = nil
                 AudioHub.log("sending held: \"\(text.suffix(60))\"")
                 send(text, spoken: true)
                 return
@@ -393,6 +404,7 @@ struct CoachStageView: View {
         // silence): pick back up, unless it stopped on an error.
         // Counting reps out loud: the count updates as you say each number.
         .onChange(of: voiceInput.transcript) { _, heardAll in
+            if !heardAll.isEmpty { lastHeardAt = Date() }
             // With no echo cancellation the mic hears Coach and you as one
             // stream: "four five <Coach's sentence> six". While Coach talks
             // (and just after), its own words come out before the count is
@@ -663,7 +675,7 @@ struct CoachStageView: View {
     /// only talks, so the regular coach takes over in captions.
     private func voiceSettingChanged(_ on: Bool) {
         guard !on else { captionReply = nil; return }
-        if live.isActive {
+        if live.isRunning {
             endConversation()
             talkTapped(fromMic: true)
         } else if voice.isSpeaking {
@@ -1123,6 +1135,14 @@ struct CoachStageView: View {
         if showIsolationTip {
             isolationTip.transition(.opacity.combined(with: .move(edge: .bottom)))
         }
+        if let liveBadge {
+            Text(liveBadge)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(MyoColor.Text.secondary.color)
+                .padding(.leading, 6)
+                .accessibilityLabel("Voice: \(liveBadge)")
+                .transition(.opacity)
+        }
         HStack(alignment: .center, spacing: MyoTheme.Spacing.sm) {
             sideButton(systemImage: "keyboard", label: "Type instead") {
                 endConversation()
@@ -1197,7 +1217,8 @@ struct CoachStageView: View {
     /// The mic, on or off at a glance. On means hands-free: MYO listens
     /// until you turn it off (it stays on through a workout).
     private var micButton: some View {
-        let on = conversationActive
+        // On means something is listening: the regular coach, or live.
+        let on = micOn
         return Button {
             talkTapped(fromMic: true)
         } label: {
@@ -1298,42 +1319,134 @@ struct CoachStageView: View {
 
     // MARK: - Live voice
 
-    /// Live voice (beta). Outside a workout it's the whole conversation.
-    /// In a workout the phone keeps its own ears on the same mic for
-    /// counting and quick commands; the coach's mic is muted while you
-    /// count, it gets a silent note each time the exercise or set changes,
-    /// and lines the app used to say in its own voice go to the live coach.
+    /// The mic is on: the regular coach is listening, or live has it.
+    private var micOn: Bool { conversationActive || live.isActive }
+
+    /// Under the controls with live voice on: who's listening right now.
+    private var liveBadge: String? {
+        guard LiveVoiceSession.enabled, micOn else { return nil }
+        if live.isActive { return "Live" }
+        switch live.state {
+        case .connecting, .standby: return "Connecting live…"
+        default: return "Regular coach"
+        }
+    }
+
+    /// Live voice (beta). The regular coach opens the mic at once, so
+    /// turning it on always listens within a second; live connects behind
+    /// it and takes over when ready. Outside a workout live is then the
+    /// whole conversation. In a workout the phone keeps its own ears on the
+    /// same mic for counting and quick commands; the coach's mic is muted
+    /// while you count, it gets a silent note each time the exercise or set
+    /// changes, and lines the app used to say in its own voice go to it.
+    /// If live drops or fails, the regular coach is back on the mic at once
+    /// and live is retried with backoff (LiveVoicePolicy).
     private func startLive() {
         voice.stop()
         director.rest()
-        voiceInput.release()
-        let inWorkout = appModel.activeWorkout != nil
-        live.sideTap = inWorkout ? voiceInput.audioSink : nil
-        voiceInput.useExternalFeed(inWorkout)
+        applyLive(livePolicy.micOn(liveWanted: true))
+    }
+
+    private func applyLive(_ effects: [LiveVoicePolicy.Effect]) {
+        for effect in effects {
+            switch effect {
+            case .openRegularMic: openRegularMic()
+            case .closeRegularMic: break // endConversation closes it
+            case .connectLive: connectLive()
+            case .handOverWhenIdle: handOverWhenIdle()
+            case .dropLive:
+                liveHandOverTask?.cancel()
+                liveHandOverTask = nil
+                if live.isRunning { live.stop(releaseAudio: false) }
+            case .scheduleRetry(let after):
+                liveRetryTask?.cancel()
+                AudioHub.log("live: trying again in \(Int(after)) s; regular coach listening")
+                liveRetryTask = Task {
+                    try? await Task.sleep(nanoseconds: UInt64(after * 1_000_000_000))
+                    guard !Task.isCancelled else { return }
+                    applyLive(livePolicy.retryDue())
+                }
+            case .cancelRetry:
+                liveRetryTask?.cancel()
+                liveRetryTask = nil
+            }
+        }
+    }
+
+    /// The regular coach takes (or keeps) the mic.
+    private func openRegularMic() {
+        voice.redirect = nil
+        voiceInput.useExternalFeed(false)
+        conversationActive = true
+        silentRestarts = []
+        if voiceInput.isListening {
+            // It was listening through live's tap: restart on its own.
+            markRestartHandled()
+            voiceInput.stop()
+        }
+        voiceInput.listen()
+        AudioHub.log("regular coach has the mic")
+    }
+
+    private func connectLive() {
         live.onSafetyStop = { line in
             // The server's severe screen fired: the live session is over
             // and the regular voice says the stop line.
             endConversation()
             voice.speak(line, messageId: "live-safety-\(UUID().uuidString)")
         }
+        live.onReady = { applyLive(livePolicy.liveReady()) }
+        live.onEnded = { reason in
+            applyLive(livePolicy.liveEnded(reason))
+        }
         Task {
-            let started = await live.start(appModel.liveBackend)
-            guard started else {
-                AudioHub.log("live: falling back to the regular coach")
-                voiceInput.useExternalFeed(false)
-                conversationActive = true
-                silentRestarts = []
-                voiceInput.toggle()
-                return
-            }
-            if inWorkout {
-                voice.redirect = { [live] text in live.say(text) }
-                conversationActive = true
-                silentRestarts = []
-                voiceInput.toggle()
-                if let note = liveWorkoutNote { live.note(note) }
+            // Failures come back through onEnded.
+            _ = await live.start(appModel.liveBackend)
+            if let note = liveWorkoutNote { live.note(note) }
+        }
+    }
+
+    /// Live is ready: it takes the mic once you're between turns — not
+    /// mid-sentence, not mid-count, not while Coach talks or thinks.
+    private func handOverWhenIdle() {
+        liveHandOverTask?.cancel()
+        liveHandOverTask = Task {
+            while !Task.isCancelled, live.state == .standby {
+                if conversationActive, readyForHandOver {
+                    handOverToLive()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
             }
         }
+    }
+
+    private var readyForHandOver: Bool {
+        // Quiet for a moment counts as between turns even if the open
+        // mic's transcript isn't empty (music, a gym) — mid-workout the
+        // phone's ears keep that transcript through the handover anyway.
+        let quiet = voiceInput.transcript.isEmpty || lastHeardAt.map { Date().timeIntervalSince($0) > 2.5 } ?? true
+        return !voice.isSpeaking && quiet && awaitingReplyAfter == nil
+            && heldReply == nil && heldUtterances.isEmpty && repCount == 0 && closeCountTask == nil
+            && !appModel.isSending && lessonPlan == nil
+    }
+
+    private func handOverToLive() {
+        guard live.state == .standby else { return }
+        if appModel.activeWorkout != nil {
+            // The phone's ears stay on for counting, fed from live's tap.
+            live.sideTap = voiceInput.audioSink
+            voiceInput.useExternalFeed(true)
+            live.takeMic()
+            voice.redirect = { [live] text in live.say(text) }
+            if !voiceInput.isListening { voiceInput.listen() }
+        } else {
+            conversationActive = false
+            voiceInput.release()
+            live.sideTap = nil
+            live.takeMic()
+        }
+        livePolicy.handedOver()
     }
 
     /// Where you are, for the live coach: "Now: Dumbbell Shoulder Press,
@@ -2521,7 +2634,8 @@ struct CoachStageView: View {
         voiceInput.useExternalFeed(false)
         voice.redirect = nil
         voice.stop()
-        if live.isActive { live.stop() }
+        applyLive(livePolicy.micOff())
+        if live.isRunning { live.stop(releaseAudio: false) }
         AudioHub.shared.stop()
     }
 
@@ -2579,6 +2693,7 @@ struct CoachStageView: View {
             typedReplyAfter = Set(appModel.messages.map(\.id))
         }
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        if spoken { CoachVoice.latencyClock = (lastHeardAt ?? Date(), Date()) }
         let counted = repCount
         Task { await appModel.sendCoachMessage(trimmed, spoken: spoken, repsCounted: counted) }
         // Keep listening while Coach thinks: anything you add is held.

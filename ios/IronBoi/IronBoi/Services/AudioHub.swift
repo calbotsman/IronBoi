@@ -122,6 +122,15 @@ final class AudioHub {
     /// may be switched on or off to suit the current route.
     func start(reconfigure: Bool = false) throws {
         let session = AVAudioSession.sharedInstance()
+        // Already up exactly as wanted: nothing to do. Coach calls this
+        // before every line, and each full pass re-activated the session
+        // on the main thread (and logged), three times per reply.
+        if !reconfigure, sessionActive, engineStarted, engine.isRunning, !needsCategory(session) { return }
+        let began = Date()
+        defer {
+            let ms = Int(Date().timeIntervalSince(began) * 1000)
+            if ms >= 30 { Self.log("start took \(ms) ms") }
+        }
         // Before we take the session, the route is the system's own — if
         // headphones are on, it shows them.
         if !sessionActive {

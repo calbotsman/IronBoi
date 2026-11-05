@@ -24,6 +24,9 @@ final class CoachVoice: NSObject, ObservableObject {
     var fetchAudio: ((String) async throws -> Data)?
     /// Set while live voice runs a workout: lines go to the live coach.
     var redirect: ((String) -> Void)?
+    /// A spoken message was just sent: when you stopped talking, and when it
+    /// went. The reply's first audio logs the gap (the regular coach's lag).
+    static var latencyClock: (speechEnd: Date, sent: Date)?
 
     private let hub = AudioHub.shared
     private var generation = 0
@@ -110,7 +113,14 @@ final class CoachVoice: NSObject, ObservableObject {
                 guard gen == self.generation else { return }
                 self.caption = chunk
                 self.lineIndex = index
-                if index == 0 { AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))") }
+                if index == 0 {
+                    AudioHub.log("coach speaking: \(AudioHub.shared.routeLines.joined(separator: " | "))")
+                    if let clock = Self.latencyClock, Date().timeIntervalSince(clock.speechEnd) < 120 {
+                        Self.latencyClock = nil
+                        let ms = { (from: Date) in Int(Date().timeIntervalSince(from) * 1000) }
+                        AudioHub.log("latency: speech end → coach audio \(ms(clock.speechEnd)) ms (pause wait \(Int(clock.sent.timeIntervalSince(clock.speechEnd) * 1000)) ms, reply + voice \(ms(clock.sent)) ms)")
+                    }
+                }
                 await self.hub.play(buffer)
             }
             if gen == self.generation { self.finish() }

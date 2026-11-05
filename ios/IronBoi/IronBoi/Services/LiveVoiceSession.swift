@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Network
 
 /// Live voice (beta): the phone talks straight to Gemini Live — your voice
 /// streams up, the coach's streams back, and talking over it stops it
@@ -12,9 +13,17 @@ import Foundation
 /// your name, plan changes) run on the server with the text coach's gates.
 /// Connections end after ~10 minutes; it reconnects with the resume handle
 /// and the conversation carries on. See docs/design/live-voice-brain.md.
+///
+/// Nothing goes on the socket before the provider says it's ready
+/// (setupComplete): notes, lines and tool answers queue until then, so the
+/// log always reads connect → ready → note. When it ends without being
+/// asked to, `onEnded` says why and the stage puts the regular coach back
+/// on the mic (LiveVoicePolicy).
 @MainActor
 final class LiveVoiceSession: ObservableObject {
-    enum State: Equatable { case idle, connecting, listening, speaking }
+    /// `standby`: connected and ready, but the regular coach still has the
+    /// mic until the stage hands it over (`takeMic`).
+    enum State: Equatable { case idle, connecting, standby, listening, speaking }
 
     @Published private(set) var state: State = .idle
     /// What the coach is saying right now.
@@ -28,9 +37,21 @@ final class LiveVoiceSession: ObservableObject {
     static let defaultsKey = "liveVoiceBeta"
     static var enabled: Bool { UserDefaults.standard.bool(forKey: defaultsKey) }
 
-    var isActive: Bool { state != .idle }
+    /// The live coach has the mic: it's the one you're talking to.
+    var isActive: Bool { state == .listening || state == .speaking }
+    /// Connecting, standing by, or active.
+    var isRunning: Bool { state != .idle }
 
-    struct Ticket: Decodable { let token: String; let model: String }
+    /// `provider` is sent by servers that can mint for more than one live
+    /// model ("gemini" / "openai"); older ones leave it out (Gemini).
+    struct Ticket: Decodable { let token: String; let model: String; let provider: String? }
+
+    /// This build speaks Gemini Live only. A ticket for anything else (the
+    /// server set to OpenAI Realtime, model "gpt-realtime") can't connect:
+    /// it fails at once and the regular coach carries on, without retrying.
+    static func speaks(_ ticket: Ticket) -> Bool {
+        LiveVoicePolicy.buildSpeaks(provider: ticket.provider, model: ticket.model)
+    }
     struct TurnResult: Decodable { let saved: Bool; let stop: Bool; let line: String? }
 
     /// The server, as the session needs it.
@@ -45,6 +66,10 @@ final class LiveVoiceSession: ObservableObject {
     var onSafetyStop: ((String) -> Void)?
     /// Every mic buffer also goes here (the phone's own counter, mid-workout).
     var sideTap: ((AVAudioPCMBuffer) -> Void)?
+    /// Connected and ready, in standby: the stage hands over the mic.
+    var onReady: (() -> Void)?
+    /// It ended without `stop()` being called — dropped, refused, timed out.
+    var onEnded: ((LiveVoicePolicy.EndReason) -> Void)?
     /// While you count, the coach doesn't hear the mic at all — it can't
     /// talk over a set. When this went false (anything said just before
     /// that is forwarded as text).
@@ -63,6 +88,18 @@ final class LiveVoiceSession: ObservableObject {
     private var model = ""
     private var resumeHandle: String?
     private var reconnecting = false
+    /// The open connection has had setupComplete; until then, sends queue.
+    private var ready = false
+    private var outbox: [(json: String, label: String)] = []
+    private var readyTimeout: Task<Void, Never>?
+    private var pingTask: Task<Void, Never>?
+    private var pathMonitor: NWPathMonitor?
+    private var startedAt = Date()
+    /// When the coach's current answer started playing (one latency line
+    /// per answer).
+    private var answerAudioLogged = false
+    /// How long a connection gets from start to setupComplete.
+    static let readyTimeoutSeconds: Double = 8
 
     // The exchange in progress: what you said, what it said back.
     private var turnId = UUID().uuidString
@@ -80,16 +117,51 @@ final class LiveVoiceSession: ObservableObject {
         caption = ""
         heard = ""
         resetTurn()
+        outbox = []
         state = .connecting
+        startedAt = Date()
+        watchNetwork()
+        armReadyTimeout()
         return await connect(resume: nil)
     }
 
-    func stop() {
+    /// Ready and standing by: take the mic. The regular coach must have
+    /// let go of its own tap first.
+    func takeMic() {
+        guard state == .standby else { return }
+        state = .listening
+        installTap()
+        AudioHub.log("live: has the mic (\(Self.ms(since: startedAt)) ms after start)")
+    }
+
+    /// You ended it. `releaseAudio: false` keeps the audio session up, for
+    /// when the regular coach is taking the mic straight back.
+    func stop(releaseAudio: Bool = true) {
+        teardown(releaseAudio: releaseAudio, why: nil)
+    }
+
+    /// It ended on its own: tear down (keeping the audio session for the
+    /// regular coach) and say why.
+    private func end(_ reason: LiveVoicePolicy.EndReason) {
+        guard state != .idle else { return }
+        teardown(releaseAudio: false, why: reason)
+        onEnded?(reason)
+    }
+
+    private func teardown(releaseAudio: Bool, why: LiveVoicePolicy.EndReason?) {
         connection += 1
         recordTurnIfAny(interrupted: true)
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
         socketBox.socket = nil
+        ready = false
+        outbox = []
+        readyTimeout?.cancel()
+        readyTimeout = nil
+        pingTask?.cancel()
+        pingTask = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
         removeTap()
         uplinkMuted = false
         uplink.muted = false
@@ -97,11 +169,68 @@ final class LiveVoiceSession: ObservableObject {
         buffersPlaying = 0
         youMeter.reset()
         agentMeter.reset()
-        if state != .idle { AudioHub.log("live: ended") }
+        if state != .idle { AudioHub.log("live: ended\(why.map { " (\($0.rawValue))" } ?? "")") }
         state = .idle
         caption = ""
         reconnecting = false
-        hub.stop()
+        if releaseAudio { hub.stop() }
+    }
+
+    // MARK: - Staying honest about the connection
+
+    /// No network path (airplane mode, Wi-Fi gone with no cellular): end
+    /// now, rather than waiting for the socket to notice.
+    private func watchNetwork() {
+        pathMonitor?.cancel()
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status != .satisfied else { return }
+            Task { @MainActor in
+                guard let self, self.state != .idle else { return }
+                AudioHub.log("live: network path \(path.status == .unsatisfied ? "lost" : "needs connection")")
+                self.end(.network)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "live.path"))
+        pathMonitor = monitor
+    }
+
+    private func armReadyTimeout() {
+        readyTimeout?.cancel()
+        readyTimeout = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.readyTimeoutSeconds * 1_000_000_000))
+            guard !Task.isCancelled, let self, !self.ready, self.state != .idle else { return }
+            AudioHub.log("live: not ready after \(Int(Self.readyTimeoutSeconds)) s")
+            self.end(.timeout)
+        }
+    }
+
+    /// A silent stall (the socket's still "open" but nothing gets through):
+    /// a ping every 4 s. Only once a pong has come back on this connection
+    /// does a missing one count, so a server that doesn't answer pings can
+    /// never end a healthy session.
+    private func keepAlive(_ task: URLSessionWebSocketTask, connection mine: Int) {
+        pingTask?.cancel()
+        let box = PongBox()
+        pingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard !Task.isCancelled, let self, self.connection == mine else { return }
+                let sent = Date()
+                box.waiting = true
+                task.sendPing { error in
+                    box.waiting = false
+                    if error == nil { box.answered = true }
+                }
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled, self.connection == mine else { return }
+                if box.waiting, box.answered {
+                    AudioHub.log("live: no pong in \(Self.ms(since: sent)) ms — connection stalled")
+                    self.end(.network)
+                    return
+                }
+            }
+        }
     }
 
     // MARK: - Connecting
@@ -111,10 +240,19 @@ final class LiveVoiceSession: ObservableObject {
         connection += 1
         let mine = connection
         do {
+            let mintStarted = Date()
             let ticket = try await backend.mint(handle)
             guard mine == connection else { return false }
+            AudioHub.log("live timing: mint \(Self.ms(since: mintStarted)) ms")
+            guard Self.speaks(ticket) else {
+                AudioHub.log("live: server minted \(ticket.provider ?? "?")/\(ticket.model), which this build can't speak — staying on the regular coach")
+                end(.unsupported)
+                return false
+            }
             model = ticket.model
-            try hub.start(reconfigure: !tapInstalled)
+            // Never retune echo cancellation here: the regular coach may
+            // have its tap on the mic right now, and it set the session up.
+            try hub.start()
             let token = ticket.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "+/=&"))) ?? ticket.token
             guard let url = URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=\(token)") else {
                 throw URLError(.badURL)
@@ -122,6 +260,7 @@ final class LiveVoiceSession: ObservableObject {
             let task = URLSession.shared.webSocketTask(with: url)
             task.maximumMessageSize = 8 * 1024 * 1024
             socket = task
+            ready = false
             task.resume()
             receive(on: task, connection: mine)
             var setup: [String: Any] = [
@@ -129,8 +268,9 @@ final class LiveVoiceSession: ObservableObject {
                 "generationConfig": ["responseModalities": ["AUDIO"]],
             ]
             if let handle { setup["sessionResumption"] = ["handle": handle] }
-            try await task.send(.string(Self.json(["setup": setup])))
+            // The setup message is the one thing sent before ready.
             AudioHub.log("live: connecting \(ticket.model)\(handle == nil ? "" : " (resuming)")")
+            try await task.send(.string(Self.json(["setup": setup])))
             return true
         } catch {
             AudioHub.log("live: connect failed \(error.localizedDescription)")
@@ -141,7 +281,7 @@ final class LiveVoiceSession: ObservableObject {
                     resumeHandle = nil
                     return await connect(resume: nil)
                 }
-                stop()
+                end(.connectFailed)
             }
             return false
         }
@@ -155,11 +295,16 @@ final class LiveVoiceSession: ObservableObject {
         AudioHub.log("live: reconnecting (\(reason))")
         let old = socket
         socketBox.socket = nil
+        ready = false
+        armReadyTimeout()
         Task {
             let ok = await connect(resume: resumeHandle)
             old?.cancel(with: .normalClosure, reason: nil)
             reconnecting = false
-            if !ok { AudioHub.log("live: reconnect failed") }
+            if !ok, state != .idle {
+                AudioHub.log("live: reconnect failed")
+                end(.connectFailed)
+            }
         }
     }
 
@@ -172,7 +317,11 @@ final class LiveVoiceSession: ObservableObject {
                 switch result {
                 case .failure(let error):
                     AudioHub.log("live: socket closed \(error.localizedDescription)")
-                    if self.state != .idle, self.resumeHandle != nil { self.reconnect(reason: "closed") } else { self.stop() }
+                    if self.state != .idle, self.ready, self.resumeHandle != nil {
+                        self.reconnect(reason: "closed")
+                    } else {
+                        self.end(self.ready ? .closed : .connectFailed)
+                    }
                 case .success(let message):
                     let data: Data?
                     switch message {
@@ -192,14 +341,24 @@ final class LiveVoiceSession: ObservableObject {
     private func handle(_ message: [String: Any], socket task: URLSessionWebSocketTask) {
         if let error = message["error"] as? [String: Any] {
             AudioHub.log("live: provider error \(error["code"] ?? "?") \(String(describing: error["status"] ?? ""))")
-            stop()
+            end(.providerError)
             return
         }
         if message["setupComplete"] != nil {
-            AudioHub.log("live: ready")
+            AudioHub.log("live: ready (\(Self.ms(since: startedAt)) ms after start)")
+            ready = true
+            readyTimeout?.cancel()
+            readyTimeout = nil
             socketBox.socket = task
-            if state == .connecting { state = .listening }
-            installTap()
+            keepAlive(task, connection: connection)
+            flushOutbox(to: task)
+            if tapInstalled {
+                // A reconnect: the mic never stopped.
+                if state == .connecting { state = .listening }
+            } else if state == .connecting {
+                state = .standby
+                onReady?()
+            }
             return
         }
         if let update = message["sessionResumptionUpdate"] as? [String: Any],
@@ -219,6 +378,7 @@ final class LiveVoiceSession: ObservableObject {
             agentMeter.reset()
             uplink.coachSpeaking = false
             state = .listening
+            answerAudioLogged = false
             AudioHub.log("live: interrupted")
             recordTurnIfAny(interrupted: true)
         }
@@ -237,6 +397,13 @@ final class LiveVoiceSession: ObservableObject {
                       let pcm = Data(base64Encoded: b64),
                       let buffer = Self.buffer(fromPCM16: pcm) else { continue }
                 if coachTurnDone { caption = ""; coachTurnDone = false }
+                if !answerAudioLogged {
+                    answerAudioLogged = true
+                    let spokeUntil = uplink.lastVoiceAt
+                    if Date().timeIntervalSince(spokeUntil) < 15 {
+                        AudioHub.log("live latency: speech end → coach audio \(Self.ms(since: spokeUntil)) ms")
+                    }
+                }
                 play(buffer)
             }
         }
@@ -247,6 +414,7 @@ final class LiveVoiceSession: ObservableObject {
         }
         if content["turnComplete"] as? Bool == true {
             coachTurnDone = true
+            answerAudioLogged = false
             if buffersPlaying == 0 { state = .listening; uplink.coachSpeaking = false }
             // A turn that only called a tool has nothing said yet: keep it
             // open so the exchange is saved whole once the coach answers.
@@ -293,6 +461,7 @@ final class LiveVoiceSession: ObservableObject {
         let args = call["args"] as? [String: Any] ?? [:]
         let turnId = self.turnId
         let raw = turnUser
+        let mine = connection
         AudioHub.log("live tool: \(name)")
         Task {
             var response: [String: Any]
@@ -304,9 +473,14 @@ final class LiveVoiceSession: ObservableObject {
             }
             var functionResponse: [String: Any] = ["name": name, "response": response]
             if let id { functionResponse["id"] = id }
-            guard let socket = self.socket,
-                  let json = try? Self.json(["toolResponse": ["functionResponses": [functionResponse]]]) else { return }
-            try? await socket.send(.string(json))
+            guard let json = try? Self.json(["toolResponse": ["functionResponses": [functionResponse]]]) else { return }
+            // An answer for a connection that has since been replaced
+            // means nothing to the new one.
+            guard mine == self.connection || self.reconnecting else {
+                AudioHub.log("live tool: \(name) answered after the connection changed — dropped")
+                return
+            }
+            self.send(json, label: "tool \(name)")
         }
     }
 
@@ -327,11 +501,10 @@ final class LiveVoiceSession: ObservableObject {
     /// Something you said that the coach didn't hear (the mic was muted for
     /// a count): passed on as your words.
     func forwardUserText(_ text: String) {
-        guard let socket, let json = try? Self.json(["realtimeInput": ["text": text]]) else { return }
+        guard state != .idle, let json = try? Self.json(["realtimeInput": ["text": text]]) else { return }
         if turnUser.isEmpty { turnStartedAt = Date() }
         turnUser += text
-        socket.send(.string(json)) { _ in }
-        AudioHub.log("live: forwarded \"\(text.suffix(50))\"")
+        send(json, label: "forwarded \"\(text.suffix(50))\"")
     }
 
     /// Cut the coach off now (you started counting over it).
@@ -352,7 +525,8 @@ final class LiveVoiceSession: ObservableObject {
         if muted {
             // Tell the model the stream paused, so it doesn't wait on a
             // half-heard sentence.
-            if let socket, let json = try? Self.json(["realtimeInput": ["audioStreamEnd": true]]) {
+            // Only on an open connection: queued, it would mean nothing.
+            if ready, let socket, let json = try? Self.json(["realtimeInput": ["audioStreamEnd": true]]) {
                 socket.send(.string(json)) { _ in }
             }
         } else {
@@ -362,11 +536,35 @@ final class LiveVoiceSession: ObservableObject {
     }
 
     private func sendClientTurn(_ text: String, respond: Bool) {
-        guard let socket, let json = try? Self.json([
+        guard state != .idle, let json = try? Self.json([
             "clientContent": ["turns": [["role": "user", "parts": [["text": text]]]], "turnComplete": respond],
         ]) else { return }
-        socket.send(.string(json)) { _ in }
-        AudioHub.log("live: \(respond ? "say" : "note") \"\(text.suffix(70))\"")
+        send(json, label: "\(respond ? "say" : "note") \"\(text.suffix(70))\"")
+    }
+
+    /// Everything but the setup and the mic goes through here: straight out
+    /// once the connection is ready, queued in order until then.
+    private func send(_ json: String, label: String) {
+        guard ready, let socket else {
+            outbox.append((json, label))
+            AudioHub.log("live: queued until ready: \(label)")
+            return
+        }
+        socket.send(.string(json)) { error in
+            if let error { AudioHub.log("live: send failed (\(label.prefix(30))): \(error.localizedDescription)") }
+        }
+        AudioHub.log("live: \(label)")
+    }
+
+    private func flushOutbox(to task: URLSessionWebSocketTask) {
+        let queued = outbox
+        outbox = []
+        for item in queued {
+            task.send(.string(item.json)) { error in
+                if let error { AudioHub.log("live: send failed (\(item.label.prefix(30))): \(error.localizedDescription)") }
+            }
+            AudioHub.log("live: \(item.label) (sent after ready)")
+        }
     }
 
     // MARK: - Audio out
@@ -375,6 +573,8 @@ final class LiveVoiceSession: ObservableObject {
         // You're counting a set (the mic to the coach is muted for it): the
         // coach stays quiet until it's logged, even audio already on its way.
         if uplinkMuted { return }
+        // Standing by: the regular coach still has the stage.
+        if state == .standby || state == .connecting { return }
         if !hub.engine.isRunning { try? hub.start() }
         state = .speaking
         uplink.coachSpeaking = true
@@ -417,7 +617,7 @@ final class LiveVoiceSession: ObservableObject {
         guard !tapInstalled else { return }
         let input = hub.engine.inputNode
         let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { AudioHub.log("live: no mic"); stop(); return }
+        guard format.sampleRate > 0 else { AudioHub.log("live: no mic"); end(.noMic); return }
         uplink.reset(sourceRate: format.sampleRate)
         let uplink = self.uplink
         let box = socketBox
@@ -445,13 +645,14 @@ final class LiveVoiceSession: ObservableObject {
     #if DEBUG
     /// Sends a typed line as if spoken (MYO_LIVE_PROBE).
     func debugSay(_ text: String) {
-        guard let socket, let json = try? Self.json(["realtimeInput": ["text": text]]) else { return }
+        guard let json = try? Self.json(["realtimeInput": ["text": text]]) else { return }
         if turnUser.isEmpty { turnStartedAt = Date() }
         turnUser += text
-        socket.send(.string(json)) { _ in }
-        AudioHub.log("probe: said \"\(text)\"")
+        send(json, label: "probe: said \"\(text)\"")
     }
     #endif
+
+    private static func ms(since date: Date) -> Int { Int((Date().timeIntervalSince(date) * 1000).rounded()) }
 
     private static func json(_ object: [String: Any]) throws -> String {
         String(data: try JSONSerialization.data(withJSONObject: object), encoding: .utf8) ?? "{}"
@@ -469,6 +670,21 @@ private final class SocketBox: @unchecked Sendable {
     }
 }
 
+/// Whether a ping is still unanswered, and whether any ever was answered.
+private final class PongBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _waiting = false
+    private var _answered = false
+    var waiting: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _waiting }
+        set { lock.lock(); _waiting = newValue; lock.unlock() }
+    }
+    var answered: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _answered }
+        set { lock.lock(); _answered = newValue; lock.unlock() }
+    }
+}
+
 /// Turns mic buffers into 16 kHz mono 16-bit chunks of ~100 ms, on the
 /// audio thread. On the phone speaker without echo cancellation the mic
 /// would hear the coach and cut it off, so there it sends nothing while the
@@ -481,6 +697,7 @@ private final class MicUplink: @unchecked Sendable {
     private var _coachSpeaking = false
     private var _halfDuplex = false
     private var _muted = false
+    private var _lastVoiceAt = Date.distantPast
     private static let chunkBytes = 3_200 // 100 ms at 16 kHz, 16-bit
 
     var muted: Bool {
@@ -491,6 +708,11 @@ private final class MicUplink: @unchecked Sendable {
     var coachSpeaking: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _coachSpeaking }
         set { lock.lock(); _coachSpeaking = newValue; lock.unlock() }
+    }
+    /// The last time the mic heard speech-level sound going to the coach:
+    /// roughly when you stopped talking, for the latency line.
+    var lastVoiceAt: Date {
+        lock.lock(); defer { lock.unlock() }; return _lastVoiceAt
     }
     var halfDuplex: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _halfDuplex }
@@ -512,6 +734,10 @@ private final class MicUplink: @unchecked Sendable {
         let outCount = Int(Double(count) / ratio)
         guard outCount > 0 else { return nil }
         var samples = [Int16](repeating: 0, count: outCount)
+        var energy: Float = 0
+        for i in 0..<count { energy += channel[i] * channel[i] }
+        // About -40 dBFS: speech close to the phone, above room noise.
+        if energy / Float(max(count, 1)) > 0.0001 { _lastVoiceAt = Date() }
         for i in 0..<outCount {
             let position = Double(i) * ratio
             let low = min(Int(position), count - 1), high = min(low + 1, count - 1)
