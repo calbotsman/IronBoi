@@ -8,7 +8,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | # | Idea | In plan? | Status | Note |
 |---|---|---|---|---|
 | I1 | Peloton-style auto-start: Watch app opens on phone Start, streams HR + calories | Yes (§2) | in PR #48 (F30–F32); calories streamed but not shown | Plan says "Calories shown in-app" is out of scope, but the idea asks for calories streamed back. **Partial conflict.** |
-| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods in PR #52 (F33–F35); Health reads **deferred** (Phase 4, unassigned) | — |
+| I2 | Other wearables: BLE straps live; Whoop/Oura/Garmin via Health | Yes (§3) | straps/AirPods in PR #52 (F33–F35); Health reads **in progress** (Phase 4, recovery-reads) | — |
 | I3 | Live stats pill (HR, calories, + one; swipe away / tap back) | **No** | in PR #49 (F13–F15) | **Plan gap.** No phone UI for live stats anywhere in the plan. Calories are listed as out of scope. |
 | I4 | Colour + grain follow effort (zones from own max HR, ~10 s blend) | **No** | in PR #49 (F13, F15) | **Plan gap.** No Metal shader or atmosphere work in any phase. `HeartZones` (#44) is the only part that could be reused. |
 | I5 | MYO mirrors you (blob bounces with high HR, breathes with low) | **No** | in PR #49 (F13, F15) | **Plan gap.** |
@@ -20,11 +20,11 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | I11 | Instant start: phone caches a memory brief | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
 | I12 | Brief rebuilt on the server after each workout or conversation | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
 | I13 | Brief stays small (~1–2k words, safety/injuries always in) | **No** | in PR #50 (F16–F18, F20) | **Plan gap.** |
-| I14 | Deep recall on demand ("what did I bench last spring?") | **No** | in PR #50 (workout logs only; F19); conversations + vector search **deferred** | **Plan gap.** |
-| I15 | Social, opt-in (one onboarding question, off by default) | **No** | **deferred** (unassigned) | **Plan gap.** |
-| I16 | Join by invite link, no feeds | **No** | **deferred** (unassigned) | **Plan gap.** |
-| I17 | Coach brings friends in ("Sam trained this morning") | **No** | **deferred** (unassigned) | **Plan gap.** |
-| I18 | Social prototype first | **No** | **deferred** (unassigned) | **Plan gap.** |
+| I14 | Deep recall on demand ("what did I bench last spring?") | **No** | in PR #50 (workout logs only; F19); conversations + vector search **deferred** (structured queries first, per #50) | **Plan gap.** |
+| I15 | Social, opt-in (one onboarding question, off by default) | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
+| I16 | Join by invite link, no feeds | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
+| I17 | Coach brings friends in ("Sam trained this morning") | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
+| I18 | Social prototype first | **No** | **in progress** (social-prototype, behind a flag) | **Plan gap.** |
 
 **Ideas the plan silently leaves out:** I3 live stats pill, I4/I5/I7 HR atmosphere (colour, grain, MYO mirroring, colour-blind safe), I9 voice workout replacement, I10 ask-once suggestion, I11–I13 cached memory brief, I14 deep recall, I15–I18 opt-in social. None of these has a phase, an owner or an estimate.
 
@@ -33,7 +33,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | I22 | "10 reps each side": unilateral lifts counted and logged per side (new, 2026-11-05) | No | in PR #47 | Per-side logged from voice counts only; must be ported onto #46's `SetCount`. |
 | I21 | Voice weight changes, total vs per-side (bug) | No | in PR #47 | F36–F39 |
 
-**Deferred, not dropped:** Phase 4 recovery reads, social (I15–I18), deep-recall vector search.
+**In progress (2026-11-05):** Phase 4 recovery reads (recovery-reads), social I15–I18 (social-prototype, behind a flag). **Still deferred:** deep-recall vector search (structured queries first, per #50). **Process:** ci-launch-guard is building the bundle plist check, a simulator launch smoke test and IronBoiTests in CI (F10/F40/F41/F42).
 
 ## Plan items (`responsive-coach-plan.md`)
 
@@ -58,13 +58,13 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | P1.14 | Evals per rule in `functions/src/evals` | **not started** | Only a unit test on prompt strings. |
 | P2 | Watch app, auto-start, mirroring, HeartRateHub feed, Watch UI, Watch saves workout | in PR #48 | Real HR feed + trend/recovery now computed (resolves F4). F30–F32. |
 | P3 | BLE straps, AirPods HR | in PR #52 | — |
-| P4 | Recovery reads (resting HR, HRV, sleep) | **deferred** (unassigned) | — |
+| P4 | Recovery reads (resting HR, HRV, sleep), baselines, "lighter today?" | **in progress** (recovery-reads) | — |
 
 ## Not an idea, but tracked
 
 | Live voice "weird and laggy" (Josh, real workout) | #53 (3b7e6c2) fixes L1 (off-main decode). L3 (mint wait) and L2 (half-duplex with music) are still open; #38 B2 may cause silent gaps after tools. |
 
-## Merged vs device-tested (2026-11-05, end of day)
+## Merged vs device-tested (2026-11-05, end of day; main deployed to ironboi-staging)
 
 | PR | What | Merged | Device-tested | Open watchdog findings carried in |
 |---|---|---|---|---|
@@ -81,7 +81,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | #52 | Straps / AirPods | yes | no (0/10) | F33 now gated on `HealthSync.enabled` on main (partly fixed); F34, F35 |
 | #54 | F40 plist fix | yes | build-verified | — |
 | #55 | F42 iOS 26 mirroring launch crash | yes | sim build only; needs a 26.6 device launch | — |
-| #38 | OpenAI Realtime live voice | **no** (safe once iOS CI is green) | no | B1–B3 fixed |
-| #53 | Live voice reliability | **no** (safe once iOS CI is green) | no | B4–B6, F27, F28 fixed |
+| #38 | OpenAI Realtime live voice | yes; functions deployed to ironboi-staging | no | B1–B3 fixed |
+| #53 | Live voice reliability | yes | no | B4–B6, F27, F28 fixed |
 
 **Nothing has been device-tested.** Every merged feature has compiled and passed CI but has never run on a phone; the one device attempt (live-voice-fix) crashed on F40. Priority device run: a full workout with the Watch, Spotify on the speaker, and live voice on, to cover F30, L2, B2 and #46 together.
