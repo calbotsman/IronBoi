@@ -86,6 +86,8 @@ struct SessionReplacement: Codable, Equatable {
     let style: TrainingStyle
     let activity: String
     let title: String
+    /// When the switch happened, if sets were already logged before it (ISO 8601).
+    var switchedAt: String?
 }
 
 /// A change only the phone can make, carried on a coach reply by the text

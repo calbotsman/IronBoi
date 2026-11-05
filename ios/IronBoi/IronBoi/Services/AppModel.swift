@@ -77,6 +77,9 @@ final class AppModel: NSObject, ObservableObject {
     @Published private(set) var alternativesBank: AlternativesBank?
     private var alternativesRefreshedAt: Date?
     private var alternativesRefreshing = false
+    /// The profile changed since the bank was built: swaps ask the server
+    /// first, and only fall back to the bank when it can't be reached.
+    private var alternativesStale = false
     /// Coach replies whose phone actions were already applied.
     private var appliedClientActionIds: [String] = UserDefaults.standard.stringArray(forKey: "coach.appliedClientActions") ?? []
 
@@ -145,7 +148,18 @@ final class AppModel: NSObject, ObservableObject {
     /// Everything Coach remembers, minus deleted/rejected facts. Unfiltered
     /// otherwise — the memory screen groups proposed / active / ended.
     @Published private(set) var memoryFacts: [MemoryFact] = []
-    @Published private(set) var profile: UserProfile = .empty
+    @Published private(set) var profile: UserProfile = .empty {
+        didSet {
+            // New gear, goals or session length: the banked swaps and
+            // alternatives were built for the old ones. Stop trusting them
+            // until a rebuild lands.
+            guard !inPreview, oldValue != .empty, profile.equipment != oldValue.equipment
+                || profile.goals != oldValue.goals || profile.preferences.trainingFocus != oldValue.preferences.trainingFocus
+                || profile.schedule.sessionLengthMin != oldValue.schedule.sessionLengthMin else { return }
+            alternativesStale = true
+            Task { await self.refreshAlternatives(force: true) }
+        }
+    }
     @Published private(set) var isSending = false
     @Published private(set) var isOnboardingBusy = false
     @Published private(set) var isWorkoutBusy = false
@@ -415,7 +429,7 @@ final class AppModel: NSObject, ObservableObject {
                 if name == "replace_session" { return await self.liveReplaceSession(args) }
                 if name == "add_session_add_on" { return self.addSessionAddOn() }
                 // Banked swaps answer instantly; anything not banked asks the server.
-                if name == "find_exercise_swaps", args["availableEquipment"] == nil,
+                if name == "find_exercise_swaps", args["availableEquipment"] == nil, !self.alternativesStale,
                    let options = self.bankedSwaps(for: args["exerciseName"] as? String) {
                     return ["ok": true, "options": options.map {
                         ["name": $0.name, "primary": $0.primary, "equipment": $0.equipment, "reason": $0.reason] as [String: Any]
@@ -1001,6 +1015,7 @@ final class AppModel: NSObject, ObservableObject {
                 "getSessionAlternativesCallable", data: ["clientDate": Self.currentDateISO()])
             alternativesBank = response.bank
             alternativesRefreshedAt = Date()
+            alternativesStale = false
             SessionBank.save(response.bank, userId: userId)
         } catch {
             // The cached bank stays; it's still right for everything but a brand-new plan.
@@ -1094,8 +1109,11 @@ final class AppModel: NSObject, ObservableObject {
         workout.exercises = reindexed + SessionBank.exercises(alternative.items, from: reindexed.count)
         workout.updatedAt = Self.isoString(from: Date())
         skippedExercises = []
+        // When lifting was done first, Health gets it as its own workout up to now.
+        let switchedAt = reindexed.isEmpty ? nil : (sessionReplacement?.switchedAt ?? Self.isoString(from: Date()))
         sessionReplacement = SessionReplacement(kind: alternative.kind, style: alternative.style,
-                                                activity: alternative.activity, title: alternative.title)
+                                                activity: alternative.activity, title: alternative.title,
+                                                switchedAt: switchedAt)
         activeWorkout = workout
         // Not a sessionChanges entry: a one-day switch isn't something to keep in the plan.
         focusedExerciseIndex = reindexed.count
@@ -1443,9 +1461,22 @@ final class AppModel: NSObject, ObservableObject {
             pendingEffortSessionId = activeWorkout.sessionId
             TrainingReminders.shared.markTrainedToday()
             if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
-                let (id, name) = (activeWorkout.sessionId, sessionReplacement?.title ?? activeWorkout.workoutName)
-                let activity = sessionReplacement?.activity
-                Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, activity: activity, start: start, end: end) }
+                let id = activeWorkout.sessionId
+                if let replaced = sessionReplacement {
+                    // What was lifted before the switch is strength; the rest is what they switched to.
+                    let split = replaced.switchedAt.flatMap(Self.parseISO).flatMap { $0 > start && $0 < end ? $0 : nil }
+                    let planned = activeWorkout.workoutName
+                    Task {
+                        if let split {
+                            await HealthSync.shared.saveWorkout(sessionId: id, name: planned, start: start, end: split)
+                        }
+                        await HealthSync.shared.saveWorkout(sessionId: split == nil ? id : "\(id)-switched", name: replaced.title,
+                                                            activity: replaced.activity, start: split ?? start, end: end)
+                    }
+                } else {
+                    let name = activeWorkout.workoutName
+                    Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, start: start, end: end) }
+                }
             }
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
             pendingSessionChanges = changes
@@ -1509,9 +1540,11 @@ final class AppModel: NSObject, ObservableObject {
 
         // Banked on the phone: instant, and works with no signal. The bank
         // refreshes behind it.
-        if availableEquipment == nil,
-           let banked = SessionBank.swaps(in: alternativesBank, dayKey: dayKey, exerciseName: exerciseName,
-                                          excluding: activeWorkout?.exercises.map(\.name) ?? []) {
+        let banked = availableEquipment == nil
+            ? SessionBank.swaps(in: alternativesBank, dayKey: dayKey, exerciseName: exerciseName,
+                                excluding: activeWorkout?.exercises.map(\.name) ?? [])
+            : nil
+        if let banked, !alternativesStale {
             Task { await refreshAlternatives(force: false) }
             return .loaded(banked)
         }
@@ -1530,6 +1563,8 @@ final class AppModel: NSObject, ObservableObject {
             )
             return .loaded(response.options)
         } catch {
+            // Offline with a stale bank: older options beat none.
+            if let banked { return .loaded(banked) }
             // Deliberately NOT surfaced through errorMessage: the sheet is
             // presented above the alert's host view, so the alert would be
             // invisible and the user would just see an empty list. The sheet

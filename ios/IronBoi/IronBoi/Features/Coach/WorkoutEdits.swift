@@ -118,28 +118,29 @@ enum WorkoutEdit: Equatable {
 
     // MARK: - Cardio
 
-    /// A cardio block they're adding: what, how long (20 minutes when they
-    /// don't say), and whether it's now. Needs a cardio word and something
-    /// that makes it a plan for today — a verb like "add" or "do", a length,
-    /// or "at the end" — so "I went for a run this morning" stays a chat.
+    /// A cardio block they're explicitly adding on: what, how long (20
+    /// minutes when they don't say), and whether it's now. Only an add verb
+    /// or "at the end" makes it one here. Anything looser ("I'm going for a
+    /// run", "let's do the bike", "yoga instead") might be a whole-session
+    /// switch, so it goes to the coach, which decides (replace_session).
     static func cardioRequest(_ t: String) -> (name: String, minutes: Int, now: Bool)? {
         guard let name = cardioName(t) else { return nil }
-        let minutes = minutes(in: t)
         func has(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
-        // "I'm going for a run", "doing yoga instead", "not doing that": maybe
-        // a whole-session switch, maybe an add-on. The coach tells them apart
-        // (replace_session); only a plain "add it on" stays here.
-        let extra = has(#"\b(add|adding|added|throw in|tack on|squeeze in|also|too|as well|after this|afterwards|at the end|to finish|finish with|end with)\b"#)
-        if !extra, has(#"\b(instead|rather|not doing|don't want to do|dont want to do|skip (?:the|this|that|today)|go for|going for|gonna go|going to go)\b"#) {
-            return nil
-        }
-        let adding = has(#"\b(add|adding|added|throw in|throwing in|tack on|tacking on|put in|squeeze in|squeezing in|also do|also doing|finish with|finishing with|end with|ending with|hop on|hopping on|jump on|get on|getting on)\b"#)
-            || has(#"^(?:ok |okay |so |and |then |let's |lets |i'll |ill |i'm gonna |im gonna |gonna |i want to |i wanna |i'd like to |i'm going to |im going to )?(?:do|doing)\b"#)
-            || has(#"\b(i'm doing|im doing|i'll do|ill do|i'm gonna do|gonna do|let's do|lets do|i want to do|i wanna do|i'm going to do)\b"#)
+        let adding = has(#"\b(add|adding|added|throw in|throwing in|tack on|tacking on|put in|squeeze in|squeezing in|also do|also doing|finish with|finishing with|end with|ending with)\b"#)
             || has(#"\b(at the end|to finish|after this|afterwards|to my workout|to the workout|to today's workout)\b"#)
-        guard adding || minutes != nil else { return nil }
+        guard adding else { return nil }
         let now = has(#"\b(now|right now|first|next)\b"#)
-        return (name, minutes ?? 20, now)
+        return (name, minutes(in: t) ?? 20, now)
+    }
+
+    /// Names an activity someone might switch the whole session to (a
+    /// cardio word, or a session kind like "yoga" or "mobility"). Quick
+    /// commands ("go", "ready") step aside for these: "let's go for a run"
+    /// is for the coach, not the rest timer.
+    static func namesActivity(_ t: String) -> Bool {
+        if ExerciseKnowledge.isCardio(t) { return true }
+        let words = Set(t.lowercased().split { !$0.isLetter }.map(String.init))
+        return SessionKind.allCases.contains { words.contains($0.rawValue) }
     }
 
     /// "indoor cycling" → Indoor Cycling, "the bike" → Bike, "a run" → Run.

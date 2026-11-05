@@ -350,9 +350,24 @@ export function sessionAlternativesForDay(
   return all.filter((alt): alt is SessionAlternative => alt !== null);
 }
 
-// Gear worth building a short finisher around, most kettlebell-friendly first.
-const FINISHER_GEAR: readonly Equipment[] = ["kettlebell", "dumbbell", "sandbag", "band", "club", "medball", "barbell"];
+// Gear worth building a short finisher around (not a bench or a bar).
+const FINISHER_GEAR: readonly Equipment[] = ["kettlebell", "dumbbell", "barbell", "sandbag", "band", "club", "medball"];
 const FINISHER_PATTERNS: readonly MovementPattern[] = ["hinge", "squat", "vertical_push", "horizontal_pull", "horizontal_push", "carry"];
+
+/**
+ * The gear an add-on is built around: the first finisher-worthy item on
+ * their own equipment list, in the order they gave it. A full gym (null)
+ * goes by their goals: strength → barbell, muscle → dumbbells, otherwise
+ * kettlebell work.
+ */
+export function addOnGear(equipment: Equipment[] | null, goals: readonly string[] = []): Equipment {
+  if (equipment === null) {
+    if (goals.includes("strength")) return "barbell";
+    if (goals.includes("muscle_gain")) return "dumbbell";
+    return "kettlebell";
+  }
+  return equipment.find((g) => FINISHER_GEAR.includes(g)) ?? "none";
+}
 
 /** A short block of their main training, built from what they own. */
 export function buildAddOn(
@@ -360,6 +375,7 @@ export function buildAddOn(
   equipment: Equipment[] | null,
   baselines: BaselineMap,
   today: string,
+  goals: readonly string[] = [],
 ): AddOn {
   if (mainStyle === "endurance") {
     const run = timedSession("run", ADD_ON_MINUTES, "addon")!;
@@ -369,8 +385,7 @@ export function buildAddOn(
     const yoga = timedSession("yoga", ADD_ON_MINUTES, "addon")!;
     return { style: mainStyle, equipment: "none", title: yoga.title, minutes: ADD_ON_MINUTES, items: yoga.items };
   }
-  // A full gym (null) leans on the first finisher gear; a home list uses what's on it.
-  const gear = FINISHER_GEAR.find((g) => equipment === null || equipment.includes(g)) ?? "none";
+  const gear = addOnGear(equipment, goals);
   const catalog = allExercises();
   const items: BankedItem[] = [];
   for (const pattern of FINISHER_PATTERNS) {
@@ -428,7 +443,7 @@ export function buildAlternativesBank(input: {
     builtAt: (input.now ?? new Date()).toISOString(),
     clientDate: input.today,
     mainStyle,
-    addOn: buildAddOn(mainStyle, input.equipment, input.baselines, input.today),
+    addOn: buildAddOn(mainStyle, input.equipment, input.baselines, input.today, input.profile.goals),
     kinds: SESSION_KINDS.map((kind) => ({
       kind,
       style: KIND_STYLE[kind],
@@ -480,9 +495,22 @@ export async function getSessionAlternatives(
       trainingFocus: typeof focus === "string" ? focus : undefined,
       sessionLengthMin: typeof schedule.sessionLengthMin === "number" ? schedule.sessionLengthMin : undefined,
     },
-    equipment: catalogEquipment(Array.isArray(profile.equipment) ? profile.equipment : undefined),
+    equipment: orderedEquipment(Array.isArray(profile.equipment) ? profile.equipment : undefined),
     baselines,
     today,
   });
   return { ok: true, bank };
+}
+
+/** Catalog gear in the order the person listed it; null = a full gym. */
+export function orderedEquipment(saved: readonly unknown[] | undefined): Equipment[] | null {
+  const strings = (saved ?? []).filter((item): item is string => typeof item === "string");
+  if (catalogEquipment(strings) === null) return null;
+  const ordered: Equipment[] = [];
+  for (const entry of strings) {
+    for (const gear of catalogEquipment([entry]) ?? []) {
+      if (!ordered.includes(gear)) ordered.push(gear);
+    }
+  }
+  return ordered;
 }

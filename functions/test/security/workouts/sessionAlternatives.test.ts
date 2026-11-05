@@ -6,8 +6,10 @@ import {
   KIND_STYLE,
   SESSION_KINDS,
   TIMED_KIND_ITEM,
+  addOnGear,
   addOnOffer,
   buildAddOn,
+  orderedEquipment,
   buildAlternativesBank,
   dayStyle,
   mainTrainingStyle,
@@ -163,6 +165,22 @@ describe("fit to the person", () => {
     expect(none.equipment).toBe("none");
     for (const item of none.items) expect(lookupExercise(item.name)!.equipment).toEqual(["none"]);
     expect(buildAddOn("endurance", null, new Map(), "2026-11-05").items[0].timed).toBe(true);
+  });
+});
+
+describe("add-on gear comes from the profile", () => {
+  it("uses the first finisher gear they listed, in their order", () => {
+    expect(orderedEquipment(["Dumbbells", "a kettlebell"])).toEqual(["dumbbell", "kettlebell"]);
+    expect(addOnGear(orderedEquipment(["Dumbbells", "a kettlebell"]))).toBe("dumbbell");
+    expect(addOnGear(orderedEquipment(["kettlebells", "dumbbells"]))).toBe("kettlebell");
+    expect(addOnGear(orderedEquipment(["pull-up bar"]))).toBe("none");
+  });
+
+  it("a full gym goes by their goals", () => {
+    expect(orderedEquipment(["full gym"])).toBeNull();
+    expect(addOnGear(null, ["strength"])).toBe("barbell");
+    expect(addOnGear(null, ["muscle_gain"])).toBe("dumbbell");
+    expect(addOnGear(null, ["general_fitness"])).toBe("kettlebell");
   });
 });
 
