@@ -24,6 +24,7 @@ import {
   CoachMemoryFact,
   CoachTips,
   CoachTone,
+  LiveCoachContext,
   LiveWorkoutState,
   TrainingExperience,
   TrainingFocus,
@@ -1079,6 +1080,7 @@ export const onUserCoachMessageCreated = onDocumentCreated(
       coachTips: CoachTips.safeParse(data.coachTips).data,
       coachTone: CoachTone.safeParse(data.coachTone).data,
       liveWorkout: LiveWorkoutState.safeParse(data.liveWorkout).data,
+      liveContext: LiveCoachContext.safeParse(data.liveContext).data,
       geminiApiKey: geminiApiKey.value() || process.env.GEMINI_API_KEY,
       openRouterApiKey: openRouterApiKey.value() || process.env.OPENROUTER_API_KEY,
     });

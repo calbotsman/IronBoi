@@ -182,6 +182,18 @@ export const PHONE_TOOL_DECLARATIONS = [
     },
   },
   {
+    name: "extend_rest",
+    description:
+      "During a workout, while they're resting between sets: add time to the rest timer on their phone. Use it when their heart rate is still high, they sound gassed, or they ask for longer.",
+    parameters: {
+      type: "object",
+      properties: {
+        seconds: { type: "integer", description: "Seconds to add, 15 to 180. Usually 30." },
+      },
+      required: ["seconds"],
+    },
+  },
+  {
     name: "show_exercise",
     description:
       "Have your body on their screen demonstrate an exercise: a few slow reps. Call it whenever they ask you to show them, or when seeing it would help. Omit exerciseName for the one they're on.",
@@ -214,6 +226,10 @@ const LIVE_RULES = [
   "- When a tool changes the plan, say what changed in one sentence. A proposal is only applied when they say yes AFTER hearing it.",
   "- Lines in the conversation that start with [app] are notes from the app about what's on screen or what they just did, not the user speaking. Don't read them out.",
   "- In a workout the app handles counting, \"set done\" and weight changes itself and tells you with an [app] line. Don't answer those yourself; when an [app] line asks you to say something, say it briefly in your own words.",
+  "- [app] lines starting \"Context:\" carry the latest rest, heart rate and recent-training numbers. The newest one is the truth about right now; older ones are history. Never quote a heart rate that isn't in the newest Context line, and never guess one.",
+  "- Heart rate is one signal: mention it at most once per rest, and only when it changes what they should do. High at the end of a set (zone 4–5) or slow to come down in rest: give them more rest with extend_rest and say so in a few words. Low through a set they finished at full reps: you may offer a bit more next set; never push past the plan.",
+  "- On a cardio block (Context says \"on cardio\"), heart rate is the pace guide instead: zone 4–5 for a while, suggest easing a notch; zone 1–2, they can pick it up if they want. No rest is running, so never call extend_rest then.",
+  "- Coming back after a week or more off, or two workouts in a row that felt like too much: keep today a little lighter and say why once. Two that felt easy: offer a little more.",
   "- Swapping an exercise in a workout: call find_exercise_swaps, offer two or three, and the moment they pick one call swap_workout_exercise. Don't use adapt_plan for it and never ask for a weight. Then say what they're doing now in one sentence.",
 ].join("\n");
 

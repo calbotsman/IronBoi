@@ -130,6 +130,9 @@ struct CoachStageView: View {
     /// down and the blob breathes slow until "go".
     @State private var restEndsAt: Date?
     @State private var restTask: Task<Void, Never>?
+    /// The live coach's context note waiting to go, and the last one sent.
+    @State private var contextNoteTask: Task<Void, Never>?
+    @State private var lastContextNote: String?
     /// A timed hold in progress (a plank, a carry): when it started and ends.
     @State private var holdStartedAt: Date?
     @State private var holdEndsAt: Date?
@@ -202,6 +205,14 @@ struct CoachStageView: View {
         stage.onChange(of: appModel.showExerciseRequest) { _, request in
             if let request { demo(request.name) }
         }
+        .modifier(LiveContextSync(
+            restEndsAt: restEndsAt,
+            contextNote: appModel.liveContextNote,
+            extension: appModel.restExtensionRequest,
+            noteRest: { appModel.noteRest(endsAt: $0) },
+            push: { pushContextNote($0) },
+            extend: { extendRest(by: $0) }
+        ))
     }
 
     #if DEBUG
@@ -1333,6 +1344,8 @@ struct CoachStageView: View {
                 voiceInput.toggle()
                 if let note = liveWorkoutNote { live.note(note) }
             }
+            lastContextNote = nil
+            pushContextNote(appModel.liveContextNote)
         }
     }
 
@@ -1727,6 +1740,7 @@ struct CoachStageView: View {
         let ends = start.addingTimeInterval(TimeInterval(seconds))
         holdStartedAt = start
         holdEndsAt = ends
+        appModel.noteTimedBlock(.init(cardio: cardio, startedAt: start, plannedSec: seconds))
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         AudioHub.shared.play(cue: .tick)
         if speaksReplies, tips != .quiet {
@@ -1792,6 +1806,7 @@ struct CoachStageView: View {
         holdTask = nil
         holdEndsAt = nil
         holdStartedAt = nil
+        appModel.noteTimedBlock(nil)
     }
 
     // MARK: - Rest between sets
@@ -1852,20 +1867,41 @@ struct CoachStageView: View {
             let number = WorkoutVoice.numberWords.first { t.range(of: #"\b"# + $0.key + #"\b"#, options: .regularExpression) != nil }?.value
                 ?? Int(t.components(separatedBy: CharacterSet.decimalDigits.inverted).joined())
             let extra = says(#"\bminute\b"#) ? 60 : (number ?? 30)
-            restEndsAt = (restEndsAt ?? Date()).addingTimeInterval(TimeInterval(extra))
-            let ends = restEndsAt!
-            restTask?.cancel()
-            restTask = Task {
-                try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
-                guard !Task.isCancelled, restEndsAt == ends else { return }
-                restEndsAt = nil
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                if conversationActive, speaksReplies, tips != .quiet { confirm(tone == .hype ? "Go!" : "Go.") }
-            }
+            extendRest(by: extra)
             confirm("\(extra) more seconds.")
             return true
         }
         return false
+    }
+
+    /// Adds time to the rest running now — you asked, or the live coach
+    /// did (its extend_rest tool; it says so itself). Nothing if not resting.
+    private func extendRest(by extra: Int) {
+        guard let current = restEndsAt else { return }
+        let ends = current.addingTimeInterval(TimeInterval(extra))
+        restEndsAt = ends
+        restTask?.cancel()
+        restTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(max(0, ends.timeIntervalSinceNow) * 1_000_000_000))
+            guard !Task.isCancelled, restEndsAt == ends else { return }
+            restEndsAt = nil
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            if conversationActive, speaksReplies, tips != .quiet { confirm(tone == .hype ? "Go!" : "Go.") }
+        }
+    }
+
+    /// Tells the live voice coach the latest context, quietly. Waits for
+    /// things to settle (a set logged starts a rest a beat later) and sends
+    /// only the newest line, so a burst of changes is one note.
+    private func pushContextNote(_ note: String?) {
+        contextNoteTask?.cancel()
+        guard live.isActive, let note else { return }
+        contextNoteTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled, live.isActive, note != lastContextNote else { return }
+            lastContextNote = note
+            live.note(note)
+        }
     }
 
     /// A lift you called out: add, swap, skip, jump, new sets or reps, or
@@ -2737,5 +2773,27 @@ private struct TypedReplyText: View {
         }
         .id(message.id)
         .accessibilityLabel(message.content)
+    }
+}
+
+
+/// Keeps the coach's live context in step with the stage: the rest timer
+/// into AppModel, context changes out to the live voice coach, and the live
+/// coach's "more rest" back onto the timer.
+private struct LiveContextSync: ViewModifier {
+    let restEndsAt: Date?
+    let contextNote: String?
+    let `extension`: AppModel.RestExtension?
+    let noteRest: (Date?) -> Void
+    let push: (String?) -> Void
+    let extend: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: restEndsAt) { _, ends in noteRest(ends) }
+            .onChange(of: contextNote) { _, note in push(note) }
+            .onChange(of: `extension`) { _, request in
+                if let request { extend(request.seconds) }
+            }
     }
 }
