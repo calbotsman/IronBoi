@@ -36,7 +36,9 @@ targets:
       properties:
         # Coach keeps talking and listening with the screen off or the
         # phone in a pocket; the audio session carries the app.
-        UIBackgroundModes: [audio]
+        # bluetooth-central: a heart-rate strap keeps streaming with the
+        # screen off (Services/HeartStrapConnector.swift).
+        UIBackgroundModes: [audio, bluetooth-central]
     preBuildScripts:
       - name: "Select GoogleService-Info.plist for $CONFIGURATION"
         script: |
@@ -152,6 +154,7 @@ targets:
         INFOPLIST_KEY_NSMicrophoneUsageDescription: MYO uses the microphone so you can speak to your coach.
         INFOPLIST_KEY_NSHealthUpdateUsageDescription: MYO saves your finished workouts to Apple Health so they count toward your activity.
         # Read: live heart rate and active energy from a Watch workout (Services/WatchWorkoutLink.swift).
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: MYO connects to your heart rate strap so your coach can pace your rests.
         INFOPLIST_KEY_NSHealthShareUsageDescription: MYO reads your heart rate and active energy during workouts so your coach can pace your rests.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: MYO uses speech recognition to turn your voice into coach messages.
         SWIFT_VERSION: 5.10
