@@ -1716,8 +1716,8 @@ struct CoachStageView: View {
     private func handleHoldCommand(_ text: String) -> Bool {
         guard let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return false }
         let t = text.lowercased()
-        // "Add a run now" adds one; it doesn't start this timer.
-        if holdEndsAt == nil, WorkoutEdit.cardioRequest(t) != nil { return false }
+        // "Add a run now", "let's go for a run": an activity, not this timer.
+        if holdEndsAt == nil, WorkoutEdit.namesActivity(t) { return false }
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         if holdEndsAt != nil {
             // A cardio block runs for minutes while you chat: only a clear
@@ -1865,8 +1865,8 @@ struct CoachStageView: View {
     private func handleRestCommand(_ text: String) -> Bool {
         guard restEndsAt != nil else { return false }
         let t = text.lowercased()
-        // "Add 20 minutes on the bike" is a cardio block, not more rest.
-        if WorkoutEdit.cardioRequest(t) != nil { return false }
+        // "Add 20 minutes on the bike", "let's go for a run": an activity, not the rest timer.
+        if WorkoutEdit.namesActivity(t) { return false }
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         if says(#"\b(skip|skip rest|skip the rest|go|ready|let's go|lets go|next set|i'm ready|im ready)\b"#), t.split(separator: " ").count <= 5 {
             cancelRest()

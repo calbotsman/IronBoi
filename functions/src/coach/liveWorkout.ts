@@ -159,6 +159,21 @@ export function liveContextRules(
     }
   }
 
+  if (context.switching) {
+    const { mainStyle, addOnAsked, options: banked, switchedTo } = context.switching;
+    facts.push(`Their main kind of training: ${mainStyle}.`);
+    if (banked?.length) {
+      facts.push(`Banked alternatives for today's session (alternativeId: kind, minutes): ${banked.map((o) => `${o.id}: ${o.kind}, ${o.minutes} min`).join("; ")}.`);
+    }
+    if (switchedTo) facts.push(`Today's session has already been switched to: ${switchedTo}.`);
+    rules.push("If they're not doing today's session and want something else instead, call replace_session (with the matching alternativeId when one fits) and confirm in one sentence. Adding something on top of the workout is not a replacement.");
+    if (addOnAsked) {
+      rules.push("You've already offered the add-on this session: never offer it again.");
+    } else {
+      rules.push("If replace_session returns offerAddOn, offer it once in a few words; on yes call add_session_add_on; on no, drop it.");
+    }
+  }
+
   if (!facts.length && !rules.length) return null;
   return [
     "<live_context>",

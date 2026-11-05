@@ -20,6 +20,7 @@
 		243DAA051BBB749B952B57CC /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */; };
 		25B2EAE2F402BA9568A459D1 /* WorkoutEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 083722ABB4FE380F28D66DF6 /* WorkoutEdits.swift */; };
 		28C9D2CA7124C268C8AC5E2D /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 8323F6678C89F93E8A1AB75E /* FirebaseFirestore */; };
+		2A64E71009EB2332881D805A /* SessionAlternatives.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7879883696E212221E0C2A4C /* SessionAlternatives.swift */; };
 		2F7E75CE7193B0A636214470 /* GenerativeLife.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F80FFC8D48AE2F4283FCA8 /* GenerativeLife.swift */; };
 		302EFB0F1A9C9E4BFC2C13F6 /* FlowLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B95702D3FB16E882BF8E3F9 /* FlowLayout.swift */; };
 		31D9F65E51B20F61260F722A /* HealthSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C698900CF6774CF078D13616 /* HealthSync.swift */; };
@@ -117,6 +118,7 @@
 		7536DAFABEEB5AFD6FEBE835 /* MicAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicAnalyzer.swift; sourceTree = "<group>"; };
 		7701CCF07727848BE39DE49A /* AudioHub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioHub.swift; sourceTree = "<group>"; };
 		77605A0D6DB9127A417137E3 /* ExerciseMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseMotion.swift; sourceTree = "<group>"; };
+		7879883696E212221E0C2A4C /* SessionAlternatives.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAlternatives.swift; sourceTree = "<group>"; };
 		8251B627C5781604E47176FE /* CoachView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachView.swift; sourceTree = "<group>"; };
 		8932D2CF267BB36314E83C02 /* IronBoi.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = IronBoi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8E0A6C0ED67D717816D1C4B0 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
@@ -333,6 +335,7 @@
 				444A6BCDA936221DF3510CAD /* ExerciseSequence.swift */,
 				A3FF2436A03BB2BF1414B976 /* MemoryFact.swift */,
 				039EE3F780882104FBD9CC48 /* OnboardingModels.swift */,
+				7879883696E212221E0C2A4C /* SessionAlternatives.swift */,
 				42295F0B01F3CA6DF05D93F5 /* UserProfile.swift */,
 				A4734F76A950FA7C6ECA47EC /* WorkoutLogModels.swift */,
 				07DECCF4FA552889A83248A3 /* WorkoutModels.swift */,
@@ -519,6 +522,7 @@
 				DDE287948E75C936D7F8D05A /* PlanReviewCard.swift in Sources */,
 				22E2419B0E6B57D846EEF87C /* PreferencesView.swift in Sources */,
 				5E959043BE8381E22181D226 /* RecordView.swift in Sources */,
+				2A64E71009EB2332881D805A /* SessionAlternatives.swift in Sources */,
 				97122EBA819A4AC4B8DD976A /* SessionChangesCard.swift in Sources */,
 				1DC4693D65CE2DB9F8BFE4A3 /* SetCount.swift in Sources */,
 				CA375C8D58B1B03F67C2B93A /* SetupCard.swift in Sources */,

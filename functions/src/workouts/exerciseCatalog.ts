@@ -207,6 +207,8 @@ const ENTRIES: CatalogEntry[] = [
   { name: "Incline Walk", primary: ["Quads", "Glutes"], secondary: ["Calves"], equipment: ["none"], pattern: "conditioning", loadClass: "bodyweight" },
   { name: "Farmer Carry", primary: ["Traps", "Core"], secondary: ["Forearms"], equipment: ["dumbbell"], pattern: "carry", loadClass: "heavy", timed: true },
   { name: "Suitcase Carry", primary: ["Core", "Traps"], secondary: ["Forearms"], equipment: ["kettlebell"], pattern: "carry", loadClass: "moderate", timed: true },
+  // A yoga session is one timed block ("doing yoga instead"); MYO doesn't build flows.
+  { name: "Yoga Flow", primary: ["Core"], secondary: ["Hamstrings", "Hip flexors"], equipment: ["none"], pattern: "mobility", loadClass: "bodyweight", timed: true },
 ];
 
 const BY_KEY = new Map(ENTRIES.map((entry) => [normalizeExerciseKey(entry.name), entry]));

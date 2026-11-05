@@ -26,6 +26,12 @@ import { safeLogger } from "../logging/safeLogger.js";
 import { TrainingSetupChange, updateTrainingSetup } from "../workouts/trainingSetup.js";
 import type { ToolRegistry } from "../tools/executor.js";
 import type { CoachToolDeclaration } from "./modelProvider.js";
+import type { SessionSwitchContext } from "../contracts/coach-agent.js";
+import {
+  ADD_SESSION_ADD_ON_DECLARATION,
+  REPLACE_SESSION_DECLARATION,
+  sessionSwitchHandlers,
+} from "./sessionSwitch.js";
 
 // Gemini function declarations — a hand-written mirror of the Zod args
 // schemas below. Gemini's function-calling API takes an OpenAPI-3.0-subset
@@ -326,6 +332,8 @@ export const COACH_TOOL_DECLARATIONS: CoachToolDeclaration[] = [
       required: ["reason", "question"],
     },
   },
+  REPLACE_SESSION_DECLARATION,
+  ADD_SESSION_ADD_ON_DECLARATION,
 ];
 
 // The envelope fields on ToolCallBase (toolCallId, requestedAt, tool
@@ -417,6 +425,9 @@ export type CoachToolRegistryContext = {
   // The triggering message id — remembered facts are keyed to it so a fact
   // can always be traced to the message that produced it.
   sourceMessageId?: string;
+  // What the phone has banked for switching today's session, and whether
+  // the one-time add-on was already offered (liveContext.switching).
+  switching?: SessionSwitchContext;
 };
 
 const MAX_LIVE_MEMORY_FACTS = 100;
@@ -438,6 +449,7 @@ export function buildCoachToolRegistry(
   // one turn from overwriting each other.
   let rememberedThisTurn = 0;
   return {
+    ...sessionSwitchHandlers(context.switching),
     adapt_plan: async (rawArgs) => {
       // executeTool injects userId onto every handler's args — strip it
       // before validating against AdaptPlanArgs, which doesn't declare it.

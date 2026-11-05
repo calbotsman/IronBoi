@@ -52,12 +52,12 @@ final class HealthSync: ObservableObject {
 
     /// Saves one finished session. Quietly does nothing when off, and never
     /// throws: a workout that didn't reach Health isn't worth an error card.
-    func saveWorkout(sessionId: String, name: String, start: Date, end: Date) async {
+    func saveWorkout(sessionId: String, name: String, activity: String? = nil, start: Date, end: Date) async {
         guard enabled, end > start,
               store.authorizationStatus(for: HKObjectType.workoutType()) == .sharingAuthorized else { return }
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = Self.activityType(for: name)
-        configuration.locationType = .indoor
+        configuration.activityType = Self.activityType(for: name, activity: activity)
+        configuration.locationType = activity.map { ["running", "walking", "cycling", "hiking"].contains($0) } == true ? .unknown : .indoor
         let builder = HKWorkoutBuilder(healthStore: store, configuration: configuration, device: .local())
         do {
             try await builder.beginCollection(at: start)
@@ -73,8 +73,22 @@ final class HealthSync: ObservableObject {
         }
     }
 
-    /// The plan names its mobility days; everything else MYO builds is strength.
-    static func activityType(for name: String) -> HKWorkoutActivityType {
-        name.localizedCaseInsensitiveContains("mobility") ? .flexibility : .traditionalStrengthTraining
+    /// A switched session says what it was ("running", "yoga"; the server's
+    /// SessionActivity). Otherwise the plan names its mobility days and
+    /// everything else MYO builds is strength.
+    static func activityType(for name: String, activity: String? = nil) -> HKWorkoutActivityType {
+        switch activity {
+        case "running": return .running
+        case "walking": return .walking
+        case "cycling": return .cycling
+        case "rowing": return .rowing
+        case "swimming": return .swimming
+        case "hiking": return .hiking
+        case "yoga": return .yoga
+        case "flexibility": return .flexibility
+        case "strength": return .traditionalStrengthTraining
+        default:
+            return name.localizedCaseInsensitiveContains("mobility") ? .flexibility : .traditionalStrengthTraining
+        }
     }
 }

@@ -207,6 +207,7 @@ export async function orchestrateCoachTurn({
   // real proposal, and stranding it makes the user re-ask for a change that
   // was already settled.
   const ownDraftProposalIds: string[] = [];
+  const clientActions: Array<Record<string, unknown>> = [];
 
   try {
     const usageCap = await checkDailyUsageCap(db, userId);
@@ -324,6 +325,7 @@ export async function orchestrateCoachTurn({
           clientDate,
           rawUserText: userContent,
           sourceMessageId: messageId,
+          switching: liveContext?.switching,
         })
       : undefined;
     const executeCoachTool: CoachToolExecutor | undefined = toolRegistry
@@ -342,6 +344,11 @@ export async function orchestrateCoachTurn({
             // running concurrently with this one.
             if (typeof record.proposalId === "string") {
               ownDraftProposalIds.push(record.proposalId);
+            }
+            // Changes only the phone can make (switching today's session):
+            // carried on the reply for the phone to apply once.
+            if (record.ok === true && typeof record.clientAction === "object" && record.clientAction !== null) {
+              clientActions.push(record.clientAction as Record<string, unknown>);
             }
             return record;
           } catch (error) {
@@ -450,6 +457,7 @@ export async function orchestrateCoachTurn({
         ...(result.toolCalls.length > 0
           ? { toolNames: result.toolCalls.map((call) => call.name) }
           : {}),
+        ...(clientActions.length > 0 ? { clientActions } : {}),
         serverCompletedAt: FieldValue.serverTimestamp(),
       },
       { merge: true },

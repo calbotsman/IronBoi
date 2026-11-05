@@ -8,7 +8,7 @@ struct ExerciseKnowledge: Equatable {
 
     /// Done for time, not counted: a plan's reps for these are seconds.
     /// Kept in step with the server catalog's `timed` (a test checks).
-    static let timed: Set<String> = ["Plank", "Side Plank", "Hollow Body Hold", "Wall Sit", "Superman Hold", "Sandbag Carry", "Farmer Carry", "Suitcase Carry"]
+    static let timed: Set<String> = ["Plank", "Side Plank", "Hollow Body Hold", "Wall Sit", "Superman Hold", "Sandbag Carry", "Farmer Carry", "Suitcase Carry", "Yoga Flow"]
 
     /// A hold, a carry or a cardio block: "Plank", "Weighted Plank", "Farmer
     /// Carry", "Indoor Cycling".
@@ -104,6 +104,7 @@ struct ExerciseKnowledge: Equatable {
         "Zone 2 Walk/Jog": .init(primary: ["Quads", "Hamstrings"], secondary: ["Glutes", "Calves"], cues: ["Use conversational pace", "Try nasal breathing if possible", "Aim for 30-45 minutes", "Build aerobic base"], youtubeVideoId: nil),
         "Foam Rolling": .init(primary: ["Core"], secondary: [], cues: ["Spend 30 seconds per muscle group", "Roll slowly and pause on tender spots", "Breathe into pressure", "Do not roll joints"], youtubeVideoId: nil),
         "Stretching Circuit": .init(primary: ["Core"], secondary: [], cues: ["Hold stretches 30-60 seconds", "Breathe out into stretch", "Never bounce", "Use after training or separately"], youtubeVideoId: nil),
+        "Yoga Flow": .init(primary: ["Core"], secondary: ["Hamstrings", "Hip flexors"], cues: ["Move with your breath", "Ease into each pose, never force it", "Keep your knees soft", "Rest in child's pose whenever you need"], youtubeVideoId: nil),
 
         // MARK: Swap-catalog alternates
         // Every entry below exists because the server's swap catalog
