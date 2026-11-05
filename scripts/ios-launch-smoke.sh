@@ -73,21 +73,32 @@ MARK=$(mktemp -t myo-smoke-mark)
 
 deadline 180 xcrun simctl install "$UDID" "$APP"
 xcrun simctl spawn "$UDID" log stream --style compact --level debug \
-  --predicate "process == \"$EXE\"" >"$LOG" 2>&1 &
+  --predicate "process == \"$EXE\" OR eventMessage CONTAINS \"$BUNDLE_ID\"" >"$LOG" 2>&1 &
 STREAM_PID=$!
 sleep 1
 
-OUT=$(SIMCTL_CHILD_MYO_NO_MIC=1 SIMCTL_CHILD_MYO_PREVIEW=1 \
-  deadline 120 xcrun simctl launch "$UDID" "$BUNDLE_ID") \
-  || { echo "::error::simctl launch failed or hung (120s)"; exit 1; }
-PID="${OUT##*: }"
-echo "Launched $BUNDLE_ID (pid $PID); waiting ${WAIT}s"
-sleep "$WAIT"
-
 fail=0
-if ! kill -0 "$PID" 2>/dev/null; then
-  echo "::error::$EXE (pid $PID) died within ${WAIT}s of launch on $RUNTIME_NAME"
+set +e
+OUT=$(SIMCTL_CHILD_MYO_NO_MIC=1 SIMCTL_CHILD_MYO_PREVIEW=1 \
+  deadline 120 xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>&1)
+rc=$?
+set -e
+echo "$OUT"
+if [ "$rc" != 0 ]; then
+  # 142 = SIGALRM from the deadline. A crash during launch can also make
+  # simctl give up, so collect the crash report and log either way.
+  [ "$rc" = 142 ] && why="hung for 120s" || why="exited $rc"
+  echo "::error::simctl launch failed ($why) on $RUNTIME_NAME"
   fail=1
+  sleep 5
+else
+  PID=$(echo "$OUT" | tail -1 | sed "s/.*: //")
+  echo "Launched $BUNDLE_ID (pid $PID); waiting ${WAIT}s"
+  sleep "$WAIT"
+  if ! kill -0 "$PID" 2>/dev/null; then
+    echo "::error::$EXE (pid $PID) died within ${WAIT}s of launch on $RUNTIME_NAME"
+    fail=1
+  fi
 fi
 NEW=$(find "$REPORTS" -newer "$MARK" -name "$EXE*" 2>/dev/null || true)
 if [ -n "$NEW" ]; then
@@ -98,7 +109,9 @@ fi
 if [ "$fail" = 1 ]; then
   for f in $NEW; do
     echo "----- $f"
-    head -c 6000 "$f"
+    # The .ips header line, then the fields that name the crash.
+    grep -E '"(exception|termination|asi|crashed|type|signal|reason|indicator)"|abort|selector|FIRApp|Firebase' "$f" | head -40
+    head -c 3000 "$f"
     echo
   done
   echo "----- last log lines"
