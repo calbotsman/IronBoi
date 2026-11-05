@@ -2,7 +2,7 @@
 # paths-gated iOS build.
 #
 # functions job — every PR and every push to main.
-# ios job       — only when files under ios/** changed (macOS runners are slow
+# ios job       — only when files under ios/** (or the iOS CI scripts) changed (macOS runners are slow
 #                 and expensive; the cheap `changes` job on ubuntu decides).
 
 name: CI
@@ -88,6 +88,8 @@ jobs:
           filters: |
             ios:
               - 'ios/**'
+              - 'scripts/ios-*.sh'
+              - '.github/workflows/ci.yml'
 
   ios:
     name: ios (xcodebuild, simulator, no signing)
@@ -96,7 +98,7 @@ jobs:
     # macos-15 required: the project is objectVersion 77 (Xcode 16.3+ format);
     # macos-14's Xcode 15 cannot open it.
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -121,6 +123,11 @@ jobs:
       - name: Ensure watchOS platform
         run: xcrun simctl list runtimes | grep -q watchOS || xcodebuild -downloadPlatform watchOS
 
+      # Fails fast if project.yml or the committed project stops bundling
+      # GoogleService-Info.plist (F40, #54).
+      - name: Preflight (GoogleService-Info.plist listed)
+        run: scripts/ios-ci-preflight.sh
+
       # Plain-Swift checks (Watch messages, zones, BLE parsing); no simulator.
       - name: Host tests
         run: scripts/ios-host-tests.sh
@@ -132,8 +139,38 @@ jobs:
           -scheme IronBoi
           -destination 'generic/platform=iOS Simulator'
           -configuration Debug
+          -derivedDataPath build/DerivedData
           build
           CODE_SIGNING_ALLOWED=NO
+
+      # F40: the build succeeds without the plist; the app then aborts in
+      # FIRApp configure. Check the product, not just the project.
+      - name: Bundle check (GoogleService-Info.plist in IronBoi.app)
+        run: |
+          APP=build/DerivedData/Build/Products/Debug-iphonesimulator/IronBoi.app
+          test -d "$APP" || { echo "::error::$APP not found"; exit 1; }
+          if [ ! -f "$APP/GoogleService-Info.plist" ]; then
+            echo "::error::GoogleService-Info.plist is not inside IronBoi.app; Firebase aborts at launch (F40)."
+            exit 1
+          fi
+          /usr/bin/plutil -lint "$APP/GoogleService-Info.plist"
+
+      # F40/F42 both crashed in App.init and passed a build-only CI. Install,
+      # launch, fail if the app is dead or left a crash report after 10 s.
+      # Newest runtime on the newest Xcode the runner has (F42 only crashed
+      # on iOS 26), then the oldest runtime of the default Xcode (closest to
+      # the iOS 17 deployment target that needs no download).
+      - name: Launch smoke test (newest iOS runtime)
+        run: |
+          NEWEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sed -E 's/.*Xcode_([0-9.]+)\.app/\1 &/' | grep -E '^[0-9]' | sort -V | tail -1 | cut -d' ' -f2- || true)
+          if [ -n "$NEWEST" ] && DEVELOPER_DIR="$NEWEST/Contents/Developer" xcrun simctl list runtimes available | grep '^iOS' >/dev/null; then
+            export DEVELOPER_DIR="$NEWEST/Contents/Developer"
+          fi
+          xcodebuild -version
+          scripts/ios-launch-smoke.sh build/DerivedData/Build/Products/Debug-iphonesimulator/IronBoi.app
+
+      - name: Launch smoke test (oldest iOS runtime, default Xcode)
+        run: scripts/ios-launch-smoke.sh build/DerivedData/Build/Products/Debug-iphonesimulator/IronBoi.app oldest
 
       # Pure-logic unit tests (no app host, no backend): the rep-count state
       # machine. Needs a concrete simulator, not the generic destination.
