@@ -96,20 +96,28 @@ final class CoachVoice: NSObject, ObservableObject {
                 self.speakOnDevice(spoken)
                 return
             }
-            var next: Task<Data, Error>? = Task { try await fetchAudio(chunks[0]) }
+            // Each chunk is fetched and decoded off the main thread, two ahead
+            // of the one playing, so the next is ready the moment this ends.
+            // (Decoding used to run on main, and the next fetch only started
+            // once the current chunk had been decoded.)
+            let began = Date()
+            func load(_ chunk: String) -> Task<AVAudioPCMBuffer, Error> {
+                Task.detached { try AudioHub.buffer(fromWAV: try await fetchAudio(chunk)) }
+            }
+            var loads = chunks.prefix(2).map(load)
             for (index, chunk) in chunks.enumerated() {
-                guard gen == self.generation, let pending = next else { return }
+                guard gen == self.generation, index < loads.count else { return }
+                if index + 2 < chunks.count { loads.append(load(chunks[index + 2])) }
                 let buffer: AVAudioPCMBuffer
                 do {
-                    buffer = try AudioHub.buffer(fromWAV: try await pending.value)
+                    buffer = try await loads[index].value
+                    if index == 0 { AudioHub.log("voice timing: first chunk fetched + decoded in \(Int(Date().timeIntervalSince(began) * 1000)) ms") }
                 } catch {
                     guard gen == self.generation else { return }
                     AudioHub.log("voice fetch failed, on-device fallback: \(error.localizedDescription)")
                     self.speakOnDevice(chunks[index...].joined(separator: " "))
                     return
                 }
-                // Download the next chunk while this one plays.
-                next = index + 1 < chunks.count ? Task { try await fetchAudio(chunks[index + 1]) } : nil
                 guard gen == self.generation else { return }
                 self.caption = chunk
                 self.lineIndex = index

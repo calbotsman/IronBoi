@@ -27,7 +27,7 @@ final class AudioHub {
     /// The workout's done: a rising arpeggio.
     private lazy var fanfareBuffer = Self.tone([(523, 0.09), (659, 0.09), (784, 0.09), (1046, 0.28)], gain: 0.28)
     /// Coach's audio format: Cloud TTS LINEAR16 at 24 kHz, mono.
-    static let voiceFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
+    nonisolated static let voiceFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
 
     private var configured = false
     private var engineStarted = false
@@ -391,7 +391,8 @@ final class AudioHub {
     }
 
     /// Decodes Cloud TTS WAV bytes into a buffer the player can schedule.
-    static func buffer(fromWAV data: Data) throws -> AVAudioPCMBuffer {
+    /// Off the main thread is fine (and better: it writes and reads a file).
+    nonisolated static func buffer(fromWAV data: Data) throws -> AVAudioPCMBuffer {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("coach-\(UUID().uuidString).wav")
         try data.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }

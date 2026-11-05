@@ -310,35 +310,77 @@ final class LiveVoiceSession: ObservableObject {
 
     // MARK: - Receiving
 
+    /// Reads the socket off the main thread: each message is parsed and its
+    /// audio decoded on URLSession's queue, the next receive is armed at
+    /// once, and only the result goes to the main thread. Before, the parse,
+    /// base64 and PCM conversion ran on main and the next receive waited for
+    /// them, so any main-thread work (the stage redrawing, a shader) gapped
+    /// or delayed the coach's voice.
     private func receive(on task: URLSessionWebSocketTask, connection mine: Int) {
-        task.receive { [weak self] result in
-            Task { @MainActor in
-                guard let self, mine == self.connection else { return }
-                switch result {
-                case .failure(let error):
-                    AudioHub.log("live: socket closed \(error.localizedDescription)")
-                    if self.state != .idle, self.ready, self.resumeHandle != nil {
-                        self.reconnect(reason: "closed")
-                    } else {
-                        self.end(self.ready ? .closed : .connectFailed)
+        Self.pump(task) { [weak self] incoming in
+            // Main queue, strictly in arrival order.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, mine == self.connection else { return }
+                    switch incoming {
+                    case .failure(let error):
+                        AudioHub.log("live: socket closed \(error.localizedDescription)")
+                        if self.state != .idle, self.ready, self.resumeHandle != nil {
+                            self.reconnect(reason: "closed")
+                        } else {
+                            self.end(self.ready ? .closed : .connectFailed)
+                        }
+                    case .success(let message):
+                        let waited = Self.ms(since: message.receivedAt)
+                        if waited >= 50 { AudioHub.log("live timing: message waited \(waited) ms for the main thread") }
+                        self.handle(message.object, audio: message.audio, socket: task)
                     }
-                case .success(let message):
-                    let data: Data?
-                    switch message {
-                    case .string(let text): data = text.data(using: .utf8)
-                    case .data(let raw): data = raw
-                    @unknown default: data = nil
-                    }
-                    if let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        self.handle(object, socket: task)
-                    }
-                    if mine == self.connection { self.receive(on: task, connection: mine) }
                 }
             }
         }
     }
 
-    private func handle(_ message: [String: Any], socket task: URLSessionWebSocketTask) {
+    /// One received message, already parsed, with its audio decoded.
+    private struct Incoming: @unchecked Sendable {
+        let object: [String: Any]
+        let audio: [AVAudioPCMBuffer]
+        let receivedAt: Date
+    }
+
+    nonisolated private static func pump(_ task: URLSessionWebSocketTask,
+                                         deliver: @escaping @Sendable (Result<Incoming, Error>) -> Void) {
+        task.receive { result in
+            switch result {
+            case .failure(let error):
+                deliver(.failure(error))
+            case .success(let message):
+                // The next one is armed before this one is even parsed.
+                pump(task, deliver: deliver)
+                let receivedAt = Date()
+                let data: Data?
+                switch message {
+                case .string(let text): data = text.data(using: .utf8)
+                case .data(let raw): data = raw
+                @unknown default: data = nil
+                }
+                guard let data, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+                deliver(.success(Incoming(object: object, audio: decodeAudio(in: object), receivedAt: receivedAt)))
+            }
+        }
+    }
+
+    nonisolated private static func decodeAudio(in object: [String: Any]) -> [AVAudioPCMBuffer] {
+        guard let content = object["serverContent"] as? [String: Any],
+              let parts = (content["modelTurn"] as? [String: Any])?["parts"] as? [[String: Any]] else { return [] }
+        return parts.compactMap { part in
+            guard let inline = part["inlineData"] as? [String: Any],
+                  let b64 = inline["data"] as? String,
+                  let pcm = Data(base64Encoded: b64) else { return nil }
+            return buffer(fromPCM16: pcm)
+        }
+    }
+
+    private func handle(_ message: [String: Any], audio: [AVAudioPCMBuffer], socket task: URLSessionWebSocketTask) {
         if let error = message["error"] as? [String: Any] {
             AudioHub.log("live: provider error \(error["code"] ?? "?") \(String(describing: error["status"] ?? ""))")
             end(.providerError)
@@ -390,12 +432,8 @@ final class LiveVoiceSession: ObservableObject {
             turnUser += input
             heard = turnUser
         }
-        if let parts = (content["modelTurn"] as? [String: Any])?["parts"] as? [[String: Any]] {
-            for part in parts {
-                guard let inline = part["inlineData"] as? [String: Any],
-                      let b64 = inline["data"] as? String,
-                      let pcm = Data(base64Encoded: b64),
-                      let buffer = Self.buffer(fromPCM16: pcm) else { continue }
+        if !audio.isEmpty {
+            for buffer in audio {
                 if coachTurnDone { caption = ""; coachTurnDone = false }
                 if !answerAudioLogged {
                     answerAudioLogged = true
@@ -551,7 +589,7 @@ final class LiveVoiceSession: ObservableObject {
             return
         }
         socket.send(.string(json)) { error in
-            if let error { AudioHub.log("live: send failed (\(label.prefix(30))): \(error.localizedDescription)") }
+            if let error { let text = "live: send failed (\(label.prefix(30))): \(error.localizedDescription)"; Task { @MainActor in AudioHub.log(text) } }
         }
         AudioHub.log("live: \(label)")
     }
@@ -561,7 +599,7 @@ final class LiveVoiceSession: ObservableObject {
         outbox = []
         for item in queued {
             task.send(.string(item.json)) { error in
-                if let error { AudioHub.log("live: send failed (\(item.label.prefix(30))): \(error.localizedDescription)") }
+                if let error { let text = "live: send failed (\(item.label.prefix(30))): \(error.localizedDescription)"; Task { @MainActor in AudioHub.log(text) } }
             }
             AudioHub.log("live: \(item.label) (sent after ready)")
         }
@@ -598,7 +636,7 @@ final class LiveVoiceSession: ObservableObject {
 
     /// Gemini sends 24 kHz mono 16-bit PCM; the player takes the hub's
     /// float format at the same rate.
-    static func buffer(fromPCM16 data: Data) -> AVAudioPCMBuffer? {
+    nonisolated static func buffer(fromPCM16 data: Data) -> AVAudioPCMBuffer? {
         let frames = data.count / 2
         guard frames > 0,
               let buffer = AVAudioPCMBuffer(pcmFormat: AudioHub.voiceFormat, frameCapacity: AVAudioFrameCount(frames)),
