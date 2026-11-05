@@ -127,8 +127,13 @@ struct HeartSample: Equatable {
 }
 
 /// Where live heart rate lands, whichever device sends it: the Watch app
-/// (WatchWorkoutLink, Phase 2); Bluetooth straps and AirPods are Phase 3.
-/// The coach context reads `latest`; nothing reads a device directly.
+/// (WatchWorkoutLink), a Bluetooth strap (HeartStrapConnector) or AirPods
+/// through an iPhone workout session (PhoneWorkoutSession, iOS 26). The
+/// coach context reads `latest`; nothing reads a device directly.
+///
+/// When several stream at once the best live one wins: Watch > strap >
+/// AirPods. A source counts as live while its last reading is under
+/// `liveWindow` old; readings from a lower source are ignored meanwhile.
 ///
 /// Interface other code relies on (the atmosphere visuals read it): `latest`,
 /// `sessionPeak`, `zone`, `activeEnergyKcal`, `publish(_:)`, `reset()`. `latest`
@@ -151,6 +156,12 @@ final class HeartRateHub: ObservableObject {
     /// for the coach and visuals; not shown as a number in the app.
     @Published private(set) var activeEnergyKcal: Double?
 
+    /// Best first.
+    static let priority: [HeartSample.Source] = [.watch, .strap, .airpods]
+    /// The Watch sends about every 5 s; a gap of 12 s means it dropped.
+    static let liveWindow: TimeInterval = 12
+    private var lastSeen: [HeartSample.Source: Date] = [:]
+
     /// The last 60 s of readings, oldest first, for the trend.
     private var recent: [(at: Date, bpm: Int)] = []
     /// The reading when the current rest began, for the recovery drop.
@@ -158,6 +169,13 @@ final class HeartRateHub: ObservableObject {
     private var restDrop60: Int?
 
     func publish(_ sample: HeartSample) {
+        lastSeen[sample.source] = sample.at
+        let best = Self.priority.first { source in
+            lastSeen[source].map { sample.at.timeIntervalSince($0) <= Self.liveWindow } ?? false
+        }
+        guard best == sample.source else { return }
+        // A new source: its readings don't trend against the last one's.
+        if let current = latest?.source, current != sample.source { recent = [] }
         recent.append((sample.at, sample.bpm))
         recent.removeAll { sample.at.timeIntervalSince($0.at) > 60 }
         var sample = sample
@@ -192,6 +210,7 @@ final class HeartRateHub: ObservableObject {
         activeEnergyKcal = nil
         zone = nil
         zoneTracker.reset()
+        lastSeen = [:]
         recent = []
         restStart = nil
         restDrop60 = nil

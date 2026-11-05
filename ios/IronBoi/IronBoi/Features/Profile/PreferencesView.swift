@@ -14,6 +14,7 @@ struct PreferencesView: View {
     @State private var reminderNote: String?
     /// Saving finished workouts to Apple Health — also phone-only.
     @ObservedObject private var health = HealthSync.shared
+    @ObservedObject private var strap = HeartStrapConnector.shared
     @State private var healthNote: String?
 
     // Local editing copy. Seeded from appModel.profile on appear and
@@ -151,6 +152,9 @@ struct PreferencesView: View {
             MyoHairline()
             navRow(title: "Conversation", detail: conversationDetail, highlight: false,
                    systemImage: "text.bubble") { ConversationView() }
+            MyoHairline()
+            navRow(title: "Heart rate strap", detail: strap.pairedName ?? "Polar, Wahoo, Garmin broadcast",
+                   highlight: false, systemImage: "heart") { HeartStrapView() }
         }
     }
 

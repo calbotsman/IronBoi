@@ -1,7 +1,7 @@
 import Foundation
 
-/// The workout as the Watch shows it, and what the Watch can do to it.
-/// See WatchWorkoutLink.
+/// Wearables during a workout: what the Watch shows and can do (see
+/// WatchWorkoutLink), the heart-rate strap, and the iPhone workout session.
 extension AppModel {
     /// What the Watch shows right now. Nil outside a workout.
     func watchState() -> WatchWorkoutState? {
@@ -36,24 +36,41 @@ extension AppModel {
         completeNextSet(exerciseIndex: index, reps: exercise.targetReps)
     }
 
-    /// A workout started: open MYO on the Watch, if there is one.
+    /// A workout started: open MYO on the Watch, if there is one; connect
+    /// the paired heart-rate strap; and, with no Watch after 15 s, try
+    /// AirPods heart rate through an iPhone workout session (iOS 26).
     func startWatchWorkout() {
         guard let workout = activeWorkout else { return }
-        WatchWorkoutLink.shared.startWatchWorkout(activityType: HealthSync.activityType(for: workout.workoutName))
+        let activityType = HealthSync.activityType(for: workout.workoutName)
+        WatchWorkoutLink.shared.startWatchWorkout(activityType: activityType)
+        HeartStrapConnector.shared.connect()
+        let id = workout.sessionId
+        Task {
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            guard self.activeWorkout?.sessionId == id else { return }
+            PhoneWorkoutSession.shared.startIfUseful(sessionId: id, activityType: activityType)
+        }
     }
 
-    /// The workout finished. The Watch saves it to Health when it ran it;
-    /// otherwise the phone does (HealthSync), as before.
+    /// The workout finished. Saved to Health once: by the Watch when it ran
+    /// this workout, else by the iPhone workout session when it streamed
+    /// heart rate, else by HealthSync, as before.
     func saveFinishedWorkoutToHealth(sessionId: String, name: String, start: Date, end: Date) {
+        HeartStrapConnector.shared.disconnect()
         Task {
-            let watchSaves = await WatchWorkoutLink.shared.endWorkout(sessionId: sessionId, save: HealthSync.shared.enabled)
-            guard !watchSaves else { return }
+            let save = HealthSync.shared.enabled
+            if await WatchWorkoutLink.shared.endWorkout(sessionId: sessionId, save: save) { return }
+            if await PhoneWorkoutSession.shared.end(save: save, name: name) { return }
             await HealthSync.shared.saveWorkout(sessionId: sessionId, name: name, start: start, end: end)
         }
     }
 
     /// The workout was thrown away: the Watch drops its recording too.
     func discardWatchWorkout(sessionId: String) {
-        Task { _ = await WatchWorkoutLink.shared.endWorkout(sessionId: sessionId, save: false) }
+        HeartStrapConnector.shared.disconnect()
+        Task {
+            _ = await WatchWorkoutLink.shared.endWorkout(sessionId: sessionId, save: false)
+            _ = await PhoneWorkoutSession.shared.end(save: false, name: "")
+        }
     }
 }

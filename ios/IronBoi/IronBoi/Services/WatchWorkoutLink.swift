@@ -128,6 +128,8 @@ final class WatchWorkoutLink: NSObject, ObservableObject {
     private func attach(_ session: HKWorkoutSession) {
         mirrored = session
         session.delegate = self
+        // The Watch is the best heart-rate source; an iPhone session would double-count.
+        PhoneWorkoutSession.shared.yieldToWatch()
         mirroredWorkoutId = appModel?.activeWorkout?.sessionId
         isMirroring = true
         lastSent = nil
