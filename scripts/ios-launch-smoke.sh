@@ -36,8 +36,14 @@ if not rts:
     sys.exit("no matching iOS simulator runtime")
 pick = min if want == "oldest" else max
 rt = pick(rts, key=lambda r: tuple(int(x) for x in r["version"].split(".")))
-phones = [d["identifier"] for d in rt["supportedDeviceTypes"] if d.get("productFamily") == "iPhone"]
-print(rt["identifier"], phones[-1], rt["name"].replace(" ", "_"))
+import re
+phones = [d for d in rt["supportedDeviceTypes"] if d.get("productFamily") == "iPhone"]
+# Newest plain model: highest number, no "e"/"Plus"/"Max"/"mini" variant.
+def rank(d):
+    n = re.search(r"iPhone (\d+)", d["name"])
+    plain = re.fullmatch(r"iPhone \d+( Pro)?", d["name"]) is not None
+    return (plain, int(n.group(1)) if n else 0)
+print(rt["identifier"], max(phones, key=rank)["identifier"], rt["name"].replace(" ", "_"))
 ' "$RUNTIME")
 [ -n "${DEVTYPE:-}" ] || { echo "::error::no usable iOS simulator runtime${RUNTIME:+ ($RUNTIME)}"; exit 1; }
 echo "Runtime: $RUNTIME_NAME ($RUNTIME), device: $DEVTYPE"
