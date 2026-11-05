@@ -8,9 +8,11 @@ enum WorkoutCoaching {
 
     /// "3 sets of 10", "3 sets of 30 s", "1 set of 8" — spelled out, so
     /// nobody has to decode "3 × 10".
-    static func setsOf(_ sets: Int, _ reps: Int, timed: Bool, minutes: Bool = false) -> String {
-        if minutes { return sets == 1 ? "\(reps) min" : "\(sets) × \(reps) min" }
-        return "\(sets) \(sets == 1 ? "set" : "sets") of \(reps)\(timed ? " s" : "")"
+    static func setsOf(_ sets: Int, _ reps: Int, name: String) -> String {
+        if ExerciseKnowledge.isCardio(name) || ExerciseKnowledge.legacyMinutes.contains(name) {
+            return ExerciseKnowledge.durationText(seconds: ExerciseKnowledge.seconds(name, target: reps) * max(1, sets))
+        }
+        return "\(sets) \(sets == 1 ? "set" : "sets") of \(reps)\(ExerciseKnowledge.isTimed(name) ? " s" : "")"
     }
 
     // MARK: - Stretches and warm-ups

@@ -10,22 +10,57 @@ struct ExerciseKnowledge: Equatable {
     /// Kept in step with the server catalog's `timed` (a test checks).
     static let timed: Set<String> = ["Plank", "Side Plank", "Hollow Body Hold", "Wall Sit", "Superman Hold", "Sandbag Carry", "Farmer Carry", "Suitcase Carry"]
 
-    /// A hold or a carry: "Plank", "Weighted Plank", "Farmer Carry".
-    /// Easy cardio a plan prescribes in MINUTES (reps = minutes): a fat-loss
-    /// plan's zone-2 days. Timed like a hold, just longer.
-    static let minutes: Set<String> = ["Zone 2 Walk/Jog", "Incline Walk"]
+    /// A fat-loss plan prescribes these in MINUTES (reps 30 = 30 minutes,
+    /// functions/src/onboarding/flow.ts addFatLossWork) so the plan-change
+    /// tool's reps cap still fits; every other timed item is in seconds.
+    /// `seconds` reads a target of 90 or less on these as minutes. What's
+    /// logged is always seconds (the server's durationSec).
+    static let legacyMinutes: Set<String> = ["Zone 2 Walk/Jog", "Incline Walk"]
 
-    static func isMinutes(_ exerciseName: String) -> Bool { minutes.contains(exerciseName) }
-
-    /// How long one timed set lasts, in seconds.
+    /// How long one timed set lasts, in seconds: a hold tops out at ten
+    /// minutes, cardio at three hours.
     static func seconds(_ exerciseName: String, target: Int) -> Int {
-        isMinutes(exerciseName) ? max(1, min(target, 90)) * 60 : max(5, min(target, 600))
+        if legacyMinutes.contains(exerciseName), target <= 90 { return max(1, target) * 60 }
+        return max(5, min(target, isCardio(exerciseName) ? 3 * 3600 : 600))
     }
 
+    /// A hold, a carry or a cardio block: "Plank", "Weighted Plank", "Farmer
+    /// Carry", "Indoor Cycling".
     static func isTimed(_ exerciseName: String) -> Bool {
-        if timed.contains(exerciseName) || minutes.contains(exerciseName) { return true }
+        if timed.contains(exerciseName) || isCardio(exerciseName) || legacyMinutes.contains(exerciseName) { return true }
         let lower = exerciseName.lowercased()
         return timed.contains { lower.contains($0.lowercased()) }
+    }
+
+    /// Cardio done for minutes, not sets: a bike, a run, the rower. One
+    /// "set" whose reps are seconds, like a hold. Same words as the server's
+    /// `CARDIO_PATTERN` (functions/src/workouts/exerciseCatalog.ts).
+    static let cardioPattern = #"\b(cycling|cycle|bike|biking|spin|spinning|peloton|run|running|jog|jogging|treadmill|rowing|rower|erg|elliptical|stair ?master|stair ?climber|stairs|walk|walking|incline walk|swim|swimming|jump rope|skipping rope|cardio|zone 2|assault bike|air ?bike|ski ?erg|hike|hiking)\b"#
+
+    /// Lifts that share a cardio word: "Walking Lunges", "Farmer Walk".
+    static let notCardioPattern = #"\b(lunges?|carry|carries|farmer|suitcase|overhead|plank)\b"#
+
+    static func isCardio(_ exerciseName: String) -> Bool {
+        let lower = exerciseName.lowercased()
+        return lower.range(of: cardioPattern, options: .regularExpression) != nil
+            && lower.range(of: notCardioPattern, options: .regularExpression) == nil
+    }
+
+    /// "20 min", "1 h 15 min", "45 s" for a timed target in seconds.
+    static func durationText(seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds) s" }
+        let minutes = (seconds + 30) / 60
+        if minutes < 60 { return "\(minutes) min" }
+        return minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min"
+    }
+
+    /// The same, said out loud: "20 minutes", "an hour", "45 seconds".
+    static func spokenDuration(seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds) seconds" }
+        let minutes = (seconds + 30) / 60
+        if minutes == 60 { return "an hour" }
+        if minutes == 30 { return "30 minutes" }
+        return minutes == 1 ? "a minute" : "\(minutes) minutes"
     }
 
     static func lookup(_ exerciseName: String) -> ExerciseKnowledge {

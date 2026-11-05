@@ -839,6 +839,23 @@ final class AppModel: NSObject, ObservableObject {
         return index
     }
 
+    /// Adds a cardio block (a bike, a run) to today's workout: one timed
+    /// "set" whose reps are seconds, like a plank. Returns its index.
+    @discardableResult
+    func addCardioBlock(name: String, minutes: Int) -> Int? {
+        guard var workout = activeWorkout else { return nil }
+        let minutes = max(1, min(minutes, 180))
+        let index = workout.exercises.count
+        workout.exercises.append(ActiveWorkoutExercise(
+            exerciseIndex: index, name: name, targetSets: 1, targetReps: minutes * 60, targetWeight: 0,
+            completedSets: [ActiveWorkoutSet(setIndex: 0, completed: false, reps: nil, weight: nil)],
+            exerciseDone: false, notes: nil))
+        workout.updatedAt = Self.isoString(from: Date())
+        activeWorkout = workout
+        sessionChanges.append("Added \(name), \(minutes) min")
+        return index
+    }
+
     /// The live coach asked the body to demonstrate a lift.
     struct ShowRequest: Equatable {
         let id = UUID()
@@ -1198,6 +1215,10 @@ final class AppModel: NSObject, ObservableObject {
             lastRecap = response.recap
             pendingEffortSessionId = activeWorkout.sessionId
             TrainingReminders.shared.markTrainedToday()
+            if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
+                let (id, name) = (activeWorkout.sessionId, activeWorkout.workoutName)
+                Task { await HealthSync.shared.saveWorkout(sessionId: id, name: name, start: start, end: end) }
+            }
             self.activeWorkout = response.activeWorkout.status == .active ? response.activeWorkout : nil
             pendingSessionChanges = changes
             // Surface the rebaseline card. Nothing has been written yet —

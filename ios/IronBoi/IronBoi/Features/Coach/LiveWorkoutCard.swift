@@ -215,8 +215,8 @@ struct LiveWorkoutCard: View {
                         .foregroundStyle(exercise.exerciseDone ? MyoColor.Text.tertiary.color : MyoColor.Text.primary.color)
                         .strikethrough(exercise.exerciseDone, color: MyoColor.Text.tertiary.color)
                         .lineLimit(2)
-                    Text(WorkoutCoaching.setsOf(exercise.targetSets, exercise.targetReps, timed: ExerciseKnowledge.isTimed(exercise.name), minutes: ExerciseKnowledge.isMinutes(exercise.name)))
-                        .font(.system(.caption))
+                    Text(Self.targetText(exercise))
+                        .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                 }
                 .contentShape(Rectangle())
@@ -231,7 +231,7 @@ struct LiveWorkoutCard: View {
                 if exercise.targetWeight > 0 {
                     weightStepper(exercise)
                 } else {
-                    Text("bodyweight")
+                    Text(ExerciseKnowledge.isCardio(exercise.name) ? "cardio" : "bodyweight")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                 }
@@ -303,7 +303,18 @@ struct LiveWorkoutCard: View {
         .accessibilityLabel(label)
     }
 
+    /// "3 × 10", "3 × 30 s" for a hold, "20 min" for a cardio block.
+    static func targetText(_ exercise: ActiveWorkoutExercise) -> String {
+        if ExerciseKnowledge.isCardio(exercise.name) {
+            return ExerciseKnowledge.durationText(seconds: ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps) * max(1, exercise.targetSets))
+        }
+        return "\(exercise.targetSets) × \(exercise.targetReps)\(ExerciseKnowledge.isTimed(exercise.name) ? " s" : "")"
+    }
+
     private func nextSetLine(_ exercise: ActiveWorkoutExercise) -> String {
+        if ExerciseKnowledge.isCardio(exercise.name) {
+            return "\(ExerciseKnowledge.durationText(seconds: ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps))) · starts when you're moving, or say go"
+        }
         let next = min(exercise.completedSetCount + 1, exercise.targetSets)
         let weight = appModel.workingWeight(for: exercise)
         let load = weight > 0 ? " · \(Self.pounds(weight)) lb" : ""

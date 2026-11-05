@@ -48,6 +48,13 @@ struct CoachStageView: View {
     /// A short on-screen note under the coach ("Your workout's ready…"),
     /// for when it isn't spoken, or as well as.
     @State private var notice: String?
+    /// Captions mode (Coach doesn't talk): the last reply, on screen above
+    /// what you're saying, since it isn't heard.
+    @State private var captionReply: String?
+    /// The Sound sheet: voice on/off, Coach's level, how much music dips.
+    @State private var showSound = false
+    /// Captions mode: tap the caption for the whole thread; pull down to close.
+    @State private var showThread = false
     /// The message being handled was typed, not said.
     @State private var typedTurn = false
     /// Message ids that existed when a typed message went out; the first new
@@ -818,6 +825,31 @@ struct CoachStageView: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// Voice turned off mid-conversation: stop talking now; live voice
+    /// only talks, so the regular coach takes over in captions.
+    private func voiceSettingChanged(_ on: Bool) {
+        guard !on else { captionReply = nil; return }
+        if live.isActive {
+            endConversation()
+            talkTapped(fromMic: true)
+        } else if voice.isSpeaking {
+            captionReply = voice.spokenText
+            voice.stop()
+        }
+    }
+
+    /// Under a caption: there's more above it.
+    private var threadHint: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "text.bubble").font(.caption2)
+            Text("Thread")
+        }
+        .myoStyle(.label)
+        .textCase(.uppercase)
+        .foregroundStyle(MyoColor.Text.tertiary.color)
+        .accessibilityLabel("Open the conversation")
+    }
+
     /// The plan's training days, in week order ("Mon", "Wed"…).
     private var trainingDayKeys: [String] {
         ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].filter { key in
@@ -851,6 +883,32 @@ struct CoachStageView: View {
                 .multilineTextAlignment(.center)
                 .frame(minHeight: 88, alignment: .top)
                 .transition(.opacity)
+        case .listening where !speaksReplies && captionReply != nil:
+            // Captions mode: Coach's answer, then what you're saying now.
+            // A step under body size so a full answer fits; tap for the thread.
+            VStack(spacing: MyoTheme.Spacing.sm) {
+                Text(captionReply ?? "")
+                    .font(.callout)
+                    .foregroundStyle(MyoColor.Text.primary.color)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(2)
+                    .lineLimit(9)
+                    .minimumScaleFactor(0.85)
+                if !voiceInput.transcript.isEmpty {
+                    Text(voiceInput.transcript)
+                        .font(.footnote)
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+                threadHint
+            }
+            .frame(minHeight: 88, alignment: .top)
+            .contentShape(Rectangle())
+            .onTapGesture { showThread = true }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Shows the whole conversation")
+            .transition(.opacity)
         case .listening:
             // In live voice, Gemini's own hearing of you (it's better than the
             // phone's in a noisy gym); otherwise the phone's.
@@ -893,15 +951,21 @@ struct CoachStageView: View {
         case .rest:
             if !speaksReplies, let message = lastCoachMessage {
                 // Muted: text is the only way the reply reaches you.
-                ScrollView {
-                    Text(message.content)
-                        .myoStyle(.body)
-                        .foregroundStyle(MyoColor.Text.primary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: MyoTheme.Spacing.sm) {
+                    ScrollView {
+                        Text(message.content)
+                            .font(.callout)
+                            .lineSpacing(2)
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(maxHeight: 220)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Button { showThread = true } label: { threadHint }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows the whole conversation")
                 }
-                .scrollIndicators(.hidden)
-                .frame(maxHeight: 200)
-                .fixedSize(horizontal: false, vertical: true)
             } else if lastCoachMessage == nil {
                 Text("Tell Coach how training's going, ask about today's session, or say what hurts.")
                     .myoStyle(.body)
@@ -929,7 +993,8 @@ struct CoachStageView: View {
                     }
                     if currentExercise.map({ ExerciseKnowledge.isTimed($0.name) }) == true {
                         if holdEndsAt == nil {
-                            quickTap("Start hold", systemImage: "timer") { startHold() }
+                            quickTap(currentExercise.map { ExerciseKnowledge.isCardio($0.name) } == true ? "Start timer" : "Start hold",
+                                     systemImage: "timer") { startHold() }
                         } else {
                             quickTap("Done", systemImage: "checkmark") { finishHold(early: true) }
                         }
@@ -1243,6 +1308,7 @@ struct CoachStageView: View {
                 }
                 .zIndex(1)
             }
+            soundButton.zIndex(1)
             // Mid-workout the mic is usually open, so the pills stay up then too.
             if phase == .rest || (phase == .listening && currentExerciseIndex != nil) {
                 quickTaps.transition(.opacity)
@@ -1252,6 +1318,24 @@ struct CoachStageView: View {
         }
         }
         .animation(MyoTheme.Motion.fade, value: showIsolationTip)
+        .sheet(isPresented: $showSound) { SoundMixSheet(canRetake: !live.isActive) }
+        // Pull down to close; the mic keeps listening underneath.
+        .sheet(isPresented: $showThread) {
+            NavigationStack { ConversationView() }
+                .environmentObject(appModel)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .onChange(of: speaksReplies) { _, on in voiceSettingChanged(on) }
+    }
+
+    /// Coach's voice against your music, one tap away mid-set. Shows
+    /// captions when Coach is set not to talk.
+    private var soundButton: some View {
+        sideButton(systemImage: speaksReplies ? "speaker.wave.2" : "captions.bubble",
+                   label: speaksReplies ? "Sound: Coach talks" : "Sound: captions only") {
+            showSound = true
+        }
     }
 
     /// iOS's Voice Isolation mic mode filters out everyone but you — kids,
@@ -1331,7 +1415,8 @@ struct CoachStageView: View {
     private var statusLine: String {
         if let holdEndsAt, appModel.activeWorkout != nil {
             let left = max(0, Int(holdEndsAt.timeIntervalSinceNow.rounded(.up)))
-            return String(format: "Hold · %d:%02d", left / 60, left % 60)
+            let label = currentExercise.map { ExerciseKnowledge.isCardio($0.name) } == true ? "Cardio" : "Hold"
+            return String(format: "%@ · %d:%02d", label, left / 60, left % 60)
         }
         if let restEndsAt, appModel.activeWorkout != nil {
             let left = max(0, Int(restEndsAt.timeIntervalSinceNow.rounded(.up)))
@@ -1368,7 +1453,8 @@ struct CoachStageView: View {
             endConversation()
             return
         }
-        if LiveVoiceSession.enabled, !conversationActive {
+        // Live voice only talks: in captions mode the regular coach listens.
+        if LiveVoiceSession.enabled, speaksReplies, !conversationActive {
             startLive()
             return
         }
@@ -1483,7 +1569,7 @@ struct CoachStageView: View {
                 lines += ExerciseLesson.beats(for: motion).map(\.line)
             }
             for set in 1...max(1, exercise.targetSets) { lines.append("Set \(set) done.") }
-            if timed, !ExerciseKnowledge.isMinutes(exercise.name) { lines.append("Go. \(ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps)) seconds.") }
+            if timed, !ExerciseKnowledge.isCardio(exercise.name) { lines.append("Go. \(ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps)) seconds.") }
             lines += ExerciseKnowledge.lookup(exercise.name).cues.map { cue in
                 "On the next set, " + cue.prefix(1).lowercased() + cue.dropFirst().trimmingCharacters(in: .punctuationCharacters) + "."
             }
@@ -2408,9 +2494,18 @@ struct CoachStageView: View {
     private func handleHoldCommand(_ text: String) -> Bool {
         guard let exercise = currentExercise, ExerciseKnowledge.isTimed(exercise.name) else { return false }
         let t = text.lowercased()
+        // "Add a run now" adds one; it doesn't start this timer.
+        if holdEndsAt == nil, WorkoutEdit.cardioRequest(t) != nil { return false }
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         if holdEndsAt != nil {
-            guard says(#"\b(done|stop|finished|that's it|that's all|enough|can't|cannot|i'm out|im out)\b"#) else { return false }
+            // A cardio block runs for minutes while you chat: only a clear
+            // "done" ends it, not "I can't hear the music".
+            if ExerciseKnowledge.isCardio(exercise.name) {
+                guard t.split(separator: " ").count <= 6,
+                      says(#"\b(done|finished|stop the timer|stop|that's it|that's all)\b"#) else { return false }
+            } else {
+                guard says(#"\b(done|stop|finished|that's it|that's all|enough|can't|cannot|i'm out|im out)\b"#) else { return false }
+            }
             finishHold(early: true)
             return true
         }
@@ -2425,6 +2520,7 @@ struct CoachStageView: View {
         holdCountdownTask = nil
         if restEndsAt != nil { cancelRest() }
         let seconds = ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps)
+        let cardio = ExerciseKnowledge.isCardio(exercise.name)
         let start = Date()
         let ends = start.addingTimeInterval(TimeInterval(seconds))
         holdStartedAt = start
@@ -2432,8 +2528,9 @@ struct CoachStageView: View {
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         AudioHub.shared.play(cue: .tick)
         if speaksReplies, tips != .quiet {
-            voice.speak(seconds >= 120 ? "Go. \(seconds / 60) minutes, easy pace." : "Go. \(seconds) seconds.",
-                        messageId: "local-\(UUID().uuidString)")
+            let line = cardio ? "Go. \(ExerciseKnowledge.spokenDuration(seconds: seconds)). Say done when you're finished."
+                : "Go. \(seconds) seconds."
+            voice.speak(line, messageId: "local-\(UUID().uuidString)")
         }
         holdTask?.cancel()
         holdTask = Task {
@@ -2450,7 +2547,7 @@ struct CoachStageView: View {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } else if !saidHalfway, seconds >= 30, left == seconds / 2, tips == .full, speaksReplies, !voice.isSpeaking {
                     saidHalfway = true
-                    voice.speak("Halfway. Breathe.", messageId: "local-\(UUID().uuidString)")
+                    voice.speak(cardio ? "Halfway. Keep it steady." : "Halfway. Breathe.", messageId: "local-\(UUID().uuidString)")
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
@@ -2467,14 +2564,16 @@ struct CoachStageView: View {
         let target = ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps)
         let held = early ? max(1, min(target, Int(Date().timeIntervalSince(started).rounded()))) : target
         cancelHold()
-        // Cardio is logged in minutes (its reps are minutes), holds in seconds.
-        let minutes = ExerciseKnowledge.isMinutes(exercise.name)
-        let logged = minutes ? max(1, Int((Double(held) / 60).rounded())) : held
-        guard let set = appModel.completeNextSet(exerciseIndex: index, reps: logged) else { return }
+        // Logged in seconds, holds and cardio alike (the server's durationSec).
+        guard let set = appModel.completeNextSet(exerciseIndex: index, reps: held) else { return }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         AudioHub.shared.play(cue: .target)
-        let head = held >= target ? (minutes ? "That's your \(logged) minutes." : "Set \(set) done.")
-            : minutes ? "\(logged) minutes. Good." : "Set \(set): \(held) seconds."
+        let head: String
+        if ExerciseKnowledge.isCardio(exercise.name) {
+            head = "\(exercise.name) done, \(ExerciseKnowledge.spokenDuration(seconds: held)) logged."
+        } else {
+            head = held < target ? "Set \(set): \(held) seconds." : "Set \(set) done."
+        }
         let line = afterSet(head, exerciseIndex: index)
         markRestartHandled()
         voiceInput.stop()
@@ -2602,6 +2701,8 @@ struct CoachStageView: View {
     private func handleRestCommand(_ text: String) -> Bool {
         guard restEndsAt != nil else { return false }
         let t = text.lowercased()
+        // "Add 20 minutes on the bike" is a cardio block, not more rest.
+        if WorkoutEdit.cardioRequest(t) != nil { return false }
         func says(_ p: String) -> Bool { t.range(of: p, options: .regularExpression) != nil }
         // Only the bare command: "skip the squats" is an edit, not "skip rest".
         if says(#"^\W*(okay |ok |alright )?(skip|skip rest|skip the rest|go|ready|let's go|lets go|next set|i'm ready|im ready|ready to go)\W*$"#) {
@@ -2641,6 +2742,16 @@ struct CoachStageView: View {
                 confirm("Added \(name). Let's do it now.")
             } else {
                 confirm("Added \(name), \(s) sets of \(r).")
+            }
+        case .addCardio(let name, let minutes, let now):
+            guard let index = appModel.addCardioBlock(name: name, minutes: minutes) else { return }
+            let length = ExerciseKnowledge.spokenDuration(seconds: minutes * 60)
+            let lowered = name.prefix(1) + name.dropFirst().lowercased()
+            if now || currentExerciseIndex == index {
+                appModel.focusExercise(index)
+                confirm("\(lowered), \(length). Let's do it now.")
+            } else {
+                confirm("Got it: \(lowered), \(length), added at the end.")
             }
         case .swap(let index, let name):
             let old = workout.exercises[index].name
@@ -3239,8 +3350,9 @@ struct CoachStageView: View {
             let load = weight > 0 ? " at \(LiveWorkoutCard.pounds(weight))" : ""
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
             let side = eachSide(exercise.name) ? " each side" : ""
-            if ExerciseKnowledge.isMinutes(exercise.name) {
-                lines.append("\(lead), \(exercise.name). \(exercise.targetReps) minutes, easy pace: you should be able to talk. I'll start the clock when you're moving.")
+            if ExerciseKnowledge.isCardio(exercise.name) {
+                let length = ExerciseKnowledge.spokenDuration(seconds: ExerciseKnowledge.seconds(exercise.name, target: exercise.targetReps) * max(1, exercise.targetSets))
+                lines.append("\(lead), \(exercise.name). \(length), easy pace: you should be able to talk. I'll start the clock when you're moving, or say go.")
             } else if timed {
                 lines.append("\(lead), \(exercise.name). \(exercise.targetSets) holds of \(exercise.targetReps) seconds\(side)\(load). I'll start the clock once you're in position.")
             } else {
@@ -3577,7 +3689,14 @@ struct CoachStageView: View {
             try? AudioHub.shared.start()
             voiceInput.listen()
         } else {
-            // Muted: the reply is on screen; go straight back to listening.
+            // Captions mode: the reply is on screen; straight back to listening.
+            let shown = CoachVoice.speakable(reply.content)
+            withAnimation(MyoTheme.Motion.fade) { captionReply = shown }
+            // Long enough to read between reps, then out of the way.
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(min(45, 12 + Double(shown.count) / 12) * 1_000_000_000))
+                if captionReply == shown { withAnimation(MyoTheme.Motion.fade) { captionReply = nil } }
+            }
             resumeListening()
         }
     }

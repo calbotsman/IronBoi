@@ -254,9 +254,26 @@ const ALIASES: Record<string, string> = {
   lunge: "Walking Lunges",
 };
 
-/** Done for time (a hold or a carry): the plan's reps are seconds. */
+/** Done for time (a hold, a carry or cardio): the plan's reps are seconds. */
 export function isTimedExercise(name: unknown): boolean {
-  return typeof name === "string" && lookupExercise(name)?.timed === true;
+  return typeof name === "string" && (lookupExercise(name)?.timed === true || isCardioExercise(name));
+}
+
+// Cardio added to a workout ("I'm adding indoor cycling today", "20 minutes
+// on the bike"): one timed set whose reps are seconds, like a plank. Not
+// catalog entries — they never swap for a lift — just recognised by name.
+// Same words as the app (ios Models/ExerciseKnowledge.swift cardioPattern;
+// a test keeps the two in step).
+export const CARDIO_PATTERN =
+  "\\b(cycling|cycle|bike|biking|spin|spinning|peloton|run|running|jog|jogging|treadmill|rowing|rower|erg|elliptical|stair ?master|stair ?climber|stairs|walk|walking|incline walk|swim|swimming|jump rope|skipping rope|cardio|zone 2|assault bike|air ?bike|ski ?erg|hike|hiking)\\b";
+// Lifts that share a cardio word: "Walking Lunges", "Farmer Walk".
+export const NOT_CARDIO_PATTERN = "\\b(lunges?|carry|carries|farmer|suitcase|overhead|plank)\\b";
+const CARDIO = new RegExp(CARDIO_PATTERN, "i");
+const NOT_CARDIO = new RegExp(NOT_CARDIO_PATTERN, "i");
+
+/** A cardio block ("Indoor Cycling", "Run", "Rowing"), done for minutes. */
+export function isCardioExercise(name: unknown): boolean {
+  return typeof name === "string" && CARDIO.test(name) && !NOT_CARDIO.test(name);
 }
 
 export function lookupExercise(name: string): CatalogEntry | undefined {

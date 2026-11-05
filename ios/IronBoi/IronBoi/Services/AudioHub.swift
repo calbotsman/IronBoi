@@ -1,4 +1,5 @@
 import AVFoundation
+import UIKit
 
 /// One audio engine for both sides of the conversation: the mic going in and
 /// Coach's voice coming out. Sharing it is what lets iOS voice processing
@@ -13,6 +14,14 @@ final class AudioHub {
     /// Short cues (a tick per counted rep, a two-note at target) on their
     /// own node, so they never queue behind Coach's sentences.
     private let cuePlayer = AVAudioPlayerNode()
+    /// Coach's voice and cues pass through here on the way out: a gain
+    /// (the voice-level slider, plus a lift when the music dip is light)
+    /// and a limiter so the lift never clips.
+    private let voiceBus = AVAudioMixerNode()
+    private let lift = AVAudioUnitEQ(numberOfBands: 0)
+    private let limiter = AVAudioUnitEffect(audioComponentDescription: AudioComponentDescription(
+        componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_PeakLimiter,
+        componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0))
     private lazy var tickBuffer = Self.tone([(1046, 0.06)], gain: 0.22)
     private lazy var targetBuffer = Self.tone([(880, 0.08), (1318, 0.12)], gain: 0.26)
     /// The workout's done: a rising arpeggio.
@@ -123,14 +132,8 @@ final class AudioHub {
         // .mixWithOthers added, so an equality test was always false and
         // re-set the category every time Coach spoke: the route flipped to
         // the earpiece and back mid-set, and words were lost in the flips.
-        let options = Self.categoryOptions(headphones: Self.headphones(in: session.currentRoute) || headphonesConnected)
-        // The ducking setting changed (headphones in or out): re-set, but only
-        // then — see categoryOptions.
-        let base = options.subtracting([.duckOthers, .mixWithOthers])
-        let duckChanged = session.categoryOptions.contains(.duckOthers) != options.contains(.duckOthers)
-        if session.category != .playAndRecord || !session.categoryOptions.isSuperset(of: base)
-            || (duckChanged && !sessionActive) {
-            try session.setCategory(.playAndRecord, mode: .default, options: options)
+        if needsCategory(session) {
+            try session.setCategory(.playAndRecord, mode: .default, options: Self.categoryOptions)
             Self.log("category set: options=\(session.categoryOptions.rawValue)")
         }
         try session.setActive(true, options: .notifyOthersOnDeactivation)
@@ -138,21 +141,24 @@ final class AudioHub {
         if Self.headphones(in: session.currentRoute) { headphonesConnected = true }
 
         if !configured {
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: Self.voiceFormat)
-            // Over full-volume music the coach was too loud: a touch lower.
-            player.volume = 0.8
-            engine.attach(cuePlayer)
-            engine.connect(cuePlayer, to: engine.mainMixerNode, format: Self.voiceFormat)
+            for node in [player, cuePlayer, voiceBus, lift, limiter] as [AVAudioNode] { engine.attach(node) }
+            engine.connect(player, to: voiceBus, format: Self.voiceFormat)
+            engine.connect(cuePlayer, to: voiceBus, format: Self.voiceFormat)
+            engine.connect(voiceBus, to: lift, format: Self.voiceFormat)
+            engine.connect(lift, to: limiter, format: Self.voiceFormat)
+            engine.connect(limiter, to: engine.mainMixerNode, format: Self.voiceFormat)
             configured = true
         }
+        applyLevels()
 
         // Echo cancellation only where it's needed and safe: Coach on the
         // phone's own speaker, nothing else playing. Voice processing can't
         // run with Bluetooth headphones — iOS pulls the audio off them onto
         // the speaker — and with headphones the mic can't hear Coach
         // anyway. With music playing it fights the other app's audio.
-        let wanted = !echoCancellationRefused && !headphonesConnected && !session.isOtherAudioPlaying
+        // Captions mode: Coach doesn't talk, so there's nothing to cancel —
+        // and voice processing would dip your music.
+        let wanted = wantsEchoCancellation(session)
         if (reconfigure || !engineStarted), wanted != engine.inputNode.isVoiceProcessingEnabled, !player.isPlaying {
             if engine.isRunning { engine.stop() }
             do {
@@ -160,7 +166,7 @@ final class AudioHub {
                 if wanted, #available(iOS 17.0, *) {
                     // Other audio dips only while someone's actually talking.
                     engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration =
-                        .init(enableAdvancedDucking: true, duckingLevel: .mid)
+                        .init(enableAdvancedDucking: true, duckingLevel: CoachMix.dip == .full ? .mid : .min)
                 }
             } catch {
                 // The simulator and some routes refuse it; the app still
@@ -174,6 +180,48 @@ final class AudioHub {
             try engine.start()
             engineStarted = true
         }
+    }
+
+    private func wantsEchoCancellation(_ session: AVAudioSession) -> Bool {
+        !echoCancellationRefused && CoachMix.voiceOn && !headphonesConnected && !session.isOtherAudioPlaying
+    }
+
+    /// The session isn't set up the way the mix wants it. Compared on
+    /// .duckOthers itself: iOS adds .mixWithOthers whenever we ask for
+    /// ducking, so a plain equality test was always false.
+    private func needsCategory(_ session: AVAudioSession) -> Bool {
+        let wanted = Self.categoryOptions
+        return session.category != .playAndRecord
+            || session.categoryOptions.contains(.duckOthers) != wanted.contains(.duckOthers)
+            || !session.categoryOptions.isSuperset(of: wanted)
+    }
+
+    /// Coach's level, as set now. Cheap; safe any time.
+    private func applyLevels() {
+        lift.globalGain = CoachMix.voiceGainDB()
+    }
+
+    /// The voice, level or dip setting changed. Levels apply at once. If
+    /// the music's dip has to change (or echo cancellation, which dips it
+    /// too), the session is let go and taken back — iOS only brings other
+    /// audio back up when an app releases its session — and the mic is
+    /// reopened on the new setup. `retake: false` (live voice owns the mic
+    /// and can't reopen it) leaves the dip for the next session.
+    func applyMix(retake: Bool = true) {
+        applyLevels()
+        guard retake else { return }
+        let session = AVAudioSession.sharedInstance()
+        let echoWrong = engineStarted && engine.inputNode.isVoiceProcessingEnabled != wantsEchoCancellation(session)
+        guard sessionActive, needsCategory(session) || echoWrong else { return }
+        Self.log("mix changed: voice=\(CoachMix.voiceOn) dip=\(CoachMix.dip.rawValue) — retaking the session")
+        player.stop()
+        cuePlayer.stop()
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        sessionActive = false
+        do { try start(reconfigure: true) } catch { Self.log("mix: restart failed \(error.localizedDescription)") }
+        NotificationCenter.default.post(name: Self.resetNotification, object: nil)
     }
 
     /// You can talk over Coach without the mic hearing Coach: its voice is
@@ -232,15 +280,12 @@ final class AudioHub {
     /// releases its session, and that closes the mic. Raising it after
     /// every sentence meant a deaf mic after every sentence.
     ///
-    /// So with headphones the music isn't lowered at all (unless you turn
-    /// it on): it stays full and the coach talks over it, a touch quieter.
-    /// On the phone's speaker the music shares the speaker with the coach,
-    /// so it's lowered or you couldn't hear a word. Set when the session
-    /// starts, never mid-sentence (that flipped the route).
-    static let duckMusicKey = "duckMusicWithHeadphones"
-    private static func categoryOptions(headphones: Bool) -> AVAudioSession.CategoryOptions {
-        let duck = !headphones || UserDefaults.standard.bool(forKey: duckMusicKey)
-        return [.defaultToSpeaker, .allowBluetoothA2DP, duck ? .duckOthers : .mixWithOthers]
+    /// Only the Full dip asks iOS to duck. Off, Light and captions mode
+    /// mix with your music and never lower or pause it.
+    private static var categoryOptions: AVAudioSession.CategoryOptions {
+        CoachMix.voiceOn && CoachMix.dip == .full
+            ? [.defaultToSpeaker, .duckOthers, .allowBluetoothA2DP]
+            : [.defaultToSpeaker, .mixWithOthers, .allowBluetoothA2DP]
     }
 
     /// Plays one buffer of Coach's voice; returns when it has been heard (or
@@ -267,8 +312,16 @@ final class AudioHub {
 
     /// A rep was heard (tick) or the set reached its target (two notes).
     /// Plays over Coach's voice and your music; silent if the engine is
-    /// down, which only happens outside a conversation.
+    /// down, which only happens outside a conversation. In captions mode
+    /// it buzzes instead: nothing over your music.
     func play(cue: Cue) {
+        guard CoachMix.voiceOn else {
+            switch cue {
+            case .tick: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case .target, .fanfare: UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+            return
+        }
         let chosen: AVAudioPCMBuffer?
         switch cue {
         case .tick: chosen = tickBuffer
