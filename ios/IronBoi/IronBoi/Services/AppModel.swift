@@ -414,8 +414,8 @@ final class AppModel: NSObject, ObservableObject {
                 guard let self else { throw CancellationError() }
                 var data: [String: Any] = ["clientDate": Self.currentDateISO(), "voice": CoachVoiceOption.current]
                 if handover { data["handover"] = true }
-                // Only sent for OpenAI: a server without the A/B rejects the field.
-                if LiveVoiceSession.provider == .openai { data["provider"] = "openai" }
+                // Only when picked on the phone; otherwise the server's default.
+                if let chosen = LiveVoiceSession.chosenProvider { data["provider"] = chosen.rawValue }
                 if let handle { data["resumeHandle"] = handle }
                 // We'll send our cached brief as the first [app] line, so the
                 // server needn't read memory before minting.

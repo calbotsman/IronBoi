@@ -4,11 +4,11 @@ import SwiftUI
 /// brick/ochre selection, sticky save bar. No stock Form chrome.
 /// Built to docs/design/myo-you-tab-layout-spec.md.
 struct PreferencesView: View {
-    /// Live voice: talk to the coach over Gemini Live. On by default (it's
-    /// the fast voice); off falls back to the regular coach.
+    /// Live voice: talk to the coach in real time. On by default (it's the
+    /// fast voice); off falls back to the regular coach.
     @AppStorage(LiveVoiceSession.defaultsKey) private var liveVoiceBeta = true
-    /// Gemini Live or OpenAI Realtime — the voice A/B.
-    @AppStorage(LiveVoiceSession.providerKey) private var liveVoiceProvider = LiveVoiceSession.Provider.gemini.rawValue
+    /// "" = the server's default engine; else Gemini Live or OpenAI Realtime.
+    @AppStorage(LiveVoiceSession.providerKey) private var liveVoiceProvider = ""
     @EnvironmentObject private var appModel: AppModel
     @Environment(\.dismiss) private var dismiss
     /// Training-day nudges — on the phone, not part of the saved profile.
@@ -416,12 +416,13 @@ struct PreferencesView: View {
             if liveVoiceBeta {
                 MyoValueRow(label: "Voice engine") {
                     Picker("Voice engine", selection: $liveVoiceProvider) {
+                        Text("Default").tag("")
                         ForEach(LiveVoiceSession.Provider.allCases, id: \.rawValue) { provider in
                             Text(provider.label).tag(provider.rawValue)
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(maxWidth: 180)
+                    .frame(maxWidth: 240)
                 }
             }
             Text("Talk in real time. While it's on (the default), your voice goes straight from your phone to the voice engine you pick (Google's Gemini or OpenAI) to answer you; we don't keep the audio.")

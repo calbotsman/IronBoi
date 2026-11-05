@@ -7,9 +7,11 @@ import { liveToolDeclarations } from "./liveSession.js";
  *
  * The phone gets a short-lived client secret (`ek_…`) minted here with the
  * session config attached. Unlike Gemini's constrained tokens, a Realtime
- * client can still send `session.update` and change its own instructions,
- * so this provider is opt-in per environment (IRONBOI_LIVE_OPENAI_ENABLED)
- * and meant for testing, not as the default.
+ * client can still send `session.update` and change its own instructions.
+ * Known limit, accepted (2026-11-05: Josh chose OpenAI for live voice):
+ * only signed-in users get it — an anonymous uid is always given Gemini —
+ * and every mint counts against the per-user daily cap, with handovers
+ * decided server-side (liveSession.ts isHandover), never by the client.
  */
 export const OPENAI_REALTIME_MODEL_DEFAULT = "gpt-realtime";
 const SECRET_SECONDS = 600;

@@ -573,20 +573,23 @@ export const startLiveCoachSession = onCall(
       throw new HttpsError("permission-denied", "live_voice_requires_sign_in");
     }
     const parsed = parseCallablePayload(StartLiveCoachSessionRequest, request.data ?? {}, "startLiveCoachSession");
-    const cap = parsed.handover
-      ? Number(process.env.IRONBOI_LIVE_HANDOVERS_PER_DAY) || LIVE_HANDOVERS_PER_DAY_DEFAULT
-      : Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT;
-    if (!(await takeLiveMint(db, userId, cap, new Date(), parsed.handover ? "liveHandovers" : "liveMints"))) {
-      safeLogger.warn("Live voice daily cap reached", { event: "live_voice_cap_reached", userId });
+    // The phone's pick (Preferences → Voice engine), else the operator's
+    // default (IRONBOI_LIVE_PROVIDER). An OpenAI client secret doesn't lock
+    // the session (a client can session.update its own instructions), so an
+    // anonymous uid — anyone with the public web key — only ever gets
+    // Gemini, whose token does lock it.
+    const anonymous = signInProvider === "anonymous";
+    const provider = anonymous ? "gemini" : parsed.provider ?? liveProvider();
+    const taken = await takeLiveMint(db, userId, {
+      mints: Number(process.env.IRONBOI_LIVE_MINTS_PER_DAY) || LIVE_MINTS_PER_DAY_DEFAULT,
+      handovers: Number(process.env.IRONBOI_LIVE_HANDOVERS_PER_DAY) || LIVE_HANDOVERS_PER_DAY_DEFAULT,
+    }, new Date(), provider);
+    if (!taken.ok) {
+      safeLogger.warn("Live voice daily cap reached", { event: "live_voice_cap_reached", userId, outcome: taken.handover ? "handover" : "session" });
       throw new HttpsError("resource-exhausted", "live_voice_daily_cap");
     }
     const voice = parsed.voice ?? (process.env.IRONBOI_LIVE_VOICE || LIVE_VOICE_DEFAULT);
-    // The whole brain — profile, plan, recent workouts, memory facts, coach
-    // notes, the shared conversation — locked into the session.
     const today = parsed.clientDate ?? new Date().toISOString().slice(0, 10);
-    // The phone's pick (Preferences → Voice engine), else the operator's
-    // default (IRONBOI_LIVE_PROVIDER).
-    const provider = parsed.provider ?? liveProvider();
     // The whole brain — profile, plan, recent workouts, memory facts, coach
     // notes, the shared conversation — locked into the session. With a
     // cached memory brief on the phone (sent as its first [app] line, once

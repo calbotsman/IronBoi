@@ -6,14 +6,13 @@ import {
   StartLiveCoachSessionRequest,
   liveToolDeclarations,
   liveProvider,
-  mintOpenAIClientSecret,
-  openAIRealtimeSession,
   liveAllowedForSignInProvider,
   liveCoachPrompt,
   liveSetup,
   liveVoiceEnabled,
   mintLiveToken,
   takeLiveMint,
+  isHandover,
 } from "../../../src/coach/liveSession.js";
 
 const USER_ID = "live-session-user-a";
@@ -81,15 +80,35 @@ describe("live voice session mint", () => {
   });
 
   it("caps mints per user per day", async () => {
-    const now = new Date("2026-10-12T12:00:00Z");
-    expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(true);
-    expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(true);
-    expect(await takeLiveMint(db, USER_ID, 2, now)).toBe(false);
-    expect(await takeLiveMint(db, USER_ID, 2, new Date("2026-10-13T12:00:00Z"))).toBe(true);
-    // Handovers have their own counter: a long workout doesn't eat the day's sessions.
-    expect(await takeLiveMint(db, USER_ID, 1, now, "liveHandovers")).toBe(true);
-    expect(await takeLiveMint(db, USER_ID, 1, now, "liveHandovers")).toBe(false);
-    expect(await takeLiveMint(db, USER_ID, 3, now)).toBe(true);
+    const caps = { mints: 2, handovers: 1 };
+    const t = (iso: string) => new Date(iso);
+    expect(await takeLiveMint(db, USER_ID, caps, t("2026-10-12T12:00:00Z"))).toEqual({ ok: true, handover: false });
+    // Within a minute of the last mint: a fresh session, not a handover.
+    expect(await takeLiveMint(db, USER_ID, caps, t("2026-10-12T12:00:30Z"))).toEqual({ ok: true, handover: false });
+    expect(await takeLiveMint(db, USER_ID, caps, t("2026-10-12T12:00:50Z"))).toEqual({ ok: false, handover: false });
+    // The next day starts over.
+    expect(await takeLiveMint(db, USER_ID, caps, t("2026-10-13T12:00:00Z"))).toEqual({ ok: true, handover: false });
+  });
+
+  it("decides handovers on the server, from the last mint", async () => {
+    const caps = { mints: 1, handovers: 1 };
+    const t = (iso: string) => new Date(iso);
+    expect(await takeLiveMint(db, "u-handover", caps, t("2026-10-12T12:00:00Z"))).toEqual({ ok: true, handover: false });
+    // 8 minutes later (a Gemini connection's time limit): a handover, on its own cap.
+    expect(await takeLiveMint(db, "u-handover", caps, t("2026-10-12T12:08:00Z"))).toEqual({ ok: true, handover: true });
+    expect(await takeLiveMint(db, "u-handover", caps, t("2026-10-12T12:16:00Z"))).toEqual({ ok: false, handover: true });
+    // Long after any connection could be open: a fresh session (main cap, used up).
+    expect(await takeLiveMint(db, "u-handover", caps, t("2026-10-12T14:00:00Z"))).toEqual({ ok: false, handover: false });
+  });
+
+  it("only treats a recent, not-immediate previous mint as a handover", () => {
+    const now = Date.parse("2026-10-12T12:00:00Z");
+    expect(isHandover(undefined, now, "gemini")).toBe(false);
+    expect(isHandover(now - 30_000, now, "gemini")).toBe(false);
+    expect(isHandover(now - 8 * 60_000, now, "gemini")).toBe(true);
+    expect(isHandover(now - 20 * 60_000, now, "gemini")).toBe(false);
+    expect(isHandover(now - 45 * 60_000, now, "openai")).toBe(true);
+    expect(isHandover(now - 70 * 60_000, now, "openai")).toBe(false);
   });
 });
 
@@ -105,35 +124,9 @@ describe("live swaps in a workout", () => {
   });
 });
 
-describe("live voice on OpenAI Realtime", () => {
-  it("is used only when the operator says so", () => {
+describe("live voice provider", () => {
+  it("is OpenAI only when the operator says so", () => {
     expect(liveProvider({})).toBe("gemini");
     expect(liveProvider({ IRONBOI_LIVE_PROVIDER: "openai" })).toBe("openai");
-  });
-
-  it("locks the brain, a mapped voice and every live tool into the session", () => {
-    const session = openAIRealtimeSession({ model: "gpt-realtime", voice: "Orus", instruction: "You are the coach." });
-    expect(session.instructions).toBe("You are the coach.");
-    expect(session.audio.output.voice).toBe("ash");
-    expect(session.audio.input.format).toEqual({ type: "audio/pcm", rate: 24000 });
-    expect(session.tools.map((tool) => tool.name)).toEqual(liveToolDeclarations().map((tool) => tool.name));
-    expect(session.tools.every((tool) => tool.type === "function" && tool.parameters)).toBe(true);
-    expect(openAIRealtimeSession({ model: "m", voice: "Unknown", instruction: "x" }).audio.output.voice).toBe("marin");
-  });
-
-  it("mints a short-lived client secret and surfaces failures", async () => {
-    const ok = async () => ({ ok: true, status: 200, json: async () => ({ value: "ek_123", expires_at: 1_800_000_000 }) });
-    const minted = await mintOpenAIClientSecret({
-      apiKey: "sk-test",
-      session: openAIRealtimeSession({ model: "gpt-realtime", voice: "Kore", instruction: "x" }),
-      fetchImpl: ok as unknown as typeof fetch,
-    });
-    expect(minted.token).toBe("ek_123");
-    const bad = async () => ({ ok: false, status: 401, json: async () => ({ error: { code: "invalid_api_key" } }) });
-    await expect(mintOpenAIClientSecret({
-      apiKey: "sk-bad",
-      session: openAIRealtimeSession({ model: "gpt-realtime", voice: "Kore", instruction: "x" }),
-      fetchImpl: bad as unknown as typeof fetch,
-    })).rejects.toThrow("invalid_api_key");
   });
 });

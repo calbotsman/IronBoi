@@ -39,8 +39,11 @@ final class LiveVoiceSession: ObservableObject {
         var label: String { self == .gemini ? "Gemini" : "OpenAI" }
     }
     static let providerKey = "liveVoiceProvider"
-    static var provider: Provider {
-        Provider(rawValue: UserDefaults.standard.string(forKey: providerKey) ?? "") ?? .gemini
+    /// The engine picked on this phone, or nil for the server's default
+    /// (what staging serves). Sent only when picked, so the picker never
+    /// claims one engine while the server uses the other.
+    static var chosenProvider: Provider? {
+        Provider(rawValue: UserDefaults.standard.string(forKey: providerKey) ?? "")
     }
     /// Set while a count is running: the coach's audio is dropped (its mic
     /// can be closed for a whole set, but the exercise intro still has to
@@ -51,6 +54,11 @@ final class LiveVoiceSession: ObservableObject {
     private var openAI: Bool { activeProvider == .openai }
     /// OpenAI tool calls still running this turn.
     private var openAIToolsPending = 0
+    /// A Realtime response is being generated: a second `response.create`
+    /// now would be refused ("active response"), so it waits for
+    /// `response.done` (B2).
+    private var openAIResponseActive = false
+    private var openAIResponseWanted = false
 
     struct Ticket: Decodable { let token: String; let model: String; let provider: String? }
     struct TurnResult: Decodable { let saved: Bool; let stop: Bool; let line: String? }
@@ -217,6 +225,8 @@ final class LiveVoiceSession: ObservableObject {
         }
         handovers = 0
         gaps = []
+        openAIResponseActive = false
+        openAIResponseWanted = false
         gapStartedAt = nil
         socketBox.release()
         removeTap()
@@ -410,6 +420,8 @@ final class LiveVoiceSession: ObservableObject {
             let old = socket
             socket = task
             standby = nil
+            // A new Realtime session: nothing is being generated on it yet.
+            openAIResponseActive = false
             socketBox.moveTo(task)
             let age = Int(Date().timeIntervalSince(connectedAt))
             connectedAt = Date()
@@ -600,6 +612,7 @@ final class LiveVoiceSession: ObservableObject {
             if state == .connecting { stop() }
         case "session.created", "session.updated":
             guard socketBox.socket == nil else { return }
+            openAIResponseActive = false
             AudioHub.log("live: ready (OpenAI)")
             endGap()
             socketBox.attach(task)
@@ -635,28 +648,25 @@ final class LiveVoiceSession: ObservableObject {
             if coachTurnDone { caption = ""; coachTurnDone = false }
             caption += delta
             turnCoach += delta
-        case "response.function_call_arguments.done":
-            guard let name = message["name"] as? String, let callId = message["call_id"] as? String else { return }
-            let raw = (message["arguments"] as? String)?.data(using: .utf8)
-            let args = raw.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-            openAIToolsPending += 1
-            runTool(name: name, args: args) { [weak self] response in
-                guard let self else { return }
-                self.openAIToolsPending = max(0, self.openAIToolsPending - 1)
-                guard let socket = self.socket else { return }
-                let output = (try? Self.json(response)) ?? "{}"
-                let item: [String: Any] = ["type": "conversation.item.create",
-                                           "item": ["type": "function_call_output", "call_id": callId, "output": output]]
-                if let json = try? Self.json(item) { try? await socket.send(.string(json)) }
-                // One reply once every tool in the turn has answered.
-                if self.openAIToolsPending == 0, let json = try? Self.json(["type": "response.create"]) {
-                    try? await socket.send(.string(json))
-                }
-            }
+        case "response.created":
+            openAIResponseActive = true
         case "response.done":
+            openAIResponseActive = false
+            let response = message["response"] as? [String: Any]
+            let status = response?["status"] as? String ?? "completed"
             coachTurnDone = true
             if buffersPlaying == 0 { state = .listening; uplink.coachSpeaking = false }
             if !turnCoach.isEmpty { recordTurnIfAny(interrupted: false) }
+            // Tools run from the finished response, and only if it finished:
+            // a response cut off by barge-in (status "cancelled") still
+            // emits its calls, and one of them could be replace_session.
+            let calls = (response?["output"] as? [[String: Any]] ?? []).filter { $0["type"] as? String == "function_call" }
+            if status == "completed" {
+                for call in calls { runOpenAITool(call) }
+            } else if !calls.isEmpty {
+                AudioHub.log("live: \(calls.count) tool call(s) dropped — response \(status)")
+            }
+            if openAIResponseWanted, openAIToolsPending == 0 { requestOpenAIResponse() }
         default:
             break
         }
@@ -822,13 +832,45 @@ final class LiveVoiceSession: ObservableObject {
 
     /// A text message into the Realtime conversation; `respond` asks for
     /// a spoken reply to it.
+    /// A Realtime tool call from a completed response: runs, answers with
+    /// its output, and once every call of the turn has answered, asks for
+    /// one reply.
+    private func runOpenAITool(_ call: [String: Any]) {
+        guard let name = call["name"] as? String, let callId = call["call_id"] as? String else { return }
+        let raw = (call["arguments"] as? String)?.data(using: .utf8)
+        let args = raw.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        openAIToolsPending += 1
+        runTool(name: name, args: args) { [weak self] response in
+            guard let self else { return }
+            self.openAIToolsPending = max(0, self.openAIToolsPending - 1)
+            guard let socket = self.socket else { return }
+            let output = (try? Self.json(response)) ?? "{}"
+            let item: [String: Any] = ["type": "conversation.item.create",
+                                       "item": ["type": "function_call_output", "call_id": callId, "output": output]]
+            if let json = try? Self.json(item) { try? await socket.send(.string(json)) }
+            if self.openAIToolsPending == 0 { self.requestOpenAIResponse() }
+        }
+    }
+
+    /// `response.create`, unless a response is still being generated: then
+    /// it's sent the moment that one is done.
+    private func requestOpenAIResponse() {
+        guard !openAIResponseActive else {
+            openAIResponseWanted = true
+            return
+        }
+        openAIResponseWanted = false
+        guard let socket, let json = try? Self.json(["type": "response.create"]) else { return }
+        socket.send(.string(json)) { _ in }
+    }
+
     private func sendOpenAIText(_ text: String, respond: Bool) {
         guard let socket else { return }
         let item: [String: Any] = ["type": "conversation.item.create",
                                    "item": ["type": "message", "role": "user",
                                             "content": [["type": "input_text", "text": text]]]]
         if let json = try? Self.json(item) { socket.send(.string(json)) { _ in } }
-        if respond, let json = try? Self.json(["type": "response.create"]) { socket.send(.string(json)) { _ in } }
+        if respond { requestOpenAIResponse() }
     }
 
     // MARK: - Audio out

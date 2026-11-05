@@ -36,8 +36,9 @@ export const StartLiveCoachSessionRequest = z.object({
   // Which live voice model: Gemini Live (default) or OpenAI Realtime, for
   // an A/B. OpenAI only where IRONBOI_LIVE_OPENAI_ENABLED is on.
   provider: z.enum(["gemini", "openai"]).optional(),
-  // A seamless handover to a fresh connection mid-conversation: counted
-  // against its own, larger cap so a long workout never runs out.
+  // The phone's own view that this is a handover. Advisory only (logged):
+  // the server decides from the user's last mint (isHandover), so a client
+  // can't claim the larger handover cap.
   handover: z.boolean().optional(),
   // The phone has a cached memory brief (coach/memoryBrief.ts) built at this
   // time and sends it as the session's first [app] line, so the server
@@ -133,81 +134,56 @@ export async function mintLiveToken(args: {
   return { token: body.name, expiresAt };
 }
 
-// --- OpenAI Realtime (IRONBOI_LIVE_PROVIDER=openai) -------------------------
-// The same brain and tools, on OpenAI's speech-to-speech model. The server
-// mints a short-lived client secret with the session locked in (model,
-// instructions, voice, tools); the phone connects straight to OpenAI.
+// --- Which provider ----------------------------------------------------------
+// The OpenAI Realtime session itself (config, voices, client secret) lives in
+// liveOpenAI.ts; this is only the operator's default.
 
 /** Which provider live voice uses: OpenAI when the operator says so. */
 export function liveProvider(env: NodeJS.ProcessEnv = process.env): "openai" | "gemini" {
   return env.IRONBOI_LIVE_PROVIDER === "openai" ? "openai" : "gemini";
 }
 
-export const OPENAI_REALTIME_MODEL_DEFAULT = "gpt-realtime-2.1";
-export const OPENAI_TRANSCRIBE_MODEL_DEFAULT = "gpt-4o-mini-transcribe";
+/**
+ * A mint is a handover (its own, larger daily cap) only when the server
+ * can see one is plausible — never because the phone says so:
+ * - the user's previous mint is recent enough that its connection could
+ *   still be open: a Gemini connection lasts ~10 min on a 15-min token, an
+ *   OpenAI session at most 60 min (the phone hands over at 45), plus slack;
+ * - and it isn't right on top of it: real handovers come minutes apart (the
+ *   time limit) or on a network change, so anything within a minute of the
+ *   last mint is a fresh session, counted against the main cap.
+ */
+export const HANDOVER_WINDOW_MS = { gemini: 15 * 60_000, openai: 65 * 60_000 } as const;
+export const HANDOVER_MIN_SPACING_MS = 60_000;
 
-/** Our eight coach voices (COACH_VOICES) as OpenAI's: same gender, closest feel. */
-export const OPENAI_VOICES: Record<string, string> = {
-  Sulafat: "marin", Laomedeia: "shimmer", Kore: "sage", Achernar: "coral",
-  Achird: "cedar", Puck: "verse", Orus: "ash", Algieba: "echo",
-};
-
-export function openAIRealtimeSession(args: { model: string; voice: string; instruction: string; transcribeModel?: string }) {
-  return {
-    type: "realtime",
-    model: args.model,
-    instructions: args.instruction,
-    audio: {
-      input: {
-        format: { type: "audio/pcm", rate: 24000 },
-        transcription: { model: args.transcribeModel ?? OPENAI_TRANSCRIBE_MODEL_DEFAULT },
-        // Talking over the coach stops it; a finished thought gets a reply.
-        turn_detection: { type: "semantic_vad", interrupt_response: true, create_response: true },
-      },
-      output: { format: { type: "audio/pcm", rate: 24000 }, voice: OPENAI_VOICES[args.voice] ?? "marin" },
-    },
-    tools: liveToolDeclarations().map((tool) => ({
-      type: "function",
-      name: tool.name,
-      description: tool.description,
-      parameters: "parameters" in tool && tool.parameters ? tool.parameters : { type: "object", properties: {} },
-    })),
-    tool_choice: "auto",
-  };
+export function isHandover(lastMintAt: number | undefined, nowMs: number, provider: "gemini" | "openai"): boolean {
+  if (lastMintAt === undefined) return false;
+  const since = nowMs - lastMintAt;
+  return since >= HANDOVER_MIN_SPACING_MS && since <= HANDOVER_WINDOW_MS[provider];
 }
 
-export async function mintOpenAIClientSecret(args: {
-  apiKey: string;
-  session: ReturnType<typeof openAIRealtimeSession>;
-  fetchImpl?: typeof fetch;
-}): Promise<{ token: string; expiresAt: string }> {
-  const response = await (args.fetchImpl ?? fetch)("https://api.openai.com/v1/realtime/client_secrets", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${args.apiKey}` },
-    body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: TOKEN_MINUTES * 60 }, session: args.session }),
-  });
-  const body = (await response.json().catch(() => ({}))) as { value?: string; expires_at?: number; error?: { code?: string; message?: string } };
-  if (!response.ok || !body.value) {
-    throw new Error(`openai_secret_mint_failed:${response.status}:${body.error?.code ?? body.error?.message?.slice(0, 80) ?? "unknown"}`);
-  }
-  const expiresAt = new Date((body.expires_at ?? Date.now() / 1000 + TOKEN_MINUTES * 60) * 1000).toISOString();
-  return { token: body.value, expiresAt };
-}
-
-/** Counts a mint against the day's cap; false when the cap is reached. */
+/**
+ * Counts a mint against the day's cap. Whether it's a handover is decided
+ * here from the user's last mint (isHandover), not by the client.
+ */
 export async function takeLiveMint(
   db: Firestore,
   userId: string,
-  cap: number,
+  caps: { mints: number; handovers: number },
   now = new Date(),
-  counter: "liveMints" | "liveHandovers" = "liveMints",
-): Promise<boolean> {
+  provider: "gemini" | "openai" = "gemini",
+): Promise<{ ok: boolean; handover: boolean }> {
   const ref = db.doc(usagePath(userId, `live-${todayUtcDateKey(now)}`));
+  const lastRef = db.doc(usagePath(userId, "live-last-mint"));
   return db.runTransaction(async (tx) => {
-    const used = ((await tx.get(ref)).get(counter) as number | undefined) ?? 0;
-    if (used >= cap) return false;
+    const [day, last] = await Promise.all([tx.get(ref), tx.get(lastRef)]);
+    const handover = isHandover(last.get("at") as number | undefined, now.getTime(), provider);
+    const counter = handover ? "liveHandovers" : "liveMints";
+    const used = (day.get(counter) as number | undefined) ?? 0;
+    if (used >= (handover ? caps.handovers : caps.mints)) return { ok: false, handover };
     tx.set(ref, { [counter]: FieldValue.increment(1), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    return true;
+    tx.set(lastRef, { at: now.getTime(), serverUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    return { ok: true, handover };
   });
 }
 
