@@ -71,7 +71,9 @@ final class WorkoutVitals: ObservableObject {
         }
         let newReading = sample.map { $0.at != lastReadingAt } ?? false
         lastReadingAt = sample?.at
-        let zone = sample.flatMap { HeartZones.zone(bpm: $0.bpm, ageYears: profile.ageYears, observedPeak: hub.sessionPeak) }
+        // The hub's zone: 10 s smoothed and held 15 s (ZoneTracker), so wrist
+        // noise doesn't flip the colors.
+        let zone = sample != nil ? hub.zone : nil
         let shownHeart = sample.map { Heart(bpm: $0.bpm, zone: zone) }
         if heart != shownHeart { heart = shownHeart }
 
