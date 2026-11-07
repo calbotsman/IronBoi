@@ -153,7 +153,7 @@ struct MemoryReviewView: View {
                                  ? MyoColor.redPen
                                  : MyoColor.Text.tertiary.color)
 
-            Text(fact.content)
+            Text(fact.displayContent)
                 .myoStyle(.body)
                 .foregroundStyle(ended ? MyoColor.Text.tertiary.color : MyoColor.Text.primary.color)
                 .fixedSize(horizontal: false, vertical: true)
@@ -239,9 +239,13 @@ struct MemoryReviewView: View {
 struct MemorySummaryCard: View {
     @EnvironmentObject private var appModel: AppModel
 
+    /// Everything the Memory screen lists as in effect: remembered facts plus
+    /// plan changes. Plan changes used to be left out, so an account whose
+    /// only memory was a plan change read "Nothing yet" here while the
+    /// Memory screen itself showed it.
     private var liveCount: Int {
         appModel.memoryFacts.filter {
-            !$0.isProposed && !$0.isPlanChange && !$0.isLapsed(today: appModel.todayISO)
+            !$0.isProposed && ($0.isPlanChange || !$0.isLapsed(today: appModel.todayISO))
         }.count
     }
 

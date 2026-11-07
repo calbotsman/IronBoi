@@ -37,11 +37,12 @@ export const GoalType = z.enum([
   "return_to_training",
 ]);
 
-// Explanatory "lens" the user can pick so the coach frames its EXPLANATIONS
-// through a credible authority's emphasis. Per docs/design/myo-personas-*
-// (Rowan's call): lenses are "ways to understand your training," not
-// celebrity worship, and they never override safety or corpus grounding.
-// Kept to the audited top three (Mercer dossier) plus "none".
+// RETIRED. MYO no longer offers named coaching protocols (Huberman,
+// Schoenfeld, Sims, Bryan Johnson / Blueprint) and always coaches in its own
+// voice. The enum keeps the old values only so profiles saved before the
+// change still parse; nothing reads them — onboarding writes "none", the
+// prompt ignores the field, and the progress builder emits no lens
+// highlights.
 export const CoachingLens = z.enum([
   "none",
   "huberman", // recovery, circadian, nervous-system framing

@@ -25,6 +25,23 @@ struct MemoryFact: Identifiable, Equatable {
     var isPlanChange: Bool { category == "plan_change" }
     var isUserStated: Bool { source == "user_stated" }
 
+    /// The text shown to the user. Plan changes are stored as
+    /// "Plan change — <scope> [category_key]: <summary>" so Coach can read the
+    /// reason code; the row already says "Plan change" and the bracketed key
+    /// is internal, so both are dropped here, leaving "<scope>: <summary>"
+    /// with the first letter capitalised.
+    var displayContent: String {
+        guard isPlanChange else { return content }
+        var text = content.replacingOccurrences(
+            of: #"\s*\[[a-z0-9_]+\]"#, with: "", options: .regularExpression)
+        if text.hasPrefix("Plan change") {
+            text = String(text.dropFirst("Plan change".count))
+            text = text.trimmingCharacters(in: CharacterSet(charactersIn: " —-:"))
+        }
+        guard let first = text.first else { return content }
+        return first.uppercased() + text.dropFirst()
+    }
+
     /// A temporary fact past its `until` date. The server drops these from
     /// Coach's context, so the UI shows them as ended rather than active.
     func isLapsed(today: String) -> Bool {

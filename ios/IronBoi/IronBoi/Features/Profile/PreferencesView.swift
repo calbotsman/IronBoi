@@ -522,23 +522,6 @@ struct PreferencesView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
             }
-
-            MyoHairline().padding(.vertical, MyoTheme.Spacing.xs)
-
-            MyoSectionLabel(text: "Coaching protocol")
-            MyoValueRow(label: "Protocol") {
-                Picker("Protocol", selection: $draft.preferences.coachingLens) {
-                    ForEach(CoachingLens.allCases) { Text($0.displayName).tag($0) }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-            }
-            Text(draft.preferences.coachingLens.blurb)
-                .font(.caption)
-                .foregroundStyle(MyoColor.Text.tertiary.color)
-            Text("Shapes how Coach reasons and explains — never what's safe.")
-                .font(.caption2)
-                .foregroundStyle(MyoColor.Text.disabled.color)
         }
     }
 

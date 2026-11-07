@@ -26,7 +26,7 @@ The app opens on the coach: a living orb (a Metal port of the One Body study fro
 | **Coach** (the screen) | Talk or type. Proposal cards you can apply or decline. Ask for today's workout and a card appears under the orb; **Begin** turns it into a live session where counting reps aloud logs sets, a spoken weight change applies instantly, and the body demonstrates the current lift. |
 | **Plan** (behind the profile icon) | This week's plan, day by day. Start a session, swap an exercise, step weights, update a baseline. |
 | **History** (behind the profile icon) | Six-week adherence bars, strength trends per lift, body-weight trend with a safety callout. |
-| **You** (behind the profile icon) | Profile, goals, equipment, coaching protocol, non-negotiables, injuries and limitations, disliked exercises, and **What Coach remembers** — every saved memory fact, keep or remove. |
+| **You** (behind the profile icon) | Profile, goals, equipment, non-negotiables, injuries and limitations, disliked exercises, and **What Coach remembers** — every saved memory fact, keep or remove. |
 
 A conversational onboarding gates everything until the coach has enough to write a first program.
 
