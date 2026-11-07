@@ -83,6 +83,7 @@ Status values: not started, in PR #N, merged (#N), dropped.
 | #55 | F42 iOS 26 mirroring launch crash | yes | sim build only; needs a 26.6 device launch | — |
 | #57 | CI launch guard | no (merge when green) | n/a | F43 (CI builds with Xcode 16.4), F44 |
 | #59 | Social prototype | no (merge flag-off) | no | F48–F52 before the flag goes on |
+| #61 | Josh's mobile session (one voice, re-ask, History, protocols dropped) | no (merge after F53) | no | F53–F55 |
 | #60 | Recovery reads | no (merge after F45) | no | F45–F47 |
 | #38 | OpenAI Realtime live voice | yes; functions deployed to ironboi-staging | no | B1–B3 fixed |
 | #53 | Live voice reliability | yes | no | B4–B6, F27, F28 fixed |
