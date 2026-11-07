@@ -94,7 +94,7 @@ describe("buildProgressSummary — adherence", () => {
     const summary = build({ logs, plan: threeDayPlan() });
 
     expect(summary.adherence).toEqual({
-      plannedSessions: 18, // 3 non-empty plan days × 6 weeks
+      plannedSessions: 12, // 3 non-empty plan days × the 4 weeks since the first log
       completedSessions: 11,
       weeklyRate: [0, 0, 0.67, 1, 1, 1],
       streakWeeks: 3,
@@ -123,6 +123,25 @@ describe("buildProgressSummary — adherence", () => {
 
     const summary = build({ program });
     expect(summary.adherence.plannedSessions).toBe(12); // 2 days × 6 weeks
+  });
+
+  it("plans nothing for the weeks before the user joined", () => {
+    // Joined 17 days ago → weeks idx3..idx5 count: 3 days × 3 weeks.
+    const summary = build({
+      logs: [log("2026-07-10")],
+      plan: threeDayPlan(),
+      profile: { createdAt: "2026-06-28T09:00:00.000Z" },
+    });
+    expect(summary.adherence.plannedSessions).toBe(9);
+    expect(summary.adherence.completedSessions).toBe(1);
+  });
+
+  it("counts the whole window for a profile older than six weeks", () => {
+    const summary = build({
+      plan: threeDayPlan(),
+      profile: { createdAt: "2026-01-01T00:00:00.000Z" },
+    });
+    expect(summary.adherence.plannedSessions).toBe(18);
   });
 
   it("caps a weekly rate at 1 even when the user trains beyond the plan", () => {

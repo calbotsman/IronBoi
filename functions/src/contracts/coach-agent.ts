@@ -821,7 +821,9 @@ export const ProgressSummary = z.object({
   computedAt: ISODateTime,
   windowDays: z.literal(42),
   adherence: z.object({
-    // plannedSessions = plan's non-empty training days per week × 6 buckets.
+    // plannedSessions = plan's non-empty training days per week × the week
+    // buckets since the user started (profile created or first log, capped
+    // at 6).
     plannedSessions: z.number().int().nonnegative(),
     completedSessions: z.number().int().nonnegative(),
     // Per-bucket completed/planned, clamped to [0, 1]; zeros when no plan.

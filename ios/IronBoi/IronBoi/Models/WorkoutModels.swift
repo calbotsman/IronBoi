@@ -293,9 +293,8 @@ struct ProgressSummaryModel: Equatable {
     let volumeTrend: String
     let lifts: [ProgressLift]
     let body: ProgressBody
-    // Server-templated per-lens framings (computeLensHighlights). Empty for
-    // docs written before the lens slice or when the lens is "none" — the
-    // protocol card hides on empty.
+    // Retired with the named coaching protocols: the server no longer writes
+    // these and History doesn't show them. Still decoded so older docs load.
     let lensHighlights: [ProgressLensHighlight]
 }
 

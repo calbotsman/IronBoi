@@ -57,7 +57,7 @@ export function buildProgressSummary(inputs: ProgressBuildInputs): ProgressSumma
   const logs = windowedLogs(inputs.logs, todayDay);
   const plannedPerWeek = plannedSessionsPerWeek(inputs.plan, inputs.program);
 
-  const adherence = buildAdherence(logs, plannedPerWeek);
+  const adherence = buildAdherence(logs, plannedPerWeek, firstActiveWeekIndex(inputs.profile, logs, todayDay));
   const volume = buildVolume(logs);
   const lifts = buildLifts(logs);
   const body = buildBody(inputs.healthSamples, inputs.profile, todayDay);
@@ -140,7 +140,24 @@ function nonEmptyDayCount(days: unknown): number | null {
   return count;
 }
 
-function buildAdherence(logs: WindowedLog[], plannedPerWeek: number) {
+// The first week bucket the user was actually on MYO: the week their
+// profile was created or their first logged session in the window,
+// whichever is earlier. Weeks before it plan nothing — counting them made a
+// three-week-old account read "4 of 36 planned sessions". With neither date
+// known, the whole window counts.
+function firstActiveWeekIndex(profile: Loose | null, logs: WindowedLog[], todayDay: number): number {
+  const starts: number[] = [];
+  const createdDay = typeof profile?.createdAt === "string" ? epochDayOf(profile.createdAt) : null;
+  if (createdDay !== null) starts.push(createdDay);
+  const firstLogDay = logs.length > 0 ? epochDayOf(logs[0].date) : null;
+  if (firstLogDay !== null) starts.push(firstLogDay);
+  if (starts.length === 0) return 0;
+  const offset = todayDay - Math.min(...starts);
+  if (offset >= PROGRESS_WINDOW_DAYS) return 0;
+  return Math.max(0, WEEKS_IN_WINDOW - 1 - Math.floor(Math.max(0, offset) / 7));
+}
+
+function buildAdherence(logs: WindowedLog[], plannedPerWeek: number, firstActiveWeek: number) {
   const perWeek = new Array<number>(WEEKS_IN_WINDOW).fill(0);
   for (const log of logs) {
     perWeek[log.weekIndex] += 1;
@@ -159,7 +176,7 @@ function buildAdherence(logs: WindowedLog[], plannedPerWeek: number) {
   }
 
   return {
-    plannedSessions: plannedPerWeek * WEEKS_IN_WINDOW,
+    plannedSessions: plannedPerWeek * (WEEKS_IN_WINDOW - firstActiveWeek),
     completedSessions: logs.length,
     weeklyRate,
     streakWeeks,
