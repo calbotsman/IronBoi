@@ -254,6 +254,23 @@ Verdict: **the fix is real and well tested.** The bug cause in the PR body match
 
 **F12. #46: `AppModel.updateSetReps` is now dead code** (`AppModel.swift:1119` on the branch). Nothing calls it. Delete it, or keep it on purpose.
 
+## #61 Josh's mobile session, nine commits (deb4cb8)
+
+**Verdict: merge after the F53 guard (a few lines). F54 is a product trade-off for Josh to decide, and doesn't block the merge.** CI was pending at audit time.
+
+**F53. The "always answers" re-ask can repeat a tool action. CONFIRMED (code), medium-high.** `LiveVoiceSession.expectAnswer` (`LiveVoiceSession.swift:~1029`) resends the question 8 s after the ask if no live audio has played. Its guard checks speaking, owed, the count and the quiet window. It does not check `openAIResponseActive`, a tool call in flight, or a tool that ran since the ask. `CoachStageView.swift:3856` calls it for anything `isQuestionOrRequest` matches, and that regex includes `add|swap|skip|change`. Failure: "add a set" or "swap bench". The coach calls the tool, and the server round-trip plus the confirmation audio takes more than 8 s. The re-ask fires, "[app] They asked you this… Answer it now", and the model can call the tool a second time: two added sets, or a double swap. Fix: skip the re-ask while a response or tool call is active, or if any tool ran since `lastAskedAt`. Tell the model "answer only, don't repeat any action".
+
+**F54. "One coach voice" removes the Cloud TTS fallback, so a provider outage makes the regular coach mute. PLAUSIBLE, medium (trade-off).** `speech.ts:160-180`: the engine is tried twice, and then the call errors instead of falling back to Cloud TTS. The client shows a tone and the words (`CoachVoice.swift:237`). #53's fallback (live fails → the regular coach) usually happens because the live provider is failing, and the regular coach's TTS uses that same engine. So in an OpenAI or Gemini outage the whole workout is ticks and captions. **Never-deaf still holds:** the mic, STT and the text coach are untouched. What it loses is "never mute". The retry also doubles the worst-case wait, and `speech.ts` sets no fetch timeout. Option: switch voice per session, not per line. After N engine failures, the rest of the conversation uses Cloud TTS: one voice per session, never two in one reply.
+
+**F55. Old progress docs still carry lens framings into the prompt. CONFIRMED, low.** The builder no longer writes `lensHighlights`. But `contextBundle.ts:457` still reads them from persisted progress summaries into `<progress_summary>` (`prompt.ts:241`) until each doc is rebuilt. A user who picked Huberman and hasn't trained since still sends Huberman framings. The prompt's "don't name protocols" rule mostly covers it. Fix: drop `lensHighlights` in `contextBundle`.
+
+**Checked and fine:**
+- **Captions mode:** unaffected. The `allowsDeviceVoice` setters in `CoachStageView` are gone and it now defaults to `false`. The phone voice is used only when `fetchAudio` is nil, and the stage, onboarding and preferences always set it. The voice-off gating is unchanged.
+- **Share voice log:** shares only `Documents/audio-log.txt` (`AudioHub.logFileURL`), and only from the share sheet the user opens. The log holds timestamps, mic transcripts (≤60 characters per line), coach lines and audio-state notes. A grep of all 124 `AudioHub.log` calls found no tokens, keys, uids or emails. One health line logs only a read error. Nit: the row could say it includes what you said.
+- **Protocols removed:** the `protocol_*` corpus entries are gone, with no remaining references in `functions/` or `ios/`. The retrieval test is updated. Onboarding writes `none`, the iOS picker is removed, the enum is kept so old profiles parse, and the prompt says to ignore it. The Schoenfeld citations in `ironlab-seed.json` are research references, not the protocol. Stale doc: `docs/product/habit-journey-plan.md:42`.
+- **"of 36 planned" fix** (`build.ts` `firstActiveWeekIndex`) is correct and tested. The bodyweight shortfall wording and the warm-up moves are UI only.
+- **Latency:** nothing on the normal path. The re-ask and owed-answer each add a model turn only after a failure.
+
 ## #57 CI launch guard (9f0dabf)
 
 **Verdict: merge once its own iOS run is green.** The guards are sound. One gap needs a follow-up (F43).
