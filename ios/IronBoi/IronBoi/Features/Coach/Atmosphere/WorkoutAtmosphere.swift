@@ -11,7 +11,7 @@ struct WorkoutAtmosphere: View {
     @AppStorage(CoachColor.storageKey) private var coachHex = CoachColor.defaultHex
 
     /// 30 fps is plenty: effort moves over seconds and the fastest grain
-    /// re-seeds at 24 Hz. The orb above keeps its own 60. Under Reduce
+    /// re-seeds at 10 Hz. The orb above keeps its own 60. Under Reduce
     /// Motion the grain is still, so once a second is enough for the colour.
     private static let frameInterval: TimeInterval = 1.0 / 30
 

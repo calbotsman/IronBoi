@@ -55,10 +55,12 @@ final class CoachVoice: NSObject, ObservableObject {
         if gen == generation { finish() }
     }
 
-    /// Outside a workout the on-device voice can stand in when the network
-    /// fails; in one, the voice must never change, so it's a tone and the
-    /// words on screen instead.
-    var allowsDeviceVoice = true
+    /// Whether the phone's own voice may stand in when the coach's voice
+    /// can't be fetched. Off: it's a different person, and switching to it
+    /// mid-reply was one of the "four different voices". A line that can't
+    /// be voiced is a soft tone and the words on screen instead. (With no
+    /// cloud voice at all, the phone's voice is the only one, so it reads.)
+    var allowsDeviceVoice = false
     /// A line that couldn't be spoken in the coach's voice (shown instead).
     var onUnspoken: ((String) -> Void)?
     /// A spoken message was just sent: when you stopped talking, and when it
@@ -81,7 +83,10 @@ final class CoachVoice: NSObject, ObservableObject {
                 guard remaining > 0.3, !Task.isCancelled else { break }
                 let fetch = Task { () -> Data? in
                     guard let (data, served) = try? await fetchAudio(text, engine) else { return nil }
-                    if served == engine { VoiceCache.shared.store(data, for: text, engine: engine) }
+                    // Read in another voice (an older server's fallback):
+                    // not played, so one reply is never two people.
+                    guard served == engine else { return nil }
+                    VoiceCache.shared.store(data, for: text, engine: engine)
                     return data
                 }
                 do {
@@ -188,7 +193,8 @@ final class CoachVoice: NSObject, ObservableObject {
         }
 
         guard fetchAudio != nil else {
-            cannotSpeak(chunks, generation: gen)
+            // No cloud voice at all: the phone's voice is the only one.
+            speakOnDevice(spoken)
             return
         }
         Task { [weak self] in

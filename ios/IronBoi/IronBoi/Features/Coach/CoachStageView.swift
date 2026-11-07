@@ -249,11 +249,28 @@ struct CoachStageView: View {
 
     /// The stage's size, for placing the body when nothing else is open.
     @State private var stageSize: CGSize = .zero
+    /// Top of whatever sits at the bottom of the stage (the live workout
+    /// card, else the controls), in the stage's own space. The caption
+    /// pinned under the coach stops above it instead of running into it.
+    @State private var bottomChromeTop: CGFloat?
 
     /// Nothing below the body: it sits near the middle of the screen with
     /// the status line pinned just under it.
     private var centered: Bool { !cardOpen && appModel.pendingPlanAdjustmentProposal == nil }
     private var restFocus: CGPoint { CGPoint(x: stageSize.width / 2, y: stageSize.height * 0.42) }
+    private static let stageArea = "coachStageArea"
+    /// Where the pinned caption starts: just under the coach's body.
+    private var captionTop: CGFloat { restFocus.y + stageSize.width * 0.225 + 36 }
+    /// Height left between that and the workout card / controls.
+    private var captionRoom: CGFloat? {
+        bottomChromeTop.map { max(0, $0 - captionTop - MyoTheme.Spacing.sm) }
+    }
+
+    private static func measureTop() -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: BottomChromeKey.self, value: geo.frame(in: .named(stageArea)).minY)
+        }
+    }
 
     /// Any card that needs the space below the body.
     private var cardOpen: Bool {
@@ -371,10 +388,7 @@ struct CoachStageView: View {
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
-        .onChange(of: appModel.activeWorkout == nil) { _, ended in
-            keepAwake()
-            voice.allowsDeviceVoice = ended
-        }
+        .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
         .onChange(of: liveWorkoutNote) { _, note in
             // Connecting or standing by, it queues: the live coach is
@@ -395,10 +409,9 @@ struct CoachStageView: View {
                 handleUtterance(text)
             }
             voice.fetchAudio = { [appModel] text, engine in try await appModel.synthesizeSpeech(text, engine: engine) }
-            // A line that can't be spoken in the coach's voice mid-workout is
-            // shown instead (the voice never switches to the device's).
+            // A line that can't be spoken in the coach's voice is shown
+            // instead; the voice never switches to the phone's own.
             voice.onUnspoken = { text in show(notice: text) }
-            voice.allowsDeviceVoice = appModel.activeWorkout == nil
             appModel.warmVoice()
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
@@ -720,6 +733,7 @@ struct CoachStageView: View {
                             .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
                             .padding(.horizontal, MyoTheme.Spacing.md)
                             .padding(.top, MyoTheme.Spacing.md)
+                            .background { Self.measureTop() }
                     }
                 }
                 // A card under the coach: the controls stay at the bottom
@@ -731,19 +745,25 @@ struct CoachStageView: View {
                     .padding(.leading, MyoTheme.Spacing.lg)
                     .padding(.top, MyoTheme.Spacing.md)
                     .padding(.bottom, MyoTheme.Spacing.sm)
+                    .background { Self.measureTop() }
                     .opacity(showKeyboard ? 0 : 1)
                     .allowsHitTesting(!showKeyboard)
             }
         }
+        .coordinateSpace(name: Self.stageArea)
+        .onPreferenceChange(BottomChromeKey.self) { bottomChromeTop = $0 }
         .overlay {
             if centered {
                 // Pinned just under the body (radius ≈ 0.45 of half the short side).
                 VStack(spacing: 0) {
-                    Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
+                    Color.clear.frame(height: captionTop)
                     // The rest-day question replaces the caption, so the card
                     // never pushes down over the controls.
                     if !askingSkipRestDay, !askingMicPermission {
-                        caption.padding(.horizontal, MyoTheme.Spacing.lg)
+                        caption
+                            .padding(.horizontal, MyoTheme.Spacing.lg)
+                            // Never past the workout card or the controls.
+                            .frame(maxHeight: captionRoom, alignment: .top)
                     }
                     // A leftover from an earlier day doesn't block today's start.
                     if askingSkipRestDay {
@@ -1718,7 +1738,8 @@ struct CoachStageView: View {
                                "Stop there. Never push through pain.", "Catch your breath, and go when you're ready.",
                                "Good. Same again.", "That's the spot.", "Perfect, keep it there.", "Take an extra thirty, then.",
                                "How did that feel? Easy, good, or hard?", "How was that one? Too light, about right, or tough?",
-                               "Want me to take a little weight off for the next one?", "Nice and steady.",
+                               "Want me to take a little weight off for the next one?",
+                               "Want me to cut the reps a little for the next one?", "Nice and steady.",
                                "Let's go!", "Strong!", "That's it!", "Nice work!", "Big set.", "Clean reps.",
                                "Nice.", "Good set.", "Solid.", "Steady.", "That's the one.",
                                "Strong work.", "That was solid.", "Nailed it.", "Good stuff.", "Good work.", "Well done.",
@@ -2320,7 +2341,8 @@ struct CoachStageView: View {
             if tips != .quiet, !lastSet || reps < exercise.targetReps - 1,
                let advice = advisor.line(exercise: exercise.name, set: exercise.completedSetCount,
                                          targetSets: exercise.targetSets, reps: reps, target: exercise.targetReps,
-                                         timed: timed, hype: tone == .hype, tipsFull: tips == .full) {
+                                         timed: timed, hype: tone == .hype, tipsFull: tips == .full,
+                                         weighted: appModel.workingWeight(for: exercise) > 0) {
                 lastAdvice = (advice.kind, advice.text, index, Date())
                 // A tip is for the next set, so it comes after the rest
                 // ("Rest sixty seconds. On the next set, …"); a question
@@ -2607,6 +2629,7 @@ struct CoachStageView: View {
         }
         routine.endsAt = .distantFuture
         guided = routine
+        showGuided(move, kind: routine.kind)
         confirm(line)
         guidedTask?.cancel()
         guidedTask = Task {
@@ -2653,11 +2676,24 @@ struct CoachStageView: View {
         runGuidedStep()
     }
 
+    /// The body does the move while it's timed: a stretch is eased into and
+    /// held, a warm-up shown as reps. Nothing for a move it doesn't know.
+    private func showGuided(_ move: WorkoutCoaching.Move, kind: GuidedRoutine.Kind) {
+        guard lessonPlan == nil else { return }
+        guard let motion = ExerciseMotion.match(move.name) else {
+            lessonCue = nil
+            return
+        }
+        let moving = kind == .warmup || motion.spec?.tempo == .wave
+        lessonCue = LessonCue(motion: motion, body: moving ? .reps : .hold(1), from: 0, startedAt: CACurrentMediaTime())
+    }
+
     private func finishGuided(skipped: Bool) {
         guard let routine = guided else { return }
         guidedTask?.cancel()
         guidedTask = nil
         guided = nil
+        if lessonPlan == nil { lessonCue = nil }
         switch routine.kind {
         case .warmup:
             warmupPending = false
@@ -3771,6 +3807,7 @@ struct CoachStageView: View {
         cancelRest()
         guidedTask?.cancel()
         guidedTask = nil
+        if guided != nil, lessonPlan == nil { lessonCue = nil }
         guided = nil
         cooldownOffer = nil
         interruptedSpeech = nil
@@ -3814,6 +3851,10 @@ struct CoachStageView: View {
             // a count when you said it, or you typed it: then pass it on.
             if !spoken || live.uplinkMuted || Date().timeIntervalSince(live.unmutedAt) < 4 {
                 live.forwardUserText(trimmed)
+            }
+            // A question gets an answer: if none plays, it's asked again.
+            if !spoken || WorkoutVoice.isQuestionOrRequest(trimmed) {
+                live.expectAnswer(to: trimmed)
             }
             markRestartHandled()
             resumeListening()
@@ -3953,6 +3994,15 @@ struct CoachStageView: View {
             }
             resumeListening()
         }
+    }
+}
+
+/// The topmost of the bottom-of-stage views that reported (card, controls).
+private struct BottomChromeKey: PreferenceKey {
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        guard let next = nextValue() else { return }
+        value = value.map { min($0, next) } ?? next
     }
 }
 

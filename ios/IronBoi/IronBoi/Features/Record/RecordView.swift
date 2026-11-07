@@ -1,23 +1,34 @@
 import SwiftUI
 
-/// History — "this is what we did together." Pushed from the profile.
-/// Milestone stamps for earned PRs, then the training log as folded paper
-/// cards. Reads live from appModel.workoutLogs.
+/// History — "this is what we've done together." Pushed from the profile.
+/// Built like the newer You screens (Memory, profile): a display headline,
+/// then labelled groups — progress, milestones, and every session grouped
+/// by month. Reads live from appModel.workoutLogs.
 struct RecordView: View {
     @EnvironmentObject private var appModel: AppModel
 
     var body: some View {
-        Group {
-            if logs.isEmpty, !appModel.hasSession {
-                signedOut
-            } else if logs.isEmpty {
-                emptyState
-            } else {
-                content
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: MyoTheme.Spacing.xl) {
+                header
+
+                if logs.isEmpty {
+                    emptyState
+                } else {
+                    if let summary = appModel.progressSummary {
+                        ProgressSection(summary: summary)
+                    }
+                    if !stamps.isEmpty { milestones }
+                    sessions
+                }
             }
+            .padding(.horizontal, MyoTheme.Spacing.md)
+            .padding(.vertical, MyoTheme.Spacing.lg)
         }
         .background(PaperBackground())
         .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(MyoTheme.Colors.cream, for: .navigationBar)
     }
 
     private var logs: [WorkoutLogSummary] {
@@ -29,38 +40,90 @@ struct RecordView: View {
         return appModel.workoutLogs
     }
 
-    private var content: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: MyoTheme.Spacing.xl) {
-                if let summary = appModel.progressSummary {
-                    ProgressSection(summary: summary)
-                }
+    // MARK: - Pieces
 
-                if !stamps.isEmpty {
-                    VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-                        MyoSectionLabel(text: "Milestones")
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: MyoTheme.Spacing.lg) {
-                                ForEach(Array(stamps.enumerated()), id: \.offset) { i, stamp in
-                                    MyoStamp(line1: stamp.0, line2: stamp.1, rotation: i.isMultiple(of: 2) ? -6 : 4)
-                                }
-                            }
-                            .padding(.vertical, MyoTheme.Spacing.sm)
-                            .padding(.horizontal, MyoTheme.Spacing.sm)
+    private var header: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+            Text("This is what we've done together.")
+                .myoStyle(.display)
+                .foregroundStyle(MyoColor.Text.primary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Every session you've logged, and what it's adding up to.")
+                .myoStyle(.body)
+                .foregroundStyle(MyoColor.Text.secondary.color)
+        }
+    }
+
+    private var emptyState: some View {
+        MyoGroupCard {
+            MyoSectionLabel(text: "Nothing yet")
+            Text(appModel.hasSession
+                 ? "Finish a workout from your plan and it will show up here."
+                 : "Sign in to see the workouts you've completed.")
+                .myoStyle(.body)
+                .foregroundStyle(MyoColor.Text.secondary.color)
+        }
+    }
+
+    private var milestones: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+            MyoSectionLabel(text: "Milestones")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MyoTheme.Spacing.lg) {
+                    ForEach(Array(stamps.enumerated()), id: \.offset) { i, stamp in
+                        MyoStamp(line1: stamp.0, line2: stamp.1, rotation: i.isMultiple(of: 2) ? -4 : 3)
+                    }
+                }
+                // Room for the rotated stamps so their corners aren't clipped.
+                .padding(.vertical, MyoTheme.Spacing.md)
+                .padding(.horizontal, MyoTheme.Spacing.sm)
+            }
+            .padding(.horizontal, -MyoTheme.Spacing.sm)
+        }
+    }
+
+    /// Sessions grouped by month, newest first: one card per month with a
+    /// hairline between sessions.
+    private var sessions: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.lg) {
+            ForEach(monthGroups, id: \.title) { group in
+                VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+                    MyoSectionLabel(text: "\(group.title) · \(group.logs.count)")
+                    MyoGroupCard {
+                        ForEach(Array(group.logs.enumerated()), id: \.element.id) { index, log in
+                            if index > 0 { MyoHairline() }
+                            SessionRow(log: log)
                         }
                     }
                 }
-
-                VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-                    MyoSectionLabel(text: "Your history")
-                    ForEach(logs) { log in
-                        SessionCard(log: log)
-                    }
-                }
             }
-            .padding(.horizontal, MyoTheme.Spacing.md)
-            .padding(.vertical, MyoTheme.Spacing.lg)
         }
+    }
+
+    private var monthGroups: [(title: String, logs: [WorkoutLogSummary])] {
+        let sorted = logs.sorted { $0.date > $1.date }
+        var groups: [(title: String, logs: [WorkoutLogSummary])] = []
+        for log in sorted {
+            let title = Self.monthTitle(log)
+            if let last = groups.indices.last, groups[last].title == title {
+                groups[last].logs.append(log)
+            } else {
+                groups.append((title, [log]))
+            }
+        }
+        return groups
+    }
+
+    private static let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMMM yyyy"
+        return f
+    }()
+
+    private static func monthTitle(_ log: WorkoutLogSummary) -> String {
+        guard let day = log.day else { return "Earlier" }
+        return monthFormatter.string(from: day)
     }
 
     /// Earned, honest milestones — only what the data supports.
@@ -84,7 +147,7 @@ struct RecordView: View {
 
     #if DEBUG
     private static let demoLogs: [WorkoutLogSummary] = [
-        WorkoutLogSummary(sessionId: "1", date: "2026-06-20", title: "Lower Body Strength",
+        WorkoutLogSummary(sessionId: "1", date: "2026-06-20", title: "Lower Body Strength · 70%",
             exercises: [LoggedExercise(name: "Back Squat", sets: Array(repeating: LoggedSet(reps: 5, loadKg: 102), count: 5)),
                         LoggedExercise(name: "Romanian Deadlift", sets: Array(repeating: LoggedSet(reps: 8, loadKg: 84), count: 3)),
                         LoggedExercise(name: "Walking Lunge", sets: Array(repeating: LoggedSet(reps: 12, loadKg: 20), count: 3))],
@@ -93,47 +156,32 @@ struct RecordView: View {
             exercises: [LoggedExercise(name: "Bench Press", sets: Array(repeating: LoggedSet(reps: 5, loadKg: 84), count: 5)),
                         LoggedExercise(name: "Overhead Press", sets: Array(repeating: LoggedSet(reps: 6, loadKg: 50), count: 4))],
             durationSec: 2700, perceivedEffort: 6),
-        WorkoutLogSummary(sessionId: "3", date: "2026-06-16", title: "Pull Day",
+        WorkoutLogSummary(sessionId: "3", date: "2026-05-30", title: "Pull Day",
             exercises: [LoggedExercise(name: "Deadlift", sets: Array(repeating: LoggedSet(reps: 3, loadKg: 140), count: 4)),
                         LoggedExercise(name: "Pull-up", sets: Array(repeating: LoggedSet(reps: 8, loadKg: nil), count: 4))],
             durationSec: 3000, perceivedEffort: 8),
     ]
     #endif
-
-    private var emptyState: some View {
-        ContentUnavailableView {
-            Label("History", systemImage: "calendar.day.timeline.left")
-        } description: {
-            Text("No sessions recorded yet. Start a workout from Plan to begin building your history.")
-        }
-    }
-
-    private var signedOut: some View {
-        ContentUnavailableView {
-            Label("Your record", systemImage: "calendar.day.timeline.left")
-        } description: {
-            Text("Sign in to see the workouts you've completed.")
-        }
-    }
 }
 
-/// A completed session as a sheet of paper: ink date block on the left, the
-/// work on the right, a folded corner so it reads as a page in the dossier.
-private struct SessionCard: View {
+/// One completed session: weekday + day on the left, the work on the right.
+/// A scaled session ("… · 70%") shows its scale as a small tag instead of
+/// part of the title.
+private struct SessionRow: View {
     let log: WorkoutLogSummary
 
     var body: some View {
         HStack(alignment: .top, spacing: MyoTheme.Spacing.md) {
             dateBlock
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(log.title)
-                    .myoStyle(.title)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(parts.title)
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(MyoColor.Text.primary.color)
                     .fixedSize(horizontal: false, vertical: true)
 
                 Text(statLine)
-                    .myoStyle(.numeric)
+                    .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(MyoColor.Text.secondary.color)
 
                 if !topExercises.isEmpty {
@@ -142,230 +190,238 @@ private struct SessionCard: View {
                         .foregroundStyle(MyoColor.Text.tertiary.color)
                         .lineLimit(2)
                 }
+
+                if let scale = parts.scale {
+                    Text("\(scale) load")
+                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(MyoColor.Text.secondary.color)
+                        .padding(.horizontal, MyoTheme.Spacing.sm)
+                        .padding(.vertical, 3)
+                        .background(MyoTheme.Colors.ink.opacity(0.06))
+                        .clipShape(Capsule())
+                        .padding(.top, 2)
+                }
             }
 
             Spacer(minLength: 0)
         }
-        .padding(MyoTheme.Spacing.md)
-        .myoCard()
-        .overlay(alignment: .topTrailing) { foldedCorner }
+        .padding(.vertical, MyoTheme.Spacing.xs)
+        .accessibilityElement(children: .combine)
     }
 
     private var dateBlock: some View {
         VStack(spacing: 0) {
-            Text(monthText)
-                .font(.system(.caption2, design: .monospaced).weight(.bold))
+            Text(weekdayText)
+                .font(.system(.caption2, design: .monospaced).weight(.semibold))
                 .foregroundStyle(MyoColor.redPen)
                 .textCase(.uppercase)
             Text(dayText)
-                .font(.system(.title, design: .monospaced).weight(.bold))
+                .font(.system(.title2, design: .monospaced).weight(.semibold))
                 .foregroundStyle(MyoColor.Text.primary.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
         }
-        .frame(width: 52)
+        .frame(width: 40)
     }
 
-    /// A small ink page-fold in the top-right corner.
-    private var foldedCorner: some View {
-        Path { p in
-            p.move(to: CGPoint(x: 0, y: 0))
-            p.addLine(to: CGPoint(x: 16, y: 0))
-            p.addLine(to: CGPoint(x: 16, y: 16))
-            p.closeSubpath()
+    /// Splits a trailing " · 70%" off the stored title.
+    private var parts: (title: String, scale: String?) {
+        let title = log.title
+        guard let range = title.range(of: #"\s*·\s*\d{1,3}%$"#, options: .regularExpression) else {
+            return (title, nil)
         }
-        .fill(MyoTheme.Colors.ink.opacity(0.10))
-        .frame(width: 16, height: 16)
-        .padding(.trailing, 1)
-        .padding(.top, 1)
-        .accessibilityHidden(true)
+        let scale = title[range].filter { $0.isNumber || $0 == "%" }
+        return (String(title[..<range.lowerBound]), scale.isEmpty ? nil : String(scale))
     }
 
-    private var monthText: String {
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "EEE"; return f
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "d"; return f
+    }()
+
+    private var weekdayText: String {
         guard let d = log.day else { return "—" }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM"
-        return f.string(from: d)
+        return Self.weekdayFormatter.string(from: d)
     }
 
     private var dayText: String {
         guard let d = log.day else { return "·" }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "d"
-        return f.string(from: d)
+        return Self.dayFormatter.string(from: d)
     }
 
     private var statLine: String {
-        var parts = ["\(log.exerciseCount) exercises", "\(log.totalSets) sets"]
+        var parts = ["\(log.totalSets) sets"]
         if let dur = log.durationSec, dur > 0 { parts.append("\(dur / 60) min") }
-        if let e = log.perceivedEffort { parts.append("effort \(e)") }
-        return parts.joined(separator: "  ·  ")
+        if let e = log.perceivedEffort { parts.append("effort \(e)/10") }
+        return parts.joined(separator: " · ")
     }
 
     private var topExercises: String {
-        log.exercises.prefix(4).map(\.name).joined(separator: ", ")
+        let names = log.exercises.prefix(3).map(\.name)
+        let more = log.exercises.count - names.count
+        return names.joined(separator: ", ") + (more > 0 ? " + \(more) more" : "")
     }
 }
 
 #Preview {
-    RecordView()
-        .environmentObject(AppModel())
+    NavigationStack {
+        RecordView()
+            .environmentObject(AppModel())
+    }
 }
 
 // MARK: - Progress section (server-computed trends; the app only renders)
 
-/// "Am I getting somewhere?" — adherence, strength trends, weight trend.
-/// Every number comes from derivedSummaries/progress_current; no math here.
+/// "Am I getting somewhere?" — showing up, strength, body weight, each as
+/// its own labelled card. Every number comes from
+/// derivedSummaries/progress_current; no math here.
 private struct ProgressSection: View {
     let summary: ProgressSummaryModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
-            MyoSectionLabel(text: "Progress — last 6 weeks")
-
-            if !summary.lensHighlights.isEmpty {
-                lensCard
-            }
-
-            adherenceCard
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.lg) {
+            group("Last 6 weeks") { adherenceCard }
 
             if !summary.lifts.isEmpty {
-                liftsCard
+                group("Strength · \(summary.lifts.count)") { liftsCard }
             }
 
             if !summary.body.weightSeries.isEmpty {
-                weightCard
+                group("Body weight") { weightCard }
             }
         }
     }
 
-    /// "Through your protocol's eyes" — the coaching-lens callout. Every
-    /// string is server-templated from computed numbers in
-    /// functions/src/progress/build.ts (computeLensHighlights); the app
-    /// renders them verbatim. Hidden entirely when the doc has no
-    /// lensHighlights (lens "none", pre-lens docs, or nothing to frame).
-    private var lensCard: some View {
+    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
-            Text("Through your protocol's eyes")
-                .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                .foregroundStyle(MyoColor.redPen)
-                .textCase(.uppercase)
-
-            ForEach(summary.lensHighlights) { highlight in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(highlight.framing)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MyoColor.Text.primary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if !highlight.note.isEmpty {
-                        Text(highlight.note)
-                            .myoStyle(.detail)
-                            .foregroundStyle(MyoColor.Text.secondary.color)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
+            MyoSectionLabel(text: title)
+            content()
         }
-        .padding(MyoTheme.Spacing.md)
-        .myoCard()
     }
 
     private var adherenceCard: some View {
-        HStack(alignment: .center, spacing: MyoTheme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Showing up")
-                    .myoStyle(.title)
-                    .foregroundStyle(MyoColor.Text.primary.color)
-                Text(
-                    summary.adherence.plannedSessions > 0
-                        ? "\(summary.adherence.completedSessions) of \(summary.adherence.plannedSessions) planned sessions"
-                        : "\(summary.adherence.completedSessions) sessions logged"
-                )
-                    .myoStyle(.numeric)
-                    .foregroundStyle(MyoColor.Text.secondary.color)
-                if summary.adherence.streakWeeks > 0 {
-                    Text("\(summary.adherence.streakWeeks)-week streak")
-                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(MyoColor.redPen)
-                        .textCase(.uppercase)
+        MyoGroupCard {
+            HStack(alignment: .bottom, spacing: MyoTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(summary.adherence.completedSessions)")
+                            .font(.system(.largeTitle, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                        Text(summary.adherence.completedSessions == 1 ? "session" : "sessions")
+                            .myoStyle(.body)
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                    }
+                    if summary.adherence.plannedSessions > 0 {
+                        Text("of \(summary.adherence.plannedSessions) planned since you started")
+                            .myoStyle(.detail)
+                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    WeeklyBars(rates: summary.adherence.weeklyRate)
+                        .frame(width: 104, height: 40)
+                        .accessibilityLabel("Weekly adherence over the last six weeks")
+                    Text("THIS WEEK →")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                        .accessibilityHidden(true)
                 }
             }
 
-            Spacer(minLength: 0)
-
-            WeeklyBars(rates: summary.adherence.weeklyRate)
-                .frame(width: 96, height: 44)
-                .accessibilityLabel("Weekly adherence over the last six weeks")
+            if summary.adherence.streakWeeks > 0 {
+                Text("\(summary.adherence.streakWeeks)-week streak")
+                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(MyoColor.redPen)
+                    .textCase(.uppercase)
+            }
         }
-        .padding(MyoTheme.Spacing.md)
-        .myoCard()
     }
 
     private var liftsCard: some View {
-        VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
-            Text("Strength")
-                .myoStyle(.title)
-                .foregroundStyle(MyoColor.Text.primary.color)
-
-            ForEach(summary.lifts) { lift in
+        MyoGroupCard {
+            ForEach(Array(summary.lifts.enumerated()), id: \.element.id) { index, lift in
+                if index > 0 { MyoHairline() }
                 HStack(spacing: MyoTheme.Spacing.md) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(lift.exerciseName)
-                            .myoStyle(.detail)
-                            .foregroundStyle(MyoColor.Text.primary.color)
-                            .lineLimit(1)
-                        Text(trendLabel(lift.trendPct))
-                            .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                            .foregroundStyle(trendColor(lift.trendPct))
+                    Text(lift.exerciseName)
+                        .myoStyle(.body)
+                        .foregroundStyle(MyoColor.Text.primary.color)
+                        .lineLimit(2)
+
+                    Spacer(minLength: MyoTheme.Spacing.sm)
+
+                    // A line needs at least three points to show a shape;
+                    // two points always drew a full-height diagonal that
+                    // made a small change look like a cliff.
+                    Group {
+                        if lift.e1rmSeries.count >= 3 {
+                            Sparkline(points: lift.e1rmSeries.map(\.value))
+                                .stroke(trendColor(lift.trendPct), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        } else {
+                            Color.clear
+                        }
                     }
+                    .frame(width: 56, height: 18)
+                    .accessibilityHidden(true)
 
-                    Spacer(minLength: 0)
-
-                    Sparkline(points: lift.e1rmSeries.map(\.value))
-                        .stroke(trendColor(lift.trendPct), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                        .frame(width: 96, height: 26)
-                        .accessibilityLabel("\(lift.exerciseName) strength trend")
+                    Text(trendLabel(lift.trendPct))
+                        .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(trendColor(lift.trendPct))
+                        .frame(minWidth: 64, alignment: .trailing)
                 }
+                .accessibilityElement(children: .combine)
             }
+
+            Text("Estimated one-rep max, change over the last 6 weeks.")
+                .myoStyle(.detail)
+                .foregroundStyle(MyoColor.Text.tertiary.color)
         }
-        .padding(MyoTheme.Spacing.md)
-        .myoCard()
     }
 
     private var weightCard: some View {
-        HStack(alignment: .center, spacing: MyoTheme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Body weight")
-                    .myoStyle(.title)
-                    .foregroundStyle(MyoColor.Text.primary.color)
+        MyoGroupCard {
+            HStack(alignment: .center, spacing: MyoTheme.Spacing.md) {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let avg = summary.body.rollingAvgKg {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(Self.pounds(avg))
+                                .font(.system(.title, design: .monospaced).weight(.semibold))
+                                .foregroundStyle(MyoColor.Text.primary.color)
+                            Text("lb this week")
+                                .myoStyle(.body)
+                                .foregroundStyle(MyoColor.Text.secondary.color)
+                        }
+                    }
 
-                if let avg = summary.body.rollingAvgKg {
-                    Text("\(Self.pounds(avg)) lb this week")
-                        .myoStyle(.numeric)
-                        .foregroundStyle(MyoColor.Text.secondary.color)
+                    if let trend = summary.body.trendPctPerWeek {
+                        Text(weightTrendLabel(trend))
+                            .font(.system(.caption, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(showsSafetyCaution ? MyoColor.State.danger.color : MyoColor.Text.tertiary.color)
+                    }
                 }
 
-                if let trend = summary.body.trendPctPerWeek {
-                    Text(weightTrendLabel(trend))
-                        .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(showsSafetyCaution ? MyoColor.State.danger.color : MyoColor.Text.tertiary.color)
-                }
+                Spacer(minLength: 0)
 
-                if showsSafetyCaution {
-                    Label("Faster than a safe pace — worth a chat with Coach", systemImage: "exclamationmark.shield")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(MyoColor.State.danger.color)
+                if summary.body.weightSeries.count >= 3 {
+                    Sparkline(points: summary.body.weightSeries.map(\.value))
+                        .stroke(MyoColor.Text.secondary.color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        .frame(width: 96, height: 32)
+                        .accessibilityLabel("Body weight trend")
                 }
             }
 
-            Spacer(minLength: 0)
-
-            Sparkline(points: summary.body.weightSeries.map(\.value))
-                .stroke(MyoColor.Text.secondary.color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                .frame(width: 96, height: 32)
-                .accessibilityLabel("Body weight trend")
+            if showsSafetyCaution {
+                Label("Faster than a safe pace — worth a chat with Coach", systemImage: "exclamationmark.shield")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(MyoColor.State.danger.color)
+            }
         }
-        .padding(MyoTheme.Spacing.md)
-        .myoCard()
     }
 
     // Defense-in-depth against stale persisted docs: the caution needs BOTH
@@ -377,9 +433,8 @@ private struct ProgressSection: View {
     }
 
     private func trendLabel(_ pct: Double) -> String {
-        if abs(pct) < 0.5 { return "holding steady" }
-        let arrow = pct > 0 ? "▲" : "▼"
-        return "\(arrow) \(String(format: "%.0f", abs(pct)))% over 6 wks"
+        if abs(pct) < 0.5 { return "steady" }
+        return "\(pct > 0 ? "+" : "−")\(String(format: "%.0f", abs(pct)))%"
     }
 
     private func trendColor(_ pct: Double) -> Color {

@@ -133,7 +133,7 @@ enum WorkoutVoice {
     static func isQuestionOrRequest(_ transcript: String) -> Bool {
         let t = normalized(transcript)
         if transcript.contains("?") { return true }
-        return t.range(of: #"\b(show me|how do|how many|what|what's|when|why|can you|could you|should i|explain|again|swap|skip|add|change|remind|tell me|myo)\b"#,
+        return t.range(of: #"\b(show me|how do|how many|how much|how heavy|how long|how far|how hard|which|what|what's|when|why|can you|could you|can i|should i|do i|am i|is it|is that|is this|explain|again|swap|skip|add|change|remind|tell me|myo)\b"#,
                        options: .regularExpression) != nil
     }
 

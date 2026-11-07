@@ -239,6 +239,14 @@ final class AudioHub {
         echoCancelling || headphonesConnected
     }
 
+    /// The on-phone voice log, if anything has been written to it.
+    static var logFileURL: URL? {
+        guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("audio-log.txt"),
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
     /// Audio decisions, for testing on a phone over the Xcode console.
     /// On in every build (TestFlight included — that's where the real
     /// evidence is), local only, capped at ~512 KB by dropping the oldest

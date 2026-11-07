@@ -1,39 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { retrieveResearchCorpus } from "../../../src/corpus/researchCorpus.js";
+import { RESEARCH_CORPUS, retrieveResearchCorpus } from "../../../src/corpus/researchCorpus.js";
 
-// Protocol grounding: the active coaching protocol (preferences.coachingLens)
-// must surface its evidence entry so the coach's protocol framing is cited,
-// not free-styled — and must NOT pull in protocols the user didn't pick.
-describe("coaching-protocol corpus grounding", () => {
-  it("surfaces the active protocol's evidence entry on a generic question", () => {
-    const result = retrieveResearchCorpus({
-      userContent: "should I train legs today?",
+// Named coaching protocols (Huberman, Schoenfeld, Sims, Blueprint) are
+// retired: the corpus carries no protocol entries, and a profile that still
+// names one must not change what is retrieved.
+describe("retired coaching protocols in the corpus", () => {
+  it("has no named-protocol entries", () => {
+    expect(RESEARCH_CORPUS.some((e) => e.entryId.startsWith("protocol_"))).toBe(false);
+    expect(JSON.stringify(RESEARCH_CORPUS)).not.toMatch(/huberman|schoenfeld|blueprint|stacy sims/i);
+  });
+
+  it("ignores a legacy coachingLens on the profile", () => {
+    const question = "should I train legs today?";
+    const withLens = retrieveResearchCorpus({
+      userContent: question,
       profile: { preferences: { coachingLens: "blueprint" } },
     });
-    expect(result.some((e) => e.entryId === "protocol_blueprint_longevity_v1")).toBe(true);
-  });
-
-  it("does not surface a protocol the user did not choose", () => {
-    const result = retrieveResearchCorpus({
-      userContent: "should I train legs today?",
-      profile: { preferences: { coachingLens: "blueprint" } },
+    const without = retrieveResearchCorpus({
+      userContent: question,
+      profile: { preferences: {} },
     });
-    expect(result.some((e) => e.entryId === "protocol_huberman_recovery_v1")).toBe(false);
+    expect(withLens.map((e) => e.entryId)).toEqual(without.map((e) => e.entryId));
   });
 
-  it("forces no protocol entry when the protocol is the default ('none')", () => {
-    const result = retrieveResearchCorpus({
-      userContent: "general question about my week",
-      profile: { preferences: { coachingLens: "none" } },
-    });
-    expect(result.some((e) => e.entryId.startsWith("protocol_"))).toBe(false);
-  });
-
-  it("still lets topic keywords surface a protocol entry even without selection", () => {
+  it("still grounds hypertrophy questions in the resistance-training evidence", () => {
     const result = retrieveResearchCorpus({
       userContent: "how much volume per muscle for hypertrophy?",
       profile: null,
     });
-    expect(result.some((e) => e.entryId === "protocol_schoenfeld_hypertrophy_v1")).toBe(true);
+    expect(result.some((e) => e.entryId === "acsm_resistance_training_healthy_adults_2026")).toBe(true);
   });
 });

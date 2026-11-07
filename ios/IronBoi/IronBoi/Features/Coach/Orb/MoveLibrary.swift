@@ -278,5 +278,111 @@ enum MoveLibrary {
                 Lesson(line: "Short, steady steps. Don't let them swing. Like this."),
             ],
             cues: ["Stand tall.", "Shoulders back.", "Grip hard."]),
+    ] + warmups + stretches
+
+    // MARK: - Warm-ups and stretches
+
+    /// On all fours: hips over knees, shoulders over hands (bird dog's base).
+    private static let allFours = Key(hip: [-0.12, -0.195], tilt: 90, nod: -5, arms: [[-90, -90], [-90, -90]],
+                                      feet: [[-0.31, -0.385], [-0.29, -0.385]])
+    private static let standingSide = Key(hip: [-0.01, 0.005], tilt: 2, arms: sideHang, feet: sideFeet)
+    private static let standingFront = Key(hip: [0, 0.005], arms: [[-95, -92], [-85, -88]], feet: frontFeet)
+
+    /// One spoken line and one cue: the guided routine says the rest.
+    private static func simple(_ id: String, _ names: [String], _ view: MoveSpec.View, seconds: Float,
+                               tempo: MoveSpec.Tempo = .rep, mirror: Bool = true, _ keys: [Key], cue: String) -> MoveSpec {
+        MoveSpec(id: id, names: names, view: view, takesGear: false, seconds: seconds, tempo: tempo, mirror: mirror,
+                 keys: keys, lesson: [Lesson(line: cue)], cues: [cue])
+    }
+
+    /// The moving warm-ups in WorkoutCoaching.warmupFor (bodyweight squats
+    /// use the squat lift). Shown as reps.
+    private static let warmups: [MoveSpec] = [
+        simple("leg-swing", ["leg swing", "leg swings"], .side, seconds: 1.6, tempo: .wave, [
+            Key(hip: [0, 0.005], tilt: 0, arms: [[-90, -90], [-10, -40]], feet: [[0, -0.385], [0.22, -0.31]]),
+            Key(hip: [0, 0.005], tilt: 3, arms: [[-90, -90], [-10, -40]], feet: [[0, -0.385], [-0.20, -0.32]]),
+        ], cue: "Swing front to back, let it get bigger."),
+        simple("hip-hinge", ["hip hinge", "hip hinges"], .side, seconds: 3.0, [
+            Key(hip: [-0.01, 0.005], tilt: 2, hands: [[-0.03, 0.01], [0.0, 0.01]], feet: sideFeet),
+            Key(hip: [-0.12, -0.02], tilt: 58, nod: -5, hands: [[-0.13, -0.01], [-0.10, -0.01]], feet: sideFeet),
+        ], cue: "Hands on hips, push them back, then stand tall."),
+        simple("arm-circles", ["arm circle", "arm circles"], .front, seconds: 1.2, tempo: .wave, [
+            Key(hip: [0, 0.005], arms: [[168, 160]], feet: frontFeet),
+            Key(hip: [0, 0.005], arms: [[192, 200]], feet: frontFeet),
+        ], cue: "Small to big, then switch direction."),
+        simple("arm-swings", ["arm swing", "arm swings"], .front, seconds: 1.6, tempo: .wave, [
+            Key(hip: [0, 0.005], hands: [[0.10, 0.20]], bend: [-1, -0.3], feet: frontFeet),
+            Key(hip: [0, 0.005], hands: [[-0.48, 0.22]], bend: [-1, -0.3], feet: frontFeet),
+        ], cue: "Hug yourself, then fling the arms wide."),
+        simple("scap-push-up", ["scap push up", "scap push ups", "scapular push up", "scapular push ups"], .side,
+               seconds: 2.0, tempo: .wave, [
+            Key(hip: [-0.20, -0.055], tilt: 75, nod: -10, arms: [[-90, -90], [-88, -88]],
+                feet: [[-0.42, -0.385], [-0.41, -0.385]]),
+            Key(hip: [-0.20, -0.035], tilt: 73, nod: -10, arms: [[-90, -90], [-88, -88]],
+                feet: [[-0.42, -0.385], [-0.41, -0.385]]),
+        ], cue: "Arms straight, squeeze and spread the shoulder blades."),
+        simple("cat-cow", ["cat cow", "cat camel"], .side, seconds: 5.0, tempo: .wave, [
+            Key(hip: [-0.12, -0.185], tilt: 96, nod: -25, arms: [[-90, -90], [-90, -90]],
+                feet: [[-0.31, -0.385], [-0.29, -0.385]]),
+            Key(hip: [-0.12, -0.205], tilt: 84, nod: 20, arms: [[-90, -90], [-90, -90]],
+                feet: [[-0.31, -0.385], [-0.29, -0.385]]),
+        ], cue: "Round up on the exhale, drop the belly on the inhale."),
+    ]
+
+    /// The cooldown stretches in WorkoutCoaching.stretchFor: the first key
+    /// is the way in, the last is the stretch, eased into and held.
+    private static let stretches: [MoveSpec] = [
+        simple("chest-stretch", ["doorway chest stretch", "chest stretch", "pec stretch"], .side, seconds: 3, [
+            standingSide,
+            Key(hip: [0.04, -0.03], tilt: 5, arms: [[180, 90], [-88, -88]], feet: [[-0.09, -0.385], [0.16, -0.385]]),
+        ], cue: "Forearm on the frame, step through until the chest opens."),
+        simple("triceps-stretch", ["triceps stretch", "tricep stretch", "overhead triceps stretch"], .front, seconds: 3,
+               mirror: false, [
+            standingFront,
+            Key(hip: [0, 0.005], arms: [[80, -95], [110, 170]], feet: frontFeet),
+        ], cue: "Hand down your back, gently pull the elbow."),
+        simple("shoulder-stretch", ["cross body shoulder stretch", "shoulder stretch", "cross body stretch"], .front,
+               seconds: 3, mirror: false, [
+            standingFront,
+            Key(hip: [0, 0.005], arms: [[-5, -5], [-120, 100]], feet: frontFeet),
+        ], cue: "Arm across your chest, pull it in at the elbow."),
+        simple("childs-pose", ["child's pose", "childs pose", "child pose"], .side, seconds: 4, [
+            allFours,
+            Key(hip: [-0.24, -0.27], tilt: 100, nod: -15, arms: [[0, 0], [2, 2]], feet: [[-0.36, -0.385], [-0.34, -0.385]]),
+        ], cue: "Sit back, reach long, breathe into your ribs."),
+        simple("biceps-stretch", ["biceps stretch", "bicep stretch", "wall biceps stretch"], .side, seconds: 3, [
+            standingSide,
+            Key(hip: [0, 0.005], tilt: 5, arms: [[185, 185], [-88, -88]], feet: sideFeet),
+        ], cue: "Palm on the wall behind you, turn away slowly."),
+        simple("hamstring-stretch", ["hamstring stretch", "standing hamstring stretch"], .side, seconds: 3, [
+            standingSide,
+            Key(hip: [-0.03, 0.0], tilt: 35, nod: 5, arms: [[-40, -40], [-38, -38]], feet: [[-0.02, -0.385], [0.26, -0.24]]),
+        ], cue: "Heel up on something low, flat back, hinge until you feel it."),
+        simple("figure-four", ["figure four", "pigeon stretch", "glute stretch"], .side, seconds: 3, [
+            standingSide,
+            Key(hip: [-0.08, -0.10], tilt: 25, arms: [[-20, -20], [-18, -18]], feet: [[0, -0.385], [0.12, -0.19]]),
+        ], cue: "Ankle over the opposite knee, sit back."),
+        simple("couch-stretch", ["couch stretch", "quad stretch", "hip flexor stretch"], .side, seconds: 3, [
+            Key(hip: [-0.01, -0.15], tilt: 2, arms: sideHang, feet: [[-0.24, -0.36], [0.21, -0.385]]),
+            Key(hip: [0, -0.13], tilt: -5, arms: sideHang, feet: [[-0.22, -0.22], [0.20, -0.385]]),
+        ], cue: "Back knee down, foot up behind you, squeeze that glute."),
+        simple("calf-stretch", ["calf stretch", "wall calf stretch"], .side, seconds: 3, [
+            standingSide,
+            Key(hip: [0, -0.03], tilt: 15, arms: [[10, 10], [12, 12]], feet: [[-0.14, -0.385], [0.12, -0.385]]),
+        ], cue: "Back leg straight, heel down, lean into the wall."),
+        simple("cobra", ["cobra", "cobra stretch", "upward dog"], .side, seconds: 3, [
+            Key(hip: [-0.05, -0.33], tilt: 88, hands: [[0.17, -0.375], [0.19, -0.375]],
+                feet: [[-0.44, -0.37], [-0.43, -0.365]]),
+            Key(hip: [-0.05, -0.33], tilt: 45, nod: -15, hands: [[0.18, -0.375], [0.20, -0.375]],
+                feet: [[-0.44, -0.37], [-0.43, -0.365]]),
+        ], cue: "Hips down, press up gently, long neck."),
+        simple("butterfly", ["butterfly stretch", "butterfly"], .front, seconds: 3, [
+            Key(hip: [0, -0.31], hands: [[-0.06, -0.33]], bend: [-1, 0], feet: [[-0.10, -0.37], [0.10, -0.37]]),
+            Key(hip: [0, -0.31], hands: [[-0.04, -0.33]], bend: [-1, 0], feet: [[-0.03, -0.37], [0.03, -0.37]]),
+        ], cue: "Soles together, let the knees fall."),
+        simple("neck-stretch", ["neck stretch", "neck side stretch"], .front, seconds: 3, mirror: false, [
+            standingFront,
+            Key(hip: [0, 0.005], tilt: 7, nod: 1.5, arms: [[-95, -92], [-85, -88]], feet: frontFeet),
+        ], cue: "Ear toward shoulder, the other shoulder stays heavy."),
     ]
 }

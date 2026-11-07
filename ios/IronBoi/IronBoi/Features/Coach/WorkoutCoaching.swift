@@ -345,13 +345,17 @@ enum WorkoutCoaching {
 
         /// After set `set` of `targetSets` on a lift, with `reps` of `target`.
         mutating func line(exercise name: String, set: Int, targetSets: Int, reps: Int, target: Int,
-                           timed: Bool, hype: Bool, tipsFull: Bool) -> Line? {
+                           timed: Bool, hype: Bool, tipsFull: Bool, weighted: Bool = true) -> Line? {
             let lastSet = set >= targetSets
             setsSinceSpoke += 1
             var options: [Line] = []
 
             if !timed, reps < target - 1, !muted.contains(.shortfall) {
-                options.append(Line(kind: .shortfall, text: "\(reps) of \(target). Want me to take a little weight off for the next one?"))
+                // Push-ups, pull-ups, a bodyweight squat: there's no weight
+                // to take off, so the offer is fewer reps ("yes" sets them).
+                options.append(Line(kind: .shortfall, text: weighted
+                    ? "\(reps) of \(target). Want me to take a little weight off for the next one?"
+                    : "\(reps) of \(target). Want me to cut the reps a little for the next one?"))
             }
             if !lastSet, set == 1, !muted.contains(.question), !askedAbout.contains(name) {
                 options.append(Line(kind: .question, text: ["How did that feel? Easy, good, or hard?",

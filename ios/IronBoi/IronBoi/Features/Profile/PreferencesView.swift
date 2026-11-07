@@ -522,23 +522,6 @@ struct PreferencesView: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
             }
-
-            MyoHairline().padding(.vertical, MyoTheme.Spacing.xs)
-
-            MyoSectionLabel(text: "Coaching protocol")
-            MyoValueRow(label: "Protocol") {
-                Picker("Protocol", selection: $draft.preferences.coachingLens) {
-                    ForEach(CoachingLens.allCases) { Text($0.displayName).tag($0) }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-            }
-            Text(draft.preferences.coachingLens.blurb)
-                .font(.caption)
-                .foregroundStyle(MyoColor.Text.tertiary.color)
-            Text("Shapes how Coach reasons and explains — never what's safe.")
-                .font(.caption2)
-                .foregroundStyle(MyoColor.Text.disabled.color)
         }
     }
 
@@ -662,6 +645,26 @@ struct PreferencesView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            // The phone's voice log (what the mic heard, when the coach spoke,
+            // what was dropped), to send when voice or counting misbehaves.
+            // It stays on the phone until you share it.
+            if let log = AudioHub.logFileURL {
+                MyoHairline()
+                ShareLink(item: log, preview: SharePreview("MYO voice log")) {
+                    HStack {
+                        Text("Share voice log")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(MyoTheme.Colors.ink)
+                        Spacer()
+                        Image(systemName: "waveform")
+                            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
 
             MyoHairline()
 

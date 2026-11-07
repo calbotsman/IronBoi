@@ -78,55 +78,15 @@ enum CoachingTone: String, CaseIterable, Codable, Identifiable {
     var displayName: String { rawValue.capitalized }
 }
 
-/// Explanatory lens — how the coach frames its reasoning. Mirrors
-/// CoachingLens in functions/src/contracts/coach-agent.ts. Per the personas
-/// strategy: lenses are "ways to understand your training," not celebrity
-/// worship. They shape explanation, never safety.
-/// A coaching protocol — the approach the coach reasons and explains through.
-/// One of the app's hooks. Mirrors CoachingLens in
-/// functions/src/contracts/coach-agent.ts. The enum name stays CoachingLens
-/// for storage continuity; everything user-facing says "protocol."
+/// Retired: MYO dropped the named coaching protocols (Huberman, Schoenfeld,
+/// Sims, Johnson) and always coaches in its own voice. The type and the
+/// `preferences.coachingLens` field stay so existing profiles still load;
+/// any stored protocol reads back as `.none`, and the next save writes
+/// "none" over it.
 enum CoachingLens: String, CaseIterable, Codable, Identifiable {
     case none
-    case huberman
-    case schoenfeld
-    case sims
-    case blueprint
 
     var id: String { rawValue }
-
-    /// The protocol's name — the famous person leads (it's the hook).
-    var displayName: String {
-        switch self {
-        case .none: return "MYO Coach (default)"
-        case .huberman: return "Andrew Huberman"
-        case .schoenfeld: return "Brad Schoenfeld"
-        case .sims: return "Stacy Sims"
-        case .blueprint: return "Bryan Johnson"
-        }
-    }
-
-    /// The authority the protocol is attributed to (for chips/labels). Empty for default.
-    var attribution: String {
-        switch self {
-        case .none: return ""
-        case .huberman: return "Huberman"
-        case .schoenfeld: return "Schoenfeld"
-        case .sims: return "Sims"
-        case .blueprint: return "Blueprint"
-        }
-    }
-
-    /// One-line description shown under the picker.
-    var blurb: String {
-        switch self {
-        case .none: return "Coach explains in its own balanced voice."
-        case .huberman: return "Framed around recovery, sleep, and circadian timing (Huberman)."
-        case .schoenfeld: return "Framed around tension, volume, and progression (Schoenfeld)."
-        case .sims: return "Framed around female physiology and cycle-aware training (Sims)."
-        case .blueprint: return "Consistency, recovery, and data-driven adjustments — low-stress training for longevity (Blueprint / Johnson)."
-        }
-    }
 }
 
 enum PreferredWorkoutTime: String, CaseIterable, Codable, Identifiable {

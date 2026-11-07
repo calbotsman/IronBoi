@@ -116,14 +116,35 @@ describe("app lines in the live engine's own voice", () => {
     expect(wav.length).toBe(44 + pcm.length);
   });
 
-  it("falls back to Cloud TTS when the engine fails", async () => {
+  it("retries the engine once, and never swaps in the Cloud TTS voice", async () => {
+    const calls: string[] = [];
     const fetchMock = (async (url: string) => {
+      calls.push(String(url));
       if (String(url).includes("generativelanguage")) return new Response("{}", { status: 500 });
-      if (String(url).includes("metadata")) return new Response(JSON.stringify({ access_token: "t", expires_in: 3600 }), { status: 200 });
       return new Response(JSON.stringify({ audioContent: "AAAA" }), { status: 200 });
     }) as unknown as typeof fetch;
     process.env.GOOGLE_TTS_ACCESS_TOKEN = "t";
-    const out = await synthesizeSpeech({ text: "Go.", engine: "gemini" }, fetchMock, { gemini: "k" });
+    await expect(synthesizeSpeech({ text: "Go.", engine: "gemini" }, fetchMock, { gemini: "k" })).rejects.toThrow(/gemini-tts/);
+    expect(calls.filter((url) => url.includes("generativelanguage"))).toHaveLength(2);
+    expect(calls.some((url) => url.includes("texttospeech"))).toBe(false);
+  });
+
+  it("succeeds on the retry in the same voice", async () => {
+    const pcm = Buffer.alloc(48);
+    let tries = 0;
+    const fetchMock = (async () => {
+      tries += 1;
+      if (tries === 1) return new Response("{}", { status: 503 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { data: pcm.toString("base64") } }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const out = await synthesizeSpeech({ text: "Go.", voice: "Puck", engine: "gemini" }, fetchMock, { gemini: "k" });
+    expect(out.engine).toBe("gemini");
+  });
+
+  it("uses Cloud TTS when the engine has no key (the only voice there is)", async () => {
+    const fetchMock = (async () => new Response(JSON.stringify({ audioContent: "AAAA" }), { status: 200 })) as unknown as typeof fetch;
+    process.env.GOOGLE_TTS_ACCESS_TOKEN = "t";
+    const out = await synthesizeSpeech({ text: "Go.", engine: "gemini" }, fetchMock, {});
     expect(out.engine).toBe("chirp");
   });
 

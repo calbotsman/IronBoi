@@ -1238,13 +1238,9 @@ export function normalizeTrainingExperience(value: string) {
   return undefined;
 }
 
-function normalizeCoachingLens(value: unknown): z.infer<typeof CoachingLens> {
-  if (typeof value !== "string") return "none";
-  const lower = value.toLowerCase();
-  if (/huberman|nervous|circadian|sleep/.test(lower)) return "huberman";
-  if (/schoenfeld|hypertroph|tension|volume/.test(lower)) return "schoenfeld";
-  if (/sims|female|cycle|menstru/.test(lower)) return "sims";
-  if (/blueprint|johnson|longevity|measure/.test(lower)) return "blueprint";
+// Named coaching protocols are retired: whatever the draft says, the
+// profile is written with the default ("none").
+function normalizeCoachingLens(_value: unknown): z.infer<typeof CoachingLens> {
   return "none";
 }
 

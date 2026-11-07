@@ -11,7 +11,7 @@ using namespace metal;
 //            slowly.
 //   pumping  a warm glow where MYO stands, falling off to deeper, richer
 //            colour at the edges: darker, higher contrast, more colour;
-//            denser, coarser grain that changes faster.
+//            a little denser grain that changes faster.
 //
 // The two must read apart without hue (docs/product/ideas.md, "Works
 // without colour"), so every step that adds colour also moves luminance
@@ -73,15 +73,18 @@ static float hash21(float2 p, float seed) {
     float3 col = mix(calm, pumped, ee);
     float alpha = mix(calmAlpha, pumpedAlpha, ee);
 
-    // Grain. Cell size in points: fine at rest, coarser when pumping.
-    // Re-seeded on a clock that speeds up with effort (6 → 24 Hz), so it
-    // looks like it moves faster rather than just being louder.
-    float cell = mix(0.55, 1.1, ee);
+    // Grain. Cell size in points: fine at rest, slightly coarser when
+    // pumping. Re-seeded on a clock that speeds up with effort (3 → 10 Hz),
+    // so it looks like it moves faster rather than just being louder. Kept
+    // quiet: it was 4 → 26% density at up to 24 Hz, which read as static
+    // over the coach mid-workout. Effort still reads through colour,
+    // luminance and contrast.
+    float cell = mix(0.55, 0.8, ee);
     float2 cellId = floor(position / cell);
-    float frame = floor(time * mix(6.0, 24.0, ee));
+    float frame = floor(time * mix(3.0, 10.0, ee));
     float n = hash21(cellId, frame);
-    float density = mix(0.04, 0.26, ee);
-    float strength = mix(0.10, 0.19, ee) * (0.6 + 0.4 * hash21(cellId + 17.0, frame));
+    float density = mix(0.02, 0.08, ee);
+    float strength = mix(0.06, 0.10, ee) * (0.6 + 0.4 * hash21(cellId + 17.0, frame));
     float speck = step(1.0 - density, n) * strength;
     col = mix(col, float3(ink.rgb), speck);
     alpha = alpha + (1.0 - alpha) * speck;

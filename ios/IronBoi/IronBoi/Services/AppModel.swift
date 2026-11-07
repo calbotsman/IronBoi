@@ -2991,7 +2991,6 @@ extension AppModel {
         p.schedule.sessionLengthMin = 60
         p.preferences.coachingTone = .balanced
         p.preferences.trainingFocus = .strengthConditioning
-        p.preferences.coachingLens = .huberman
         return p
     }
 
@@ -3075,18 +3074,8 @@ extension AppModel {
                 content: "I only slept about 5 hours and my knee feels a little off. Should I still do legs today?",
                 status: .complete, timestamp: now.addingTimeInterval(-600), riskLevel: nil),
             CoachMessage(id: "m2", messageId: "m2", role: .coach,
-                content: "From a recovery-first view, let's pull it back today rather than push through. Drop the squat to 3 working sets and skip the lunges — your knee and your short sleep both point the same direction. We can make it up later in the week. (Schoenfeld: volume can be redistributed without losing the adaptation.)",
-                status: .complete, timestamp: now.addingTimeInterval(-560), riskLevel: nil,
-                sources: [
-                    CoachSource(entryId: "protocol_huberman_recovery_v1",
-                        label: "Sleep & athletic-performance literature (Huberman protocol)",
-                        title: "Recovery, sleep, and circadian timing for training",
-                        url: URL(string: "https://pubmed.ncbi.nlm.nih.gov/21731144/")),
-                    CoachSource(entryId: "protocol_schoenfeld_hypertrophy_v1",
-                        label: "Schoenfeld et al., peer-reviewed hypertrophy research",
-                        title: "Hypertrophy mechanics: tension, volume, progression",
-                        url: URL(string: "https://pubmed.ncbi.nlm.nih.gov/27433992/")),
-                ]),
+                content: "With that little sleep and the knee talking, let's pull it back today rather than push through. Drop the squat to 3 working sets and skip the lunges. We can make the volume up later in the week without losing the progress.",
+                status: .complete, timestamp: now.addingTimeInterval(-560), riskLevel: nil),
             CoachMessage(id: "m3", messageId: "m3", role: .user,
                 content: "Okay that works. What should I watch for in the knee?",
                 status: .complete, timestamp: now.addingTimeInterval(-300), riskLevel: nil),
