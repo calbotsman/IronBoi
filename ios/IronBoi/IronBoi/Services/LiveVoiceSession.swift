@@ -1060,10 +1060,22 @@ final class LiveVoiceSession: ObservableObject {
     /// floor is free.
     private func settleOwedAnswer() {
         guard owedAnswer, isActive, !quietForCount, Date() >= quietUntil else { return }
+        // Still working on it (a response or a tool in flight): wait for
+        // that to finish rather than talk over it or start it again.
+        if openAIResponseActive || openAIToolsPending > 0 || toolsInFlight > 0 {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                self?.settleOwedAnswer()
+            }
+            return
+        }
         owedAnswer = false
         AudioHub.log("live: answering again after it was cut off")
         let question = lastAsked.isEmpty ? "" : " They asked: \"\(lastAsked)\""
-        sendClientTurn("[app] Your answer to what they just asked was cut off before they heard it.\(question) Answer it now, briefly.", respond: true)
+        // A tool already ran for it (a set added, a lift swapped): the cut-off
+        // audio was its confirmation. Say it, never do it again.
+        let done = lastToolAt >= lastAskedAt ? " What they asked for is already done; just tell them." : ""
+        sendClientTurn("[app] Your answer to what they just asked was cut off before they heard it.\(question)\(done) Answer it now, briefly. Answer only: don't repeat or take any action.", respond: true)
     }
 
     /// Cut the coach off now (you started counting over it).
