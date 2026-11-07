@@ -646,6 +646,26 @@ struct PreferencesView: View {
             }
             .buttonStyle(.plain)
 
+            // The phone's voice log (what the mic heard, when the coach spoke,
+            // what was dropped), to send when voice or counting misbehaves.
+            // It stays on the phone until you share it.
+            if let log = AudioHub.logFileURL {
+                MyoHairline()
+                ShareLink(item: log, preview: SharePreview("MYO voice log")) {
+                    HStack {
+                        Text("Share voice log")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(MyoTheme.Colors.ink)
+                        Spacer()
+                        Image(systemName: "waveform")
+                            .foregroundStyle(MyoTheme.Colors.ink.opacity(0.5))
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+
             MyoHairline()
 
             // Apple guideline 5.1.1(v): deletion must be discoverable. Two
