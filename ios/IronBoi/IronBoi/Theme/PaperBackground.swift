@@ -39,7 +39,8 @@ struct PaperBackground: View {
             .overlay(
                 Image(uiImage: PaperTexture.tile)
                     .resizable(resizingMode: .tile)
-                    .opacity(0.8)
+                    // Was 0.8, which read as visible speckle on every screen.
+                    .opacity(0.35)
                     .blendMode(.multiply)
                     .allowsHitTesting(false)
             )
