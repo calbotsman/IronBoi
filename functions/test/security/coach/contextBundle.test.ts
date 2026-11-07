@@ -384,15 +384,10 @@ describe("coach context bundle", () => {
     expect(JSON.stringify(bundle.progressSummary)).not.toContain("attacker-user");
     expect(JSON.stringify(bundle.progressSummary)).not.toContain("sentinel-should-not-leak");
 
-    // Lens highlights ride through compactly: capped to 3 before filtering,
-    // entries without metric+framing dropped whole.
-    expect(bundle.progressSummary?.lensHighlights?.map((h) => h.metric)).toEqual([
-      "consistency",
-      "readiness",
-    ]);
-    expect(bundle.progressSummary?.lensHighlights?.[0].note).toContain("HealthKit");
+    // Named protocols are retired (F55): highlights still on an old
+    // persisted doc never reach the coach.
+    expect(JSON.stringify(bundle.progressSummary)).not.toContain("lensHighlights");
     expect(JSON.stringify(bundle.progressSummary)).not.toContain("should-not-leak-without-framing");
-    expect(JSON.stringify(bundle.progressSummary)).not.toContain("overflow-metric");
 
     // Ships with the tool-loop feature bundle: tools on → tag + rules present…
     const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "hi", {
@@ -400,9 +395,8 @@ describe("coach context bundle", () => {
     });
     expect(userMessage).toContain("<progress_summary>");
     expect(userMessage).toContain("withinSafeBand");
-    // The highlights ride inside the existing tag — no new prompt section.
-    expect(userMessage).toContain("lensHighlights");
-    expect(userMessage).toContain("nervous system's best friend");
+    expect(userMessage).not.toContain("lensHighlights");
+    expect(userMessage).not.toContain("nervous system's best friend");
     expect(system).toContain("<progress_summary>");
     expect(system).toContain("never invent trends");
     expect(system).toContain("a caution, never a win");

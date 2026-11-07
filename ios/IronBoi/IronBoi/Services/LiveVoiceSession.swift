@@ -959,6 +959,8 @@ final class LiveVoiceSession: ObservableObject {
         let turnId = self.turnId
         let raw = turnUser
         AudioHub.log("live tool: \(name)")
+        lastToolAt = Date()
+        toolsInFlight += 1
         Task {
             var response: [String: Any]
             do {
@@ -968,8 +970,14 @@ final class LiveVoiceSession: ObservableObject {
                 AudioHub.log("live tool failed: \(name) \(error.localizedDescription)")
             }
             await reply(response)
+            self.toolsInFlight -= 1
         }
     }
+    /// When a tool last started, and how many are still running: a re-ask
+    /// must never land while one is in flight or after one ran for the
+    /// question, or "add a set" happens twice (watchdog F53).
+    private var lastToolAt = Date.distantPast
+    private var toolsInFlight = 0
 
     // MARK: - The app talking to the coach
 
@@ -1034,8 +1042,12 @@ final class LiveVoiceSession: ObservableObject {
             guard let self, self.isActive, self.lastAskedAt == asked else { return }
             guard self.lastPlayedAt < asked, self.state != .speaking, !self.owedAnswer,
                   !self.quietForCount, Date() >= self.quietUntil else { return }
+            // Something is still working on it, or already acted on it: a
+            // re-ask now could repeat the action.
+            guard !self.openAIResponseActive, self.openAIToolsPending == 0,
+                  self.toolsInFlight == 0, self.lastToolAt < asked else { return }
             AudioHub.log("live: no answer in 8 s, asking again: \"\(text.suffix(50))\"")
-            self.sendClientTurn("[app] They asked you this and haven't heard an answer: \"\(text)\" Answer it now, briefly.", respond: true)
+            self.sendClientTurn("[app] They asked you this and haven't heard an answer: \"\(text)\" Answer it now, briefly. Answer only: don't repeat or take any action.", respond: true)
         }
     }
 
