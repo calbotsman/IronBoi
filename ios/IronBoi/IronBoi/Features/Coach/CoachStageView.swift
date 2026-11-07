@@ -2629,6 +2629,7 @@ struct CoachStageView: View {
         }
         routine.endsAt = .distantFuture
         guided = routine
+        showGuided(move, kind: routine.kind)
         confirm(line)
         guidedTask?.cancel()
         guidedTask = Task {
@@ -2675,11 +2676,24 @@ struct CoachStageView: View {
         runGuidedStep()
     }
 
+    /// The body does the move while it's timed: a stretch is eased into and
+    /// held, a warm-up shown as reps. Nothing for a move it doesn't know.
+    private func showGuided(_ move: WorkoutCoaching.Move, kind: GuidedRoutine.Kind) {
+        guard lessonPlan == nil else { return }
+        guard let motion = ExerciseMotion.match(move.name) else {
+            lessonCue = nil
+            return
+        }
+        let moving = kind == .warmup || motion.spec?.tempo == .wave
+        lessonCue = LessonCue(motion: motion, body: moving ? .reps : .hold(1), from: 0, startedAt: CACurrentMediaTime())
+    }
+
     private func finishGuided(skipped: Bool) {
         guard let routine = guided else { return }
         guidedTask?.cancel()
         guidedTask = nil
         guided = nil
+        if lessonPlan == nil { lessonCue = nil }
         switch routine.kind {
         case .warmup:
             warmupPending = false
@@ -3793,6 +3807,7 @@ struct CoachStageView: View {
         cancelRest()
         guidedTask?.cancel()
         guidedTask = nil
+        if guided != nil, lessonPlan == nil { lessonCue = nil }
         guided = nil
         cooldownOffer = nil
         interruptedSpeech = nil
