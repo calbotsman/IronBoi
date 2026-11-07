@@ -11,7 +11,19 @@ struct TimerPanel: View {
     var primary: (label: String, action: () -> Void)?
     var secondary: (label: String, action: () -> Void)?
 
+    /// Full panel when there's room; otherwise the tip goes, then the clock
+    /// shrinks, so it never runs into the workout card under it.
     var body: some View {
+        ViewThatFits(in: .vertical) {
+            panel(showTip: true, clockSize: 64)
+            panel(showTip: false, clockSize: 64)
+            panel(showTip: false, clockSize: 44)
+        }
+        .frame(maxWidth: .infinity)
+        .transition(.opacity)
+    }
+
+    private func panel(showTip: Bool, clockSize: CGFloat) -> some View {
         VStack(spacing: MyoTheme.Spacing.sm) {
             Text(title)
                 .myoStyle(.label)
@@ -21,7 +33,7 @@ struct TimerPanel: View {
 
             TimelineView(.periodic(from: .now, by: 0.25)) { _ in
                 Text(Self.clock(endsAt))
-                    .font(.system(size: 64, weight: .light, design: .rounded))
+                    .font(.system(size: clockSize, weight: .light, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(MyoColor.Text.primary.color)
                     .contentTransition(.numericText(countsDown: true))
@@ -34,13 +46,15 @@ struct TimerPanel: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MyoColor.Text.secondary.color)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            if let tip, !tip.isEmpty {
+            if showTip, let tip, !tip.isEmpty {
                 Text(tip)
                     .font(.system(size: 14))
                     .foregroundStyle(MyoColor.Text.tertiary.color)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, MyoTheme.Spacing.lg)
             }
             if primary != nil || secondary != nil {
@@ -55,11 +69,9 @@ struct TimerPanel: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(MyoColor.Text.secondary.color)
                 .buttonStyle(.plain)
-                .padding(.top, MyoTheme.Spacing.xs)
+                .frame(minHeight: 44)
             }
         }
-        .frame(maxWidth: .infinity)
-        .transition(.opacity)
     }
 
     /// "1:30"; "–" while the clock hasn't started (Coach is still talking).

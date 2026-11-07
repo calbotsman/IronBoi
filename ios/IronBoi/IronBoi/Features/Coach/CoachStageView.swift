@@ -249,11 +249,28 @@ struct CoachStageView: View {
 
     /// The stage's size, for placing the body when nothing else is open.
     @State private var stageSize: CGSize = .zero
+    /// Top of whatever sits at the bottom of the stage (the live workout
+    /// card, else the controls), in the stage's own space. The caption
+    /// pinned under the coach stops above it instead of running into it.
+    @State private var bottomChromeTop: CGFloat?
 
     /// Nothing below the body: it sits near the middle of the screen with
     /// the status line pinned just under it.
     private var centered: Bool { !cardOpen && appModel.pendingPlanAdjustmentProposal == nil }
     private var restFocus: CGPoint { CGPoint(x: stageSize.width / 2, y: stageSize.height * 0.42) }
+    private static let stageArea = "coachStageArea"
+    /// Where the pinned caption starts: just under the coach's body.
+    private var captionTop: CGFloat { restFocus.y + stageSize.width * 0.225 + 36 }
+    /// Height left between that and the workout card / controls.
+    private var captionRoom: CGFloat? {
+        bottomChromeTop.map { max(0, $0 - captionTop - MyoTheme.Spacing.sm) }
+    }
+
+    private static func measureTop() -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(key: BottomChromeKey.self, value: geo.frame(in: .named(stageArea)).minY)
+        }
+    }
 
     /// Any card that needs the space below the body.
     private var cardOpen: Bool {
@@ -720,6 +737,7 @@ struct CoachStageView: View {
                             .matchedGeometryEffect(id: "workoutCard", in: cardSpace)
                             .padding(.horizontal, MyoTheme.Spacing.md)
                             .padding(.top, MyoTheme.Spacing.md)
+                            .background { Self.measureTop() }
                     }
                 }
                 // A card under the coach: the controls stay at the bottom
@@ -731,19 +749,25 @@ struct CoachStageView: View {
                     .padding(.leading, MyoTheme.Spacing.lg)
                     .padding(.top, MyoTheme.Spacing.md)
                     .padding(.bottom, MyoTheme.Spacing.sm)
+                    .background { Self.measureTop() }
                     .opacity(showKeyboard ? 0 : 1)
                     .allowsHitTesting(!showKeyboard)
             }
         }
+        .coordinateSpace(name: Self.stageArea)
+        .onPreferenceChange(BottomChromeKey.self) { bottomChromeTop = $0 }
         .overlay {
             if centered {
                 // Pinned just under the body (radius ≈ 0.45 of half the short side).
                 VStack(spacing: 0) {
-                    Color.clear.frame(height: restFocus.y + stageSize.width * 0.225 + 36)
+                    Color.clear.frame(height: captionTop)
                     // The rest-day question replaces the caption, so the card
                     // never pushes down over the controls.
                     if !askingSkipRestDay, !askingMicPermission {
-                        caption.padding(.horizontal, MyoTheme.Spacing.lg)
+                        caption
+                            .padding(.horizontal, MyoTheme.Spacing.lg)
+                            // Never past the workout card or the controls.
+                            .frame(maxHeight: captionRoom, alignment: .top)
                     }
                     // A leftover from an earlier day doesn't block today's start.
                     if askingSkipRestDay {
@@ -3953,6 +3977,15 @@ struct CoachStageView: View {
             }
             resumeListening()
         }
+    }
+}
+
+/// The topmost of the bottom-of-stage views that reported (card, controls).
+private struct BottomChromeKey: PreferenceKey {
+    static var defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        guard let next = nextValue() else { return }
+        value = value.map { min($0, next) } ?? next
     }
 }
 
