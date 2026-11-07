@@ -388,10 +388,7 @@ struct CoachStageView: View {
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
-        .onChange(of: appModel.activeWorkout == nil) { _, ended in
-            keepAwake()
-            voice.allowsDeviceVoice = ended
-        }
+        .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
         .onChange(of: liveWorkoutNote) { _, note in
             // Connecting or standing by, it queues: the live coach is
@@ -412,10 +409,9 @@ struct CoachStageView: View {
                 handleUtterance(text)
             }
             voice.fetchAudio = { [appModel] text, engine in try await appModel.synthesizeSpeech(text, engine: engine) }
-            // A line that can't be spoken in the coach's voice mid-workout is
-            // shown instead (the voice never switches to the device's).
+            // A line that can't be spoken in the coach's voice is shown
+            // instead; the voice never switches to the phone's own.
             voice.onUnspoken = { text in show(notice: text) }
-            voice.allowsDeviceVoice = appModel.activeWorkout == nil
             appModel.warmVoice()
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id

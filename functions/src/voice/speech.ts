@@ -147,8 +147,12 @@ async function synthesizeWithOpenAI(text: string, voice: string, apiKey: string,
 
 /**
  * Returns base64 WAV (LINEAR16, 24 kHz mono). With an engine and its key,
- * that engine reads it; if it fails, Cloud TTS does — a slightly different
- * voice beats silence.
+ * that engine reads it, with one retry. It never falls back to Cloud TTS
+ * for a line the live engine was asked to read: Chirp is a different
+ * voice, and mixing them made one reply sound like several people. The
+ * caller gets an error and shows the line instead. Cloud TTS reads only
+ * when it was asked for, or when the engine has no key at all (then it is
+ * the only voice there is).
  */
 export async function synthesizeSpeech(
   request: z.infer<typeof SynthesizeSpeechRequest>,
@@ -156,15 +160,22 @@ export async function synthesizeSpeech(
   keys: { gemini?: string; openai?: string } = {},
 ): Promise<{ audio: string; mimeType: "audio/wav"; engine: z.infer<typeof SpeechEngine> }> {
   const voice = request.voice ?? coachVoice();
-  try {
-    if (request.engine === "gemini" && keys.gemini) {
-      return { audio: await synthesizeWithGemini(request.text, voice, keys.gemini, fetchImpl), mimeType: "audio/wav", engine: "gemini" };
+  const engineRead =
+    request.engine === "gemini" && keys.gemini
+      ? { engine: "gemini" as const, read: () => synthesizeWithGemini(request.text, voice, keys.gemini as string, fetchImpl) }
+      : request.engine === "openai" && keys.openai
+        ? { engine: "openai" as const, read: () => synthesizeWithOpenAI(request.text, voice, keys.openai as string, fetchImpl) }
+        : null;
+  if (engineRead) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return { audio: await engineRead.read(), mimeType: "audio/wav", engine: engineRead.engine };
+      } catch (error) {
+        lastError = error;
+      }
     }
-    if (request.engine === "openai" && keys.openai) {
-      return { audio: await synthesizeWithOpenAI(request.text, voice, keys.openai, fetchImpl), mimeType: "audio/wav", engine: "openai" };
-    }
-  } catch {
-    // Fall through to Cloud TTS.
+    throw lastError instanceof Error ? lastError : new Error(`${engineRead.engine}-tts failed`);
   }
   const res = await fetchImpl(TTS_URL, {
     method: "POST",
