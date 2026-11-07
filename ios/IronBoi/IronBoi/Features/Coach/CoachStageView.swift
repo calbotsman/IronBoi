@@ -3835,6 +3835,10 @@ struct CoachStageView: View {
             if !spoken || live.uplinkMuted || Date().timeIntervalSince(live.unmutedAt) < 4 {
                 live.forwardUserText(trimmed)
             }
+            // A question gets an answer: if none plays, it's asked again.
+            if !spoken || WorkoutVoice.isQuestionOrRequest(trimmed) {
+                live.expectAnswer(to: trimmed)
+            }
             markRestartHandled()
             resumeListening()
             return

@@ -60,7 +60,18 @@ final class LiveVoiceSession: ObservableObject {
     /// Set while a count is running: the coach's audio is dropped (its mic
     /// can be closed for a whole set, but the exercise intro still has to
     /// play, so playback follows the count, not the mic).
-    var quietForCount = false
+    var quietForCount = false {
+        didSet { if !quietForCount { settleOwedAnswer() } }
+    }
+    /// When you last asked the coach something it should answer.
+    private var lastAskedAt = Date.distantPast
+    /// What you asked, kept so an unanswered question can be passed on again.
+    private var lastAsked = ""
+    /// Its answer started while the app had the floor (an app line, a
+    /// count) and was dropped before you heard it: it answers again after.
+    private var owedAnswer = false
+    /// When the coach's voice last actually played.
+    private(set) var lastPlayedAt = Date.distantPast
     /// The provider of the connection that's open now.
     private(set) var activeProvider: Provider = .gemini
     private var openAI: Bool { activeProvider == .openai }
@@ -383,6 +394,7 @@ final class LiveVoiceSession: ObservableObject {
         uplinkMuted = false
         uplink.muted = false
         // Not left set: live dropped mid-count must not stay silent later.
+        owedAnswer = false
         quietForCount = false
         recentReconnects = []
         hub.stopPlayback()
@@ -996,6 +1008,7 @@ final class LiveVoiceSession: ObservableObject {
     /// Something you said that the coach didn't hear (the mic was muted for
     /// a count): passed on as your words.
     func forwardUserText(_ text: String) {
+        noteAsked(text)
         if openAI {
             if turnUser.isEmpty { turnStartedAt = Date() }
             turnUser += text
@@ -1006,6 +1019,39 @@ final class LiveVoiceSession: ObservableObject {
         if turnUser.isEmpty { turnStartedAt = Date() }
         turnUser += text
         send(json, label: "forwarded \"\(text.suffix(50))\"")
+    }
+
+    /// You asked the coach something (it heard you directly, or it was
+    /// passed on). If no answer plays within a few seconds, and nothing had
+    /// the floor, the question goes to it again — once. Mid-workout,
+    /// questions were vanishing: the answer was dropped under an app line
+    /// or never started, and nothing noticed.
+    func expectAnswer(to text: String) {
+        noteAsked(text)
+        let asked = lastAskedAt
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard let self, self.isActive, self.lastAskedAt == asked else { return }
+            guard self.lastPlayedAt < asked, self.state != .speaking, !self.owedAnswer,
+                  !self.quietForCount, Date() >= self.quietUntil else { return }
+            AudioHub.log("live: no answer in 8 s, asking again: \"\(text.suffix(50))\"")
+            self.sendClientTurn("[app] They asked you this and haven't heard an answer: \"\(text)\" Answer it now, briefly.", respond: true)
+        }
+    }
+
+    private func noteAsked(_ text: String) {
+        lastAskedAt = Date()
+        lastAsked = text
+    }
+
+    /// An answer dropped while the app had the floor: say it now that the
+    /// floor is free.
+    private func settleOwedAnswer() {
+        guard owedAnswer, isActive, !quietForCount, Date() >= quietUntil else { return }
+        owedAnswer = false
+        AudioHub.log("live: answering again after it was cut off")
+        let question = lastAsked.isEmpty ? "" : " They asked: \"\(lastAsked)\""
+        sendClientTurn("[app] Your answer to what they just asked was cut off before they heard it.\(question) Answer it now, briefly.", respond: true)
     }
 
     /// Cut the coach off now (you started counting over it).
@@ -1131,7 +1177,21 @@ final class LiveVoiceSession: ObservableObject {
     private func play(_ buffer: AVAudioPCMBuffer) {
         // You're counting a set (the mic to the coach is muted for it): the
         // coach stays quiet until it's logged, even audio already on its way.
-        if quietForCount || Date() < quietUntil { return }
+        if quietForCount || Date() < quietUntil {
+            // Dropping an answer to something just asked: owe it, and say
+            // it once the floor is free (an app line ends, a count closes).
+            if !owedAnswer, Date().timeIntervalSince(lastAskedAt) < 20 {
+                owedAnswer = true
+                AudioHub.log("live: answer dropped under an app line or a count; will answer after")
+                let wait = max(0, quietUntil.timeIntervalSinceNow) + 0.3
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+                    self?.settleOwedAnswer()
+                }
+            }
+            return
+        }
+        lastPlayedAt = Date()
         // Standing by: the regular coach still has the stage.
         if state == .standby || state == .connecting { return }
         if !answerAudioLogged {
