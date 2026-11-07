@@ -254,6 +254,87 @@ Verdict: **the fix is real and well tested.** The bug cause in the PR body match
 
 **F12. #46: `AppModel.updateSetReps` is now dead code** (`AppModel.swift:1119` on the branch). Nothing calls it. Delete it, or keep it on purpose.
 
+## #61 Josh's mobile session, nine commits (deb4cb8)
+
+**Verdict: merge after the F53 guard (a few lines). F54 is a product trade-off for Josh to decide, and doesn't block the merge.** CI was pending at audit time.
+
+**Re-audit at 05aead6: clear to merge once CI is green.**
+- **F53 fixed.** The re-ask is skipped while `openAIResponseActive`, while `openAIToolsPending > 0`, while `toolsInFlight > 0`, or if `lastToolAt >= asked`. The decrement runs on every `runTool` path, including errors. The re-ask text now says "don't repeat or take any action".
+- **F55 fixed.** `lensHighlights` is no longer read in `contextBundle.ts`, and a test asserts it never reaches the bundle or prompt.
+- **F53b (low, open).** `settleOwedAnswer` (`LiveVoiceSession.swift:1061`) still resends with neither the tool guards nor the "answer only" wording. A confirmation dropped under a count after a tool ran could, rarely, re-run that tool. Fix: add the same suffix and the `lastToolAt` check there.
+- **F54** is with Josh.
+
+**F53. The "always answers" re-ask can repeat a tool action. CONFIRMED (code), medium-high.** `LiveVoiceSession.expectAnswer` (`LiveVoiceSession.swift:~1029`) resends the question 8 s after the ask if no live audio has played. Its guard checks speaking, owed, the count and the quiet window. It does not check `openAIResponseActive`, a tool call in flight, or a tool that ran since the ask. `CoachStageView.swift:3856` calls it for anything `isQuestionOrRequest` matches, and that regex includes `add|swap|skip|change`. Failure: "add a set" or "swap bench". The coach calls the tool, and the server round-trip plus the confirmation audio takes more than 8 s. The re-ask fires, "[app] They asked you this… Answer it now", and the model can call the tool a second time: two added sets, or a double swap. Fix: skip the re-ask while a response or tool call is active, or if any tool ran since `lastAskedAt`. Tell the model "answer only, don't repeat any action".
+
+**F54. "One coach voice" removes the Cloud TTS fallback, so a provider outage makes the regular coach mute. PLAUSIBLE, medium (trade-off).** `speech.ts:160-180`: the engine is tried twice, and then the call errors instead of falling back to Cloud TTS. The client shows a tone and the words (`CoachVoice.swift:237`). #53's fallback (live fails → the regular coach) usually happens because the live provider is failing, and the regular coach's TTS uses that same engine. So in an OpenAI or Gemini outage the whole workout is ticks and captions. **Never-deaf still holds:** the mic, STT and the text coach are untouched. What it loses is "never mute". The retry also doubles the worst-case wait, and `speech.ts` sets no fetch timeout. Option: switch voice per session, not per line. After N engine failures, the rest of the conversation uses Cloud TTS: one voice per session, never two in one reply.
+
+**F55. Old progress docs still carry lens framings into the prompt. CONFIRMED, low.** The builder no longer writes `lensHighlights`. But `contextBundle.ts:457` still reads them from persisted progress summaries into `<progress_summary>` (`prompt.ts:241`) until each doc is rebuilt. A user who picked Huberman and hasn't trained since still sends Huberman framings. The prompt's "don't name protocols" rule mostly covers it. Fix: drop `lensHighlights` in `contextBundle`.
+
+**Checked and fine:**
+- **Captions mode:** unaffected. The `allowsDeviceVoice` setters in `CoachStageView` are gone and it now defaults to `false`. The phone voice is used only when `fetchAudio` is nil, and the stage, onboarding and preferences always set it. The voice-off gating is unchanged.
+- **Share voice log:** shares only `Documents/audio-log.txt` (`AudioHub.logFileURL`), and only from the share sheet the user opens. The log holds timestamps, mic transcripts (≤60 characters per line), coach lines and audio-state notes. A grep of all 124 `AudioHub.log` calls found no tokens, keys, uids or emails. One health line logs only a read error. Nit: the row could say it includes what you said.
+- **Protocols removed:** the `protocol_*` corpus entries are gone, with no remaining references in `functions/` or `ios/`. The retrieval test is updated. Onboarding writes `none`, the iOS picker is removed, the enum is kept so old profiles parse, and the prompt says to ignore it. The Schoenfeld citations in `ironlab-seed.json` are research references, not the protocol. Stale doc: `docs/product/habit-journey-plan.md:42`.
+- **"of 36 planned" fix** (`build.ts` `firstActiveWeekIndex`) is correct and tested. The bodyweight shortfall wording and the warm-up moves are UI only.
+- **Latency:** nothing on the normal path. The re-ask and owed-answer each add a model turn only after a failure.
+
+## #57 CI launch guard (9f0dabf)
+
+**Verdict: merge once its own iOS run is green.** The guards are sound. One gap needs a follow-up (F43).
+
+**F43. CI builds with Xcode 16.4 (iOS 18.5 SDK), so iOS 26-only code is never compiled or launched in CI. CONFIRMED, medium.** The build step uses the runner's default Xcode (the run log says `Xcode 16.4`, `iphonesimulator18.5`). Only the smoke test switches to Xcode 26.3, and it launches the 18.5-SDK binary on the 26.2 runtime. Code behind `#if compiler(>=6.2)` / `#available(iOS 26)`, such as the iPhone `HKWorkoutSession` path from #48, is compiled out. Josh's device builds use Xcode 26, so a crash in that code passes CI. The smoke test does still catch the F42 class: that getter was an iOS 17 API, and the iOS 26 runtime drops it whatever the SDK. Fix: build (or add a second build) with the newest Xcode and smoke-test that product.
+
+**F44. The proof shows the preflight failing, not the launch smoke test. PLAUSIBLE, low.** The throwaway run c22c473 went red at preflight. 6100079 adds `continue-on-error` so the smoke test runs against a build with no plist, and it was still running at audit time. Until that run shows the smoke step red with the Firebase abort, "the smoke test catches a launch crash" is unproven. No run proves the F42 class; that would need a throwaway revert of #55.
+
+**Reliability (Flaky? no evidence).** Two complete runs (be2cfa7, plus 002d185 before it was cancelled) passed both smoke steps: iOS 26.2 on Xcode 26.3 and iOS 18.5 on 16.4. Boot, install and launch took about 2–4 min per runtime. The per-call deadlines (boot 300 s, install 180 s, launch 120 s) leave headroom, and the job timeout is now 45 min. The sources of flakiness are handled: a hung `simctl` is bounded by the deadlines, the crash-report check uses `-newer` and the app name, and a fresh simulator is created and deleted each run. The remaining risk is a slow first launch on a cold 26.x runtime that nears 120 s. If it flakes, raise the deadline; don't retry. Nit: those runs picked iPhone 11 / XS Max. 299f652 ("newest plain iPhone") came after them, so check the device line in the next run.
+
+**Fine:** the preflight regex matches #54's `project.yml` shape, the pbxproj grep matches the `in Resources` entry, and the bundle check lints the plist inside the built `.app`. `MYO_PREVIEW`/`MYO_NO_MIC` exist on main (`CoachView.swift:184`, `VoiceInputEngine.swift:99`), so the launch gets past sign-in without the mic or the backend. `IronBoiTests` was already in CI (F10).
+
+## #59 social prototype (872b0f3)
+
+**Verdict: safe to merge with the flag off. Before setting `IRONBOI_SOCIAL_ENABLED=true`, fix F48–F50.**
+
+**Off really is off, with small caveats.** With the server flag unset, the coach turn (`orchestrate.ts`), the live session and the workout trigger make no extra reads, and the prompt is unchanged: the env check comes before any Firestore call (`store.ts:243`, `:102`). The 4 new callables deploy but throw `social_disabled`. The caveats:
+- The `myo://` URL scheme is registered in Info.plist even when the flag is off. The handler ignores it (`SocialModel.swift:175`).
+- `recordConsent` now accepts `social_activity`.
+- deleteAccount and resetMyData run the social cleanup (two queries and a batch) even when the flag is off. If it throws, account deletion now fails where it used to succeed (F52).
+
+**F48. A friend can read more than the policy says. CONFIRMED, medium.** The policy (`privacy-policy.md:17,38`, the html matches) says friends see "whether you trained today". But the rule (`firestore.rules`, `socialActivity/{userId}`) lets a connected friend read `userId`, `firstName`, `trainedOn` (exact date), `streakWeeks`, and `updatedAt`, a full ISO timestamp that gives roughly when you finished (`store.ts:114-120`). Policy §3 (line 56) says "the day you last trained", which contradicts §1/§2. The policy also says "Leave … deletes what was shared", but Leave only deletes the connection (`store.ts:189`). Fix: drop `updatedAt`/`userId` from the shared doc or the rule, and make the policy match the five fields, including streak.
+
+**F49. Invite codes have no rate limit on accepting. CONFIRMED, medium.** Codes are 8 characters from 31 symbols, about 40 bits (`store.ts:47-48`). `acceptSocialInviteCallable` (`index.ts:~1006`) has no rate limit, and App Check isn't enforced. Any user who has consented can keep guessing, and a hit links them to a stranger. A per-user limit on accepts, or failed accepts, fixes it. Also, `myo://` is a custom scheme that another app can claim; a universal link would avoid that. Expiry (7 days), single use, no self-invite and the inviter-still-consents check are all correct.
+
+**F50. Revoking consent can bypass the cleanup. PLAUSIBLE, medium-low.** Clients may write their own `consentRecords` (`firestore.rules`, owner write). A direct `granted:false` write skips `removeSocialData`, and the friend read rule never re-checks the owner's consent, so friends keep reading. The app always uses the callable, so this is defence in depth. Turning the server flag off after it was on has the same effect: the docs stay readable and Leave refuses. Fix: the friend read rule also requires the owner's current social consent.
+
+**F51. Publish versus delete race. PLAUSIBLE, low.** `publishSocialActivity` checks consent, then writes, outside a transaction (`store.ts:103-122`). A workout trigger running at the same moment as a revoke or deleteAccount can leave the activity doc with the first name behind. Nobody can read it, but it breaks the deletion promise.
+
+**Low:**
+- The 20-friend cap is checked only for the accepter, not the inviter (`store.ts:163`).
+- The daily friend mention is marked used before the model replies (`orchestrate.ts:280`), so a failed turn loses it for the day.
+- F52: the social cleanup in deleteAccount/resetMyData (`index.ts:372,408`) runs even when the flag is off and can fail deletion.
+
+**Fine:**
+- Rules: no client writes to any social doc; invites can't be read; connections are visible only to their two members; nothing under `users/` opens up.
+- Cleanup: revoke, deleteAccount, resetMyData and `recordConsent(granted:false)` remove both-way connections, invites, the activity doc and the mention record.
+- Coach mentions: only "{FirstName} [and N others] trained today.", with the name cut to one word of letters, apostrophes or hyphens, at most 20 characters (`store.ts:66-71`). Prompt injection is negligible.
+- The rules tests make real denial assertions against the emulator, and the store tests are real. Not covered: the `index.ts` wiring (flag gate, revoke/delete hooks).
+
+## #60 Phase 4 recovery reads (a565aef)
+
+**Verdict: merge after F45 is fixed in this PR (text only). The code is otherwise sound.**
+
+**F45. Health numbers leave the phone, but the privacy policy says there is no HealthKit integration. CONFIRMED, high.** Resting HR, HRV and sleep (today and the 28-day baseline) go to the backend. From there they reach the model provider, OpenAI or Gemini: `prompt.ts:235` `<health_summary>`, and the `<recovery>` block in the live-voice setup (`liveWorkout.ts` `recoveryRules`). `legal/privacy-policy.md:40` still says "the iOS app has no HealthKit integration yet". That was already stale after #39. The switch caption ("Compared with your own last four weeks…") doesn't say the numbers leave the phone. Apple 5.1.3 requires disclosing Health data shared with third parties. Fix: update policy line 40 (md + html) to cover the reads, what is sent and to whom, and that nothing is stored server-side. Also add "sent to your coach" to the caption.
+
+**F46. "Offered" is recorded when the go-ahead is sent, not when the coach says it. PLAUSIBLE, low.** `AppModel.swift` (live setup, ~line 426, and the coach-message context, ~line 545) calls `noteLighterOffered()` as soon as `offerLighter: true` rides on a payload. If the live session drops before speaking, or the text turn is about something else, the offer is lost for the day. This fails safe (under-offers), so it's acceptable.
+
+**F47. "slept X h last night" is really the last 24 h ending now. PLAUSIBLE, low.** `lastDaySleepHours` uses `now − 24 h … now`. That's fine read in the morning. Read at 8 pm, it can include an afternoon nap and only part of the night.
+
+**Checked and fine:**
+- **Runtime APIs (the F42 rule):** `HKStatisticsCollectionQueryDescriptor`, `HKSampleQueryDescriptor`, `HKCategoryValueSleepAnalysis.allAsleepValues`, `enumerateStatistics(from:to:)`, `averageQuantity` and `requestAuthorization(toShare:read:)` are all present in the iOS 26.3 simulator runtime's HealthKit binary. They are method calls, not newly added property getters.
+- **Permission:** read-only (`toShare: []`), asked only from the "Coach reads recovery" switch, never at launch. Denial correctly yields empty queries.
+- **Thresholds have a written rationale** (`RecoveryBaseline.swift` header): 28-day median baseline with at least 10 days of data, resting HR +7 bpm (the plan's number), HRV ≤ 80 % (wrist SDNN CV 10–20 %), sleep < 6 h, and low only when two or more signals agree. None are tuned to anyone's data.
+- **Once-only:** keyed per day in UserDefaults, only on a training day not yet trained and before the first set. A reconnect gets `offerLighter: false`, and the server rules then say "don't offer". This is covered by `testOfferIsOnceADayAndOnlyBeforeTheFirstSet` and the server tests. The offer only goes through `replace_session` / `adapt_plan` (a review card), never as a silent change.
+- **Contract:** Swift clamps values to the zod bounds. A bad `recovery` is dropped without dropping the message or the session (tested).
+- **Tests are real:** 12 Swift tests on the pure maths (median outlier, window edges, overlap merge) and 8 server tests on behaviour.
+
 ## Low
 
 - **#44 efficiency:** `appModel.liveContextNote` is a computed property read in `CoachStageView`'s body modifier (`CoachStageView.swift:208`). Every re-render, including every counted rep, rebuilds the whole context: it queries `AVAudioSession` and walks all workout logs.
