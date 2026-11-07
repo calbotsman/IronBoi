@@ -1738,7 +1738,8 @@ struct CoachStageView: View {
                                "Stop there. Never push through pain.", "Catch your breath, and go when you're ready.",
                                "Good. Same again.", "That's the spot.", "Perfect, keep it there.", "Take an extra thirty, then.",
                                "How did that feel? Easy, good, or hard?", "How was that one? Too light, about right, or tough?",
-                               "Want me to take a little weight off for the next one?", "Nice and steady.",
+                               "Want me to take a little weight off for the next one?",
+                               "Want me to cut the reps a little for the next one?", "Nice and steady.",
                                "Let's go!", "Strong!", "That's it!", "Nice work!", "Big set.", "Clean reps.",
                                "Nice.", "Good set.", "Solid.", "Steady.", "That's the one.",
                                "Strong work.", "That was solid.", "Nailed it.", "Good stuff.", "Good work.", "Well done.",
@@ -2340,7 +2341,8 @@ struct CoachStageView: View {
             if tips != .quiet, !lastSet || reps < exercise.targetReps - 1,
                let advice = advisor.line(exercise: exercise.name, set: exercise.completedSetCount,
                                          targetSets: exercise.targetSets, reps: reps, target: exercise.targetReps,
-                                         timed: timed, hype: tone == .hype, tipsFull: tips == .full) {
+                                         timed: timed, hype: tone == .hype, tipsFull: tips == .full,
+                                         weighted: appModel.workingWeight(for: exercise) > 0) {
                 lastAdvice = (advice.kind, advice.text, index, Date())
                 // A tip is for the next set, so it comes after the rest
                 // ("Rest sixty seconds. On the next set, …"); a question
