@@ -194,10 +194,12 @@ private struct WeeklyPlanView: View {
                     .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
             }
 
+            let week = appModel.thisWeekDays
             ForEach(plan.days) { day in
                 PlannedWorkoutDayCard(
                     day: day,
                     isToday: day.dayKey == todayKey,
+                    status: week[day.dayKey],
                     isBusy: appModel.isWorkoutBusy
                 ) {
                     // Another day's session asks first: it used to start at
@@ -240,8 +242,13 @@ private struct WeeklyPlanView: View {
 private struct PlannedWorkoutDayCard: View {
     let day: PlannedWorkoutDay
     let isToday: Bool
+    /// This week's day from the training history, when there is one.
+    let status: TrainingDay?
     let isBusy: Bool
     let start: () -> Void
+
+    /// A planned session from earlier this week that wasn't done.
+    private var isMissed: Bool { status?.status == "missed" && !day.exercises.isEmpty }
 
     @State private var isExpanded = false
     @State private var selectedExercise: PlannedExercise?
@@ -258,13 +265,15 @@ private struct PlannedWorkoutDayCard: View {
                         Text(day.dayKey)
                             .font(.headline.weight(.black))
 
-                        if isToday {
-                            Text("Today")
+                        if let pill = statusPill {
+                            Text(pill.text)
                                 .font(.caption2.weight(.bold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 4)
-                                .background(MyoTheme.Colors.ochreLight)
-                                .foregroundStyle(MyoTheme.Colors.ink)
+                                .background(pill.background)
+                                .foregroundStyle(pill.foreground)
                                 .clipShape(Capsule())
                         }
                     }
@@ -295,6 +304,13 @@ private struct PlannedWorkoutDayCard: View {
                         Text(summaryText)
                             .font(.subheadline)
                             .foregroundStyle(MyoTheme.Colors.ink.opacity(0.65))
+
+                        if let done = doneLine {
+                            Text(done)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(MyoTheme.Colors.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
                     Spacer()
@@ -306,6 +322,11 @@ private struct PlannedWorkoutDayCard: View {
                 }
             }
             .buttonStyle(.plain)
+
+            // Missed: "Do this today" right on the card, no need to open it.
+            if isMissed, !isExpanded {
+                startButton
+            }
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 10) {
@@ -369,15 +390,7 @@ private struct PlannedWorkoutDayCard: View {
                     }
 
                     if !day.exercises.isEmpty {
-                        Button(action: start) {
-                            Label(isBusy ? "Starting…" : isToday ? "Start today's workout" : "Do this today", systemImage: "play.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(MyoColor.Action.primary.color)
-                        .foregroundStyle(MyoColor.Text.primary.color)
-                        .disabled(isBusy)
-                        .padding(.top, 4)
+                        startButton
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -395,6 +408,52 @@ private struct PlannedWorkoutDayCard: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+    }
+
+    private var startButton: some View {
+        Button(action: start) {
+            Label(isBusy ? "Starting…" : isToday ? "Start today's workout" : "Do this today", systemImage: "play.fill")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(MyoColor.Action.primary.color)
+        .foregroundStyle(MyoColor.Text.primary.color)
+        .disabled(isBusy)
+        .padding(.top, 4)
+    }
+
+    private struct Pill {
+        let text: String
+        let background: Color
+        let foreground: Color
+    }
+
+    /// The day's place in the week: Done, Missed, Today, Upcoming, Rest.
+    /// Without the history only today is marked, as before.
+    private var statusPill: Pill? {
+        let today = Pill(text: "Today", background: MyoTheme.Colors.ochreLight, foreground: MyoTheme.Colors.ink)
+        switch status?.status ?? "" {
+        case "done", "extra":
+            return Pill(text: "✓ Done", background: MyoTheme.Colors.ochre.opacity(0.18), foreground: MyoTheme.Colors.ink)
+        case "missed":
+            return Pill(text: "Missed", background: MyoColor.redPen.opacity(0.12), foreground: MyoColor.redPen)
+        case "today":
+            return today
+        case "planned":
+            return Pill(text: "Upcoming", background: .clear, foreground: MyoTheme.Colors.ink.opacity(0.65))
+        case "rest":
+            if isToday { return today }
+            return Pill(text: "Rest", background: .clear, foreground: MyoTheme.Colors.ink.opacity(0.45))
+        default:
+            return isToday ? today : nil
+        }
+    }
+
+    /// Done with something other than the planned session: what was logged.
+    private var doneLine: String? {
+        guard let status, status.status == "done" || status.status == "extra",
+              let name = status.name, !name.isEmpty, name != day.name else { return nil }
+        return "Did: \(name)"
     }
 
     private var summaryText: String {
