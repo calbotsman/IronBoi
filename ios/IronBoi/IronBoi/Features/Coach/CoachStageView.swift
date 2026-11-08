@@ -2907,16 +2907,20 @@ struct CoachStageView: View {
         }
         holdCountdownTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            for _ in 0..<150 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
+            // Wait for whoever is talking: the phone's voice or the live
+            // coach (it was only the phone's, so "Go" landed mid-sentence).
+            for _ in 0..<150 where voice.isSpeaking || (live.isActive && live.state == .speaking) {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
             // Time to get down into it.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            for n in [3, 2, 1] {
+            // Three ticks, not "three, two, one" spoken: each number was its
+            // own line, fetched and played a second apart, so a slow one got
+            // cut off by the next and each cut the live coach off too: a
+            // jumble of false starts before "Go". Ticks are instant.
+            for _ in 0..<3 {
                 guard !Task.isCancelled, currentExerciseIndex == index, holdEndsAt == nil, restEndsAt == nil else { return }
-                if speaksReplies, tips != .quiet, conversationActive {
-                    voice.speak("\(n)", messageId: "local-\(UUID().uuidString)")
-                } else {
-                    AudioHub.shared.play(cue: .tick)
-                }
+                AudioHub.shared.play(cue: .tick)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
