@@ -14,7 +14,7 @@ export type LoadBasis = "each" | "one" | "bar" | "total";
 // Same strings as the Swift raw strings (single backslashes there).
 export const IMPLEMENT_PATTERN = "\\b(dumbbells?|dbs?|kettlebells?|kbs?)\\b";
 export const SINGLE_IMPLEMENT_PATTERN =
-  "\\b(single|one)[- ]?(arm|hand|leg)\\b|\\b(goblet|swings?|halo|suitcase|clean (&|and) press|tricep extension)\\b";
+  "\\b(single|one)[- ]?(arm|hand|leg)\\b|\\b(goblet|swings?|halo|suitcase|clean (&|and) press|tricep extension|(kb|kettlebell) curls?)\\b";
 export const ONE_OBJECT_PATTERN = "\\b(clubs?|sandbag|med ?ball)\\b";
 export const BAR_PATTERN = "\\b(barbell|ez[- ]?bar|trap bar|bb)\\b";
 

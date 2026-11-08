@@ -54,7 +54,7 @@ enum WeightLoad {
     /// Words in a lift's name that mean dumbbells or kettlebells.
     static let implementPattern = #"\b(dumbbells?|dbs?|kettlebells?|kbs?)\b"#
     /// Lifts done with a single bell or object.
-    static let singleImplementPattern = #"\b(single|one)[- ]?(arm|hand|leg)\b|\b(goblet|swings?|halo|suitcase|clean (&|and) press|tricep extension)\b"#
+    static let singleImplementPattern = #"\b(single|one)[- ]?(arm|hand|leg)\b|\b(goblet|swings?|halo|suitcase|clean (&|and) press|tricep extension|(kb|kettlebell) curls?)\b"#
     /// Things there's only ever one of: a club, a sandbag, a med ball.
     static let oneObjectPattern = #"\b(clubs?|sandbag|med ?ball)\b"#
     /// A bar in the name: "Barbell Curl", "EZ Bar Curl", "Trap Bar Deadlift".
@@ -87,7 +87,7 @@ enum WeightLoad {
         "Incline Dumbbell Curl": .each,
         "Incline Dumbbell Press": .each,
         "KB Clean & Press": .one,
-        "KB Curl": .each,
+        "KB Curl": .one,
         "KB Goblet Squat": .one,
         "KB Halo": .one,
         "KB Single-arm Row": .one,
