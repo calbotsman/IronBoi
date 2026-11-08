@@ -117,10 +117,19 @@ export function planSessionProgression(input: {
   return ups;
 }
 
+// Fixed implements come in big jumps (a 35 lb bell's next size is 44): "+5"
+// would prescribe a bell that doesn't exist. Same rule as the weekly
+// defaults (progressionDefaults.ts): no automatic step; the coach proposes
+// the next bell when the user says it's easy.
+const FIXED_IMPLEMENT = /\b(kb|kbs|kettlebells?|clubs?|sandbags?|med ?balls?)\b/i;
+
 function stepFor(name: string, rule: ExerciseProgressionType | undefined, base: number): number {
   if (rule && rule.mode === "linear_lb") return rule.amount;
   if (rule && rule.mode === "percent") return Math.max(LIGHT_STEP_LB, roundToPlate((base * rule.amount) / 100));
-  return lookupExercise(name)?.loadClass === "light" ? LIGHT_STEP_LB : DEFAULT_STEP_LB;
+  const entry = lookupExercise(name);
+  const equipment = (entry?.equipment ?? []) as string[];
+  if (FIXED_IMPLEMENT.test(name) || ["kettlebell", "club", "sandbag", "medball"].some((e) => equipment.includes(e))) return 0;
+  return entry?.loadClass === "light" ? LIGHT_STEP_LB : DEFAULT_STEP_LB;
 }
 
 function currentPrescription(

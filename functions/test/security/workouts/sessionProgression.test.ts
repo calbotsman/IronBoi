@@ -32,7 +32,7 @@ const DAY = {
   muscles: [],
   exercises: [
     { name: "Barbell Bench Press", sets: 3, reps: 8, weight: 155, progression: RULE },
-    { name: "KB Goblet Squat", sets: 3, reps: 10, weight: 35 },
+    { name: "Dumbbell Goblet Squat", sets: 3, reps: 10, weight: 35 },
     { name: "Push-ups", sets: 3, reps: 12, weight: 0 },
     { name: "Plank", sets: 2, reps: 60, weight: 20 },
   ],
@@ -86,8 +86,8 @@ describe("session progression", () => {
     await seed();
     const { result } = await train(START);
     expect(await anchor("barbell_bench_press")).toMatchObject({ anchorWeightLb: 160, anchorDate: START, source: "user_session" });
-    // No rule on the kettlebell lift: the default 5 lb step.
-    expect(await anchor("kb_goblet_squat")).toMatchObject({ anchorWeightLb: 40 });
+    // No rule on the dumbbell lift: the default 5 lb step.
+    expect(await anchor("dumbbell_goblet_squat")).toMatchObject({ anchorWeightLb: 40 });
     expect(await planWeight(0)).toBe(160);
     expect(await planWeight(1)).toBe(40);
 
@@ -99,7 +99,7 @@ describe("session progression", () => {
     expect(TrainingRecap.safeParse(result.trainingRecap).success).toBe(true);
     expect(result.trainingRecap?.nextWeights).toEqual([
       { exerciseName: "Barbell Bench Press", fromLb: 155, toLb: 160, reason: "All 3×8 hit at 155 lb" },
-      { exerciseName: "KB Goblet Squat", fromLb: 35, toLb: 40, reason: "All 3×10 hit at 35 lb" },
+      { exerciseName: "Dumbbell Goblet Squat", fromLb: 35, toLb: 40, reason: "All 3×10 hit at 35 lb" },
     ]);
 
     // The next session is prescribed the new weight.
@@ -113,11 +113,11 @@ describe("session progression", () => {
     await seed();
     await train(START, (name, target) => (name === "Barbell Bench Press" ? target - 2 : target));
     expect(await anchor("barbell_bench_press")).toMatchObject({ anchorWeightLb: 155, source: "plan_seed" });
-    expect(await anchor("kb_goblet_squat")).toMatchObject({ anchorWeightLb: 40 });
+    expect(await anchor("dumbbell_goblet_squat")).toMatchObject({ anchorWeightLb: 40 });
     expect(await anchor("push_ups")).toBeUndefined();
     expect(await anchor("plank")).toBeUndefined();
     const kinds = (await db.collection(progressionEventsCollection(USER_ID)).get()).docs.map((doc) => `${doc.data().kind}:${doc.data().exerciseKey}`);
-    expect(kinds.sort()).toEqual(["session_up:kb_goblet_squat"]);
+    expect(kinds.sort()).toEqual(["session_up:dumbbell_goblet_squat"]);
   });
 
   it("no double step: the weekly rollover a week later keeps the session's step", async () => {
@@ -156,7 +156,7 @@ describe("session progression", () => {
     expect(events.size).toBe(2);
     expect(events.docs.map((doc) => doc.id).sort()).toEqual([
       `${START}_mon_session_up_barbell_bench_press`,
-      `${START}_mon_session_up_kb_goblet_squat`,
+      `${START}_mon_session_up_dumbbell_goblet_squat`,
     ]);
   });
 
@@ -172,13 +172,13 @@ describe("session progression", () => {
       exercises: session.exercises.map((exercise) => ({
         ...exercise,
         completedSets: exercise.completedSets.map((set) => ({
-          ...set, completed: true, ...(exercise.name === "KB Goblet Squat" ? { weight: 40 } : {}),
+          ...set, completed: true, ...(exercise.name === "Dumbbell Goblet Squat" ? { weight: 40 } : {}),
         })),
       })),
     });
-    const changed = (await db.doc(progressionEventPath(USER_ID, progressionEventId(`${START}_mon`, "changed_in_workout", "kb_goblet_squat"))).get()).data();
+    const changed = (await db.doc(progressionEventPath(USER_ID, progressionEventId(`${START}_mon`, "changed_in_workout", "dumbbell_goblet_squat"))).get()).data();
     expect(changed).toMatchObject({ fromLb: 35, toLb: 40 });
-    expect(await anchor("kb_goblet_squat")).toMatchObject({ anchorWeightLb: 45 });
+    expect(await anchor("dumbbell_goblet_squat")).toMatchObject({ anchorWeightLb: 45 });
     // The "keep 40?" card would pull the new anchor back down: not offered.
     expect(result.baselineSuggestions).toEqual([]);
   });
@@ -190,6 +190,20 @@ describe("session progression", () => {
         completedSets: [0, 1, 2].map((setIndex) => ({ setIndex, completed: true, reps: 8, weight: 80 })),
       }],
       planDays: { Mon: DAY },
+      baselines: new Map(),
+      date: START,
+    });
+    expect(ups).toEqual([]);
+  });
+
+  it("a kettlebell lift never steps by itself: the next bell is a big jump", () => {
+    const kbDay = { name: "Legs", muscles: [], exercises: [{ name: "KB Goblet Squat", sets: 3, reps: 10, weight: 35 }] };
+    const ups = planSessionProgression({
+      exercises: [{
+        exerciseIndex: 0, name: "KB Goblet Squat", targetSets: 3, targetReps: 10, targetWeight: 35, exerciseDone: true,
+        completedSets: [0, 1, 2].map((setIndex) => ({ setIndex, completed: true, reps: 10, weight: 35 })),
+      }],
+      planDays: { Mon: kbDay },
       baselines: new Map(),
       date: START,
     });

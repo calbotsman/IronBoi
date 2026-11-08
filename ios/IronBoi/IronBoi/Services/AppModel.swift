@@ -214,6 +214,7 @@ final class AppModel: NSObject, ObservableObject {
     private var workoutLogListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
     private var trainingHistoryListener: ListenerRegistration?
+    private var trainingHistoryForeground: NSObjectProtocol?
     private var memoryFactListener: ListenerRegistration?
     private var memoryBriefListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
@@ -2350,7 +2351,18 @@ final class AppModel: NSObject, ObservableObject {
     private func listenForTrainingHistory(userId: String?) {
         trainingHistoryListener?.remove()
         trainingHistory = nil
+        if let token = trainingHistoryForeground { NotificationCenter.default.removeObserver(token) }
+        trainingHistoryForeground = nil
         guard let userId else { return }
+        // The doc is built for a date: on open, and each time the app comes
+        // back, ask the server to rebuild it if it's for another day, so
+        // "missed" and "today" (and the once-a-day offer) are right.
+        refreshTrainingHistory()
+        trainingHistoryForeground = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshTrainingHistory() }
+        }
         trainingHistoryListener = db
             .collection("users")
             .document(userId)
@@ -2909,6 +2921,21 @@ final class AppModel: NSObject, ObservableObject {
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: monday)
+    }
+
+    /// Rebuilds derivedSummaries/training_history server-side when it's stale
+    /// or for another date; the listener picks up the new copy. Quiet on
+    /// failure: History just shows the last copy.
+    func refreshTrainingHistory() {
+        guard user != nil, !inPreview else { return }
+        let date = Self.currentDateISO()
+        Task {
+            do {
+                try await callCallable("refreshTrainingHistoryCallable", data: ["clientDate": date])
+            } catch {
+                NSLog("[IronBoi] Training history refresh failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// "2026-11-07" for one day ago, on the phone's calendar.
