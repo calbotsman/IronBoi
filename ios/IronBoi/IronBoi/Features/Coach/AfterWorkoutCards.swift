@@ -53,6 +53,90 @@ struct EffortCard: View {
     }
 }
 
+/// After the workout, once "How did that feel?" is answered: what it moved.
+/// Records set, weights that go up next time, the streak — a few lines,
+/// closed with the cross.
+struct TrainingRecapCard: View {
+    let recap: TrainingRecapModel
+    let onClose: () -> Void
+
+    private struct Line: Identifiable {
+        let id: String
+        let icon: String
+        let text: String
+    }
+
+    private var lines: [Line] {
+        var lines: [Line] = []
+        for record in recap.records.prefix(2) {
+            let label: String
+            switch record.kind {
+            case "heaviest": label = "Heaviest yet"
+            case "most_reps": label = "Most reps yet"
+            default: label = "Best set yet"
+            }
+            let load = record.weightLb > 0 ? " \(WeightLoad.number(record.weightLb)) lb" : ""
+            let reps = record.reps > 0 ? " × \(record.reps)" : ""
+            lines.append(Line(id: "record-\(record.id)", icon: "trophy.fill",
+                              text: "\(label): \(record.exerciseName)\(load)\(reps)"))
+        }
+        for next in recap.nextWeights.prefix(3) {
+            let delta = next.toLb - next.fromLb
+            let change = delta == 0 ? "" : " (\(delta > 0 ? "+" : "−")\(WeightLoad.number(abs(delta))))"
+            lines.append(Line(id: "next-\(next.id)", icon: delta < 0 ? "arrow.down" : "arrow.up",
+                              text: "Next time: \(next.exerciseName) \(WeightLoad.number(next.toLb)) lb\(change)"))
+        }
+        if recap.streakWeeks > 0 {
+            lines.append(Line(id: "streak", icon: "flame.fill",
+                              text: recap.streakWeeks == 1 ? "1-week streak" : "\(recap.streakWeeks)-week streak"))
+        }
+        return lines
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MyoTheme.Spacing.md) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Your progress")
+                    .myoStyle(.label)
+                    .textCase(.uppercase)
+                    .foregroundStyle(MyoColor.redPen)
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(MyoColor.Text.tertiary.color)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, -MyoTheme.Spacing.md)
+                .padding(.trailing, -MyoTheme.Spacing.sm)
+                .accessibilityLabel("Close")
+            }
+
+            VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
+                ForEach(lines) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: MyoTheme.Spacing.sm) {
+                        Image(systemName: line.icon)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MyoTheme.Colors.coachAmber)
+                            .frame(width: 22)
+                            .accessibilityHidden(true)
+                        Text(line.text)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(MyoColor.Text.primary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(MyoTheme.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .myoCard()
+        .shadow(color: MyoTheme.Colors.shadow.opacity(0.10), radius: 28, y: 10)
+    }
+}
+
 /// Once, after a workout: a nudge on training days, at a time you pick.
 /// Asked here — when you've just shown up — rather than on first launch.
 struct ReminderSetupCard: View {
