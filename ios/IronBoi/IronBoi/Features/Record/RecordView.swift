@@ -673,7 +673,9 @@ private struct StreakSection: View {
             MyoGroupCard {
                 headline
                 weekLine
-                CalendarStrip(days: history.calendar, today: history.today)
+                if !history.calendar.isEmpty {
+                    CalendarStrip(days: history.calendar, today: history.today)
+                }
             }
         }
     }
@@ -1267,7 +1269,9 @@ private enum SessionCompare {
     /// compared (one loaded, one not; timed sets).
     static func compare(_ exercise: LoggedExercise, in log: WorkoutLogSummary,
                         logs: [WorkoutLogSummary]) -> ExerciseComparison? {
-        guard let last = previous(exercise, before: log, in: logs) else { return nil }
+        // Timed sets keep seconds in `reps`: no "+15 reps" for a longer plank.
+        guard !exercise.sets.contains(where: { ($0.durationSec ?? 0) > 0 }),
+              let last = previous(exercise, before: log, in: logs) else { return nil }
         let vs = "vs \(HistoryDate.short(last.date))"
         let now = topSet(exercise)
         let then = topSet(last.exercise)
@@ -1297,14 +1301,16 @@ private enum SessionCompare {
         if let kg = set.loadKg, kg > 0 {
             weight = WeightLoad.label(HistoryWeight.pounds(kg: kg), for: exercise)
         }
-        if let reps = set.reps, reps > 0 {
-            if let weight { return "\(weight) × \(reps)" }
-            return "\(reps) reps"
-        }
+        // Timed first: a hold or cardio set also carries its seconds in
+        // `reps`, so "45 reps" for a plank came from checking reps first.
         if let sec = set.durationSec, sec > 0 {
             let time = sec >= 60 ? "\(sec / 60):" + String(format: "%02d", sec % 60) : "\(sec) sec"
             if let weight { return "\(weight) · \(time)" }
             return time
+        }
+        if let reps = set.reps, reps > 0 {
+            if let weight { return "\(weight) × \(reps)" }
+            return "\(reps) reps"
         }
         return weight ?? "Done"
     }

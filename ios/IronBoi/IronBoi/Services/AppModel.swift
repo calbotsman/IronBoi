@@ -906,15 +906,25 @@ final class AppModel: NSObject, ObservableObject {
     /// when the doc is missing or from another week.
     var thisWeekDays: [String: TrainingDay] {
         guard let history = trainingHistory, history.thisWeek.weekStart == Self.currentWeekStartISO() else { return [:] }
+        // The doc is rebuilt when a workout finishes, so it can be days old:
+        // a planned day that has since passed is missed, and today is today,
+        // by the phone's date rather than the doc's.
+        let today = Self.currentDateISO()
         var days: [String: TrainingDay] = [:]
         for day in history.calendar where day.date >= history.thisWeek.weekStart {
-            days[day.dayKey] = day
+            var status = day.status
+            if day.date < today, status == "planned" || status == "today" { status = "missed" }
+            if day.date == today, status == "planned" { status = "today" }
+            days[day.dayKey] = TrainingDay(date: day.date, dayKey: day.dayKey, status: status,
+                                           name: day.name, sessionId: day.sessionId)
         }
         return days
     }
 
-    /// A workout's already logged today (per the history doc).
+    /// A workout's already logged today (the history doc, or the logs, which
+    /// can be newer than the doc).
     var trainedToday: Bool {
+        if workoutLogs.contains(where: { $0.date == Self.currentDateISO() }) { return true }
         guard let today = thisWeekDays[Self.currentDayKey()] else { return false }
         return today.status == "done" || today.status == "extra"
     }
@@ -938,9 +948,20 @@ final class AppModel: NSObject, ObservableObject {
         guard let history = trainingHistory, history.thisWeek.weekStart == Self.currentWeekStartISO(),
               let days = currentWorkoutPlan?.days else { return nil }
         let today = Self.currentDateISO()
-        let recent = Set(history.recentMuscles.map { $0.lowercased() })
-        for missed in history.missedThisWeek where missed.date < today {
-            guard let day = days.first(where: { $0.dayKey == missed.dayKey && !$0.exercises.isEmpty }) else { continue }
+        // "Yesterday and today" as of the doc's date: only trust it when the
+        // doc is from today or yesterday.
+        let fresh = history.today >= Self.isoDate(daysAgo: 1)
+        let recent = fresh ? Set(history.recentMuscles.map { $0.lowercased() }) : []
+        // Missed per the phone's date (thisWeekDays), most recent first: a
+        // stale doc still lists a passed day as planned.
+        let missedDays = thisWeekDays.values
+            .filter { $0.status == "missed" && $0.date < today }
+            .sorted { $0.date > $1.date }
+        for missedDay in missedDays {
+            guard let day = days.first(where: { $0.dayKey == missedDay.dayKey && !$0.exercises.isEmpty }) else { continue }
+            let listed = history.missedThisWeek.first { $0.date == missedDay.date }
+            let missed = listed ?? MissedSession(date: missedDay.date, dayKey: missedDay.dayKey,
+                                                 name: missedDay.name ?? day.name, muscles: day.muscles)
             let muscles = missed.muscles.isEmpty ? day.muscles : missed.muscles
             if muscles.contains(where: { recent.contains($0.lowercased()) }) { continue }
             return SessionOffer(day: day, missed: missed)
@@ -2890,8 +2911,16 @@ final class AppModel: NSObject, ObservableObject {
         return formatter.string(from: monday)
     }
 
-    /// Today's date as the history doc writes it ("2026-11-08").
-    var todayISO: String { Self.currentDateISO() }
+    /// "2026-11-07" for one day ago, on the phone's calendar.
+    static func isoDate(daysAgo: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 
     private static func jsonObject<T: Encodable>(from value: T) throws -> Any {
         let data = try JSONEncoder().encode(value)

@@ -280,8 +280,16 @@ struct CoachStageView: View {
     }
 
     /// Any card that needs the space below the body.
-    private var cardOpen: Bool {
-        swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || (appModel.pendingEffortSessionId != nil && !inRoutine) || showsTrainingRecap || !appModel.pendingBaselineSuggestions.isEmpty || showReminderSetup || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
+    private var cardOpen: Bool { questionCardOpen || workoutCardOpen }
+    // Split in two: one long || chain is slow for the type-checker.
+    private var questionCardOpen: Bool {
+        let effort = appModel.pendingEffortSessionId != nil && !inRoutine
+        return swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || effort || showsTrainingRecap
+    }
+    private var workoutCardOpen: Bool {
+        let today = showTodayCard && appModel.activeWorkout == nil
+        let live = appModel.activeWorkout != nil && workoutExpanded
+        return !appModel.pendingBaselineSuggestions.isEmpty || showReminderSetup || today || live
     }
     /// What you're saying, as shown: the live coach's transcript when it
     /// has one (better in a noisy gym), else the phone's — and never a run
@@ -729,12 +737,12 @@ struct CoachStageView: View {
                     EffortCard(onAnswer: answerEffort, onSkip: skipEffort)
                         .padding(.horizontal, MyoTheme.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
-                } else if showsTrainingRecap, let recap = appModel.lastTrainingRecap {
-                    TrainingRecapCard(recap: recap, onClose: closeTrainingRecap)
-                        .padding(.horizontal, MyoTheme.Spacing.md)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else if !appModel.pendingBaselineSuggestions.isEmpty {
                     WeightFollowUpCard(suggestions: appModel.pendingBaselineSuggestions)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if showsTrainingRecap, let recap = appModel.lastTrainingRecap {
+                    TrainingRecapCard(recap: recap, onClose: closeTrainingRecap)
                         .padding(.horizontal, MyoTheme.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else if showReminderSetup {
@@ -1127,7 +1135,7 @@ struct CoachStageView: View {
                     }
                 }
                 if appModel.activeWorkout == nil {
-                    quickTap("Today's workout", systemImage: "list.bullet") { showTodayCard = true }
+                    quickTap("Today's workout", systemImage: "list.bullet") { appModel.dismissTrainingRecap(); showTodayCard = true }
                 }
                 quickTap("Adjust my workout", systemImage: "slider.horizontal.3") {
                     talk("I need to adjust my workout.")
@@ -3212,6 +3220,8 @@ struct CoachStageView: View {
         if appModel.activeWorkout != nil {
             workoutExpanded = true
         } else {
+            // The progress card would sit in front of it.
+            appModel.dismissTrainingRecap()
             showTodayCard = true
         }
     }
@@ -3481,7 +3491,7 @@ struct CoachStageView: View {
         if let up = progress.nextWeights.first(where: { $0.toLb > $0.fromLb }) {
             return "Up \(WeightLoad.number(up.toLb - up.fromLb)) on \(short(up.exerciseName)) next time."
         }
-        if let record = progress.records.first, !lines.contains(where: { $0.hasPrefix("New best") }) {
+        if let record = progress.records.first, !lines.contains(where: { $0.contains("New best") }) {
             return "New best on \(short(record.exerciseName))."
         }
         return nil
