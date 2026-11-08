@@ -257,7 +257,12 @@ struct CoachStageView: View {
     /// Nothing below the body: it sits near the middle of the screen with
     /// the status line pinned just under it.
     private var centered: Bool { !cardOpen && appModel.pendingPlanAdjustmentProposal == nil }
-    private var restFocus: CGPoint { CGPoint(x: stageSize.width / 2, y: stageSize.height * 0.42) }
+    /// Where the body rests. With a timer showing (rest, a hold, a warm-up
+    /// move) it sits higher, so the clock and its buttons fit above the
+    /// workout card instead of running into it.
+    private var restFocus: CGPoint {
+        CGPoint(x: stageSize.width / 2, y: stageSize.height * (timerPanel != nil ? 0.30 : 0.42))
+    }
     private static let stageArea = "coachStageArea"
     /// Where the pinned caption starts: just under the coach's body.
     private var captionTop: CGFloat { restFocus.y + stageSize.width * 0.225 + 36 }
@@ -848,7 +853,9 @@ struct CoachStageView: View {
                               primary: ("Done", { finishHold(early: true) }), secondary: nil)
         }
         if let restEndsAt {
-            return TimerPanel(title: "Rest", endsAt: restEndsAt, next: restNextLabel.isEmpty ? nil : "Next: " + restNextLabel,
+            // Just the name: the workout card right below has the set, reps
+            // and weight.
+            return TimerPanel(title: "Rest", endsAt: restEndsAt, next: currentExercise.map { "Next: " + Self.short($0.name) },
                               tip: restTip,
                               primary: ("Skip", { _ = handleRestCommand("skip") }),
                               secondary: ("+30s", { _ = handleRestCommand("thirty more") }))

@@ -14,8 +14,10 @@ struct TimerPanel: View {
     /// Full panel when there's room; otherwise the tip goes, then the clock
     /// shrinks, so it never runs into the workout card under it.
     var body: some View {
+        // Kept to the clock, what's next, and two buttons: the tip line made
+        // the stage crowded and ran into the workout card. The clock shrinks
+        // if even that doesn't fit.
         ViewThatFits(in: .vertical) {
-            panel(showTip: true, clockSize: 64)
             panel(showTip: false, clockSize: 64)
             panel(showTip: false, clockSize: 44)
         }
@@ -46,7 +48,8 @@ struct TimerPanel: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(MyoColor.Text.secondary.color)
                     .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             if showTip, let tip, !tip.isEmpty {
                 Text(tip)
