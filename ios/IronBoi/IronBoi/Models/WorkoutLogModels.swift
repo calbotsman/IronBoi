@@ -38,6 +38,9 @@ struct LoggedExercise: Equatable {
 struct LoggedSet: Equatable {
     let reps: Int?
     let loadKg: Double?
+    /// Timed sets (planks, carries). Defaulted so `LoggedSet(reps:loadKg:)`
+    /// keeps working.
+    var durationSec: Int? = nil
 }
 
 extension Array where Element == WorkoutLogSummary {

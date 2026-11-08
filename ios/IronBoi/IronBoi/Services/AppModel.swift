@@ -2448,7 +2448,8 @@ final class AppModel: NSObject, ObservableObject {
 
         let exercises = (data["exercises"] as? [[String: Any]] ?? []).map { ex -> LoggedExercise in
             let sets = (ex["sets"] as? [[String: Any]] ?? []).map { set in
-                LoggedSet(reps: set["reps"] as? Int, loadKg: set["loadKg"] as? Double)
+                LoggedSet(reps: set["reps"] as? Int, loadKg: set["loadKg"] as? Double,
+                          durationSec: set["durationSec"] as? Int)
             }
             return LoggedExercise(name: ex["name"] as? String ?? "Exercise", sets: sets)
         }
