@@ -130,6 +130,20 @@ export function coachNotesPath(userId: string) {
   return `${userRoot(userId)}/derivedSummaries/coach_notes`;
 }
 
+/** The training history doc History and the workout brain read (TrainingHistory). */
+export function trainingHistoryPath(userId: string) {
+  return `${userRoot(userId)}/derivedSummaries/training_history`;
+}
+
+/** One change to a lift's prescribed weight, with why (ProgressionEvent). */
+export function progressionEventPath(userId: string, eventId: string) {
+  return `${userRoot(userId)}/progressionEvents/${eventId}`;
+}
+
+export function progressionEventsCollection(userId: string) {
+  return `${userRoot(userId)}/progressionEvents`;
+}
+
 export function progressSummaryPath(userId: string) {
   return `${userRoot(userId)}/derivedSummaries/progress_current`;
 }

@@ -147,6 +147,8 @@ final class AppModel: NSObject, ObservableObject {
     /// suggests that time.
     private(set) var lastWorkoutStartedAt: Date?
     @Published private(set) var progressSummary: ProgressSummaryModel?
+    /// Streak, calendar, lift progress and records (derivedSummaries/training_history).
+    @Published private(set) var trainingHistory: TrainingHistoryModel?
     /// Recovery from Apple Health (AppModel+Recovery), when reads are on.
     @Published var recovery: RecoveryBaseline.Summary?
     var recoveryReadAt: Date?
@@ -208,6 +210,7 @@ final class AppModel: NSObject, ObservableObject {
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
+    private var trainingHistoryListener: ListenerRegistration?
     private var memoryFactListener: ListenerRegistration?
     private var memoryBriefListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
@@ -229,6 +232,7 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkoutListener?.remove()
         workoutLogListener?.remove()
         progressListener?.remove()
+        trainingHistoryListener?.remove()
         memoryFactListener?.remove()
         memoryBriefListener?.remove()
     }
@@ -255,6 +259,7 @@ final class AppModel: NSObject, ObservableObject {
                 self.listenForActiveWorkout(userId: user?.uid)
                 self.listenForWorkoutLogs(userId: user?.uid)
                 self.listenForProgressSummary(userId: user?.uid)
+                self.listenForTrainingHistory(userId: user?.uid)
                 self.listenForMemoryFacts(userId: user?.uid)
                 self.listenForMemoryBrief(userId: user?.uid)
             }
@@ -2222,6 +2227,27 @@ final class AppModel: NSObject, ObservableObject {
                         return
                     }
                     self?.progressSummary = Self.makeProgressSummary(from: data)
+                }
+            }
+    }
+
+    private func listenForTrainingHistory(userId: String?) {
+        trainingHistoryListener?.remove()
+        trainingHistory = nil
+        guard let userId else { return }
+        trainingHistoryListener = db
+            .collection("users")
+            .document(userId)
+            .collection("derivedSummaries")
+            .document("training_history")
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        // Advisory, like progress: keep the last copy.
+                        NSLog("[IronBoi] Training history listener error: \(error.localizedDescription)")
+                        return
+                    }
+                    self?.trainingHistory = snapshot?.data().flatMap(TrainingHistoryModel.init(firestore:))
                 }
             }
     }

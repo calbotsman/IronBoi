@@ -331,3 +331,151 @@ struct ProgressLensHighlight: Equatable, Identifiable {
     let framing: String
     let note: String
 }
+
+
+// MARK: - Training history (derivedSummaries/training_history)
+// Server-built mirror of TrainingHistory in functions/src/contracts/coach-agent.ts
+// (docs/plans/myo-training-intelligence.md). Weights are pounds. The app only
+// renders and reads it; all the maths is server-side.
+
+struct TrainingHistoryModel: Equatable {
+    let computedAt: String
+    let today: String
+    let streak: TrainingStreak
+    let thisWeek: TrainingWeek
+    let calendar: [TrainingDay]
+    let missedThisWeek: [MissedSession]
+    let recentMuscles: [String]
+    let lifts: [LiftProgress]
+    let recentRecords: [PersonalRecordModel]
+}
+
+struct TrainingStreak: Equatable {
+    let currentWeeks: Int
+    let bestWeeks: Int
+    let thisWeekMet: Bool
+}
+
+struct TrainingWeek: Equatable {
+    let weekStart: String
+    let planned: Int
+    let done: Int
+    let volumeLb: Double
+    let avgEffort: Double?
+}
+
+struct TrainingDay: Equatable, Identifiable {
+    var id: String { date }
+    let date: String
+    let dayKey: String
+    /// done | missed | rest | today | planned | extra
+    let status: String
+    let name: String?
+    let sessionId: String?
+}
+
+struct MissedSession: Equatable, Identifiable {
+    var id: String { date }
+    let date: String
+    let dayKey: String
+    let name: String
+    let muscles: [String]
+}
+
+struct LiftProgress: Equatable, Identifiable {
+    var id: String { exerciseKey }
+    let exerciseKey: String
+    let exerciseName: String
+    let currentLb: Double
+    let startLb: Double
+    let firstDate: String
+    let lastDate: String
+    let sessions: Int
+    /// Newest first.
+    let events: [ProgressionEventModel]
+    /// Oldest first, pounds.
+    let e1rmSeries: [ProgressPoint]
+    let prs: [PersonalRecordModel]
+}
+
+struct ProgressionEventModel: Equatable, Identifiable {
+    var id: String { "\(date)-\(kind)-\(fromLb)-\(toLb)" }
+    let date: String
+    /// session_up | weekly_up | hold_missed_reps | hold_not_trained | deload | changed_in_workout | plan_change
+    let kind: String
+    let fromLb: Double
+    let toLb: Double
+    let reason: String
+}
+
+struct PersonalRecordModel: Equatable, Identifiable {
+    var id: String { "\(exerciseName)-\(kind)-\(date)-\(weightLb)-\(reps)" }
+    let exerciseName: String
+    /// heaviest | most_reps | best_e1rm
+    let kind: String
+    let weightLb: Double
+    let reps: Int
+    let e1rmLb: Double?
+    let date: String
+}
+
+extension TrainingHistoryModel {
+    /// Parses the Firestore doc; nil if it isn't one.
+    init?(firestore data: [String: Any]) {
+        func double(_ any: Any?) -> Double? {
+            if let n = any as? NSNumber { return n.doubleValue }
+            return any as? Double
+        }
+        func int(_ any: Any?) -> Int? {
+            if let n = any as? NSNumber { return n.intValue }
+            return any as? Int
+        }
+        func record(_ raw: [String: Any]) -> PersonalRecordModel? {
+            guard let name = raw["exerciseName"] as? String, let kind = raw["kind"] as? String,
+                  let date = raw["date"] as? String else { return nil }
+            return PersonalRecordModel(exerciseName: name, kind: kind, weightLb: double(raw["weightLb"]) ?? 0,
+                                       reps: int(raw["reps"]) ?? 0, e1rmLb: double(raw["e1rmLb"]), date: date)
+        }
+        guard let streakRaw = data["streak"] as? [String: Any],
+              let weekRaw = data["thisWeek"] as? [String: Any] else { return nil }
+        computedAt = data["computedAt"] as? String ?? ""
+        today = data["today"] as? String ?? ""
+        streak = TrainingStreak(currentWeeks: int(streakRaw["currentWeeks"]) ?? 0,
+                                bestWeeks: int(streakRaw["bestWeeks"]) ?? 0,
+                                thisWeekMet: streakRaw["thisWeekMet"] as? Bool ?? false)
+        thisWeek = TrainingWeek(weekStart: weekRaw["weekStart"] as? String ?? "",
+                                planned: int(weekRaw["planned"]) ?? 0, done: int(weekRaw["done"]) ?? 0,
+                                volumeLb: double(weekRaw["volumeLb"]) ?? 0, avgEffort: double(weekRaw["avgEffort"]))
+        calendar = (data["calendar"] as? [[String: Any]] ?? []).compactMap { raw in
+            guard let date = raw["date"] as? String, let dayKey = raw["dayKey"] as? String,
+                  let status = raw["status"] as? String else { return nil }
+            return TrainingDay(date: date, dayKey: dayKey, status: status,
+                               name: raw["name"] as? String, sessionId: raw["sessionId"] as? String)
+        }
+        missedThisWeek = (data["missedThisWeek"] as? [[String: Any]] ?? []).compactMap { raw in
+            guard let date = raw["date"] as? String, let dayKey = raw["dayKey"] as? String,
+                  let name = raw["name"] as? String else { return nil }
+            return MissedSession(date: date, dayKey: dayKey, name: name, muscles: raw["muscles"] as? [String] ?? [])
+        }
+        recentMuscles = data["recentMuscles"] as? [String] ?? []
+        lifts = (data["lifts"] as? [[String: Any]] ?? []).compactMap { raw in
+            guard let key = raw["exerciseKey"] as? String, let name = raw["exerciseName"] as? String else { return nil }
+            return LiftProgress(
+                exerciseKey: key, exerciseName: name,
+                currentLb: double(raw["currentLb"]) ?? 0, startLb: double(raw["startLb"]) ?? 0,
+                firstDate: raw["firstDate"] as? String ?? "", lastDate: raw["lastDate"] as? String ?? "",
+                sessions: int(raw["sessions"]) ?? 0,
+                events: (raw["events"] as? [[String: Any]] ?? []).compactMap { e in
+                    guard let date = e["date"] as? String, let kind = e["kind"] as? String else { return nil }
+                    return ProgressionEventModel(date: date, kind: kind, fromLb: double(e["fromLb"]) ?? 0,
+                                                 toLb: double(e["toLb"]) ?? 0, reason: e["reason"] as? String ?? "")
+                },
+                e1rmSeries: (raw["e1rmSeries"] as? [[String: Any]] ?? []).compactMap { p in
+                    guard let date = p["date"] as? String, let value = double(p["value"]) else { return nil }
+                    return ProgressPoint(date: date, value: value)
+                },
+                prs: (raw["prs"] as? [[String: Any]] ?? []).compactMap(record))
+        }
+        recentRecords = (data["recentRecords"] as? [[String: Any]] ?? []).compactMap(record)
+    }
+}
