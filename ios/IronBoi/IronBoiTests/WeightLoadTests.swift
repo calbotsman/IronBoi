@@ -5,6 +5,19 @@ import XCTest
 final class WeightRequestTests: XCTestCase {
     private func change(_ text: String) -> WeightRequest.Change? { WeightLoad.request(in: text)?.change }
 
+    /// A lift with no weight set yet reads "Set weight", not "bodyweight".
+    func testWhichLiftsTakeAWeight() {
+        for name in ["Single Arm Row", "Single-arm DB Row", "Goblet Squat", "Lateral Raises", "Overhead Press",
+                     "Romanian Deadlift", "Farmer Carry", "Farmer's Walk", "KB Swing", "Cable Row"] {
+            XCTAssertTrue(WeightLoad.takesWeight(name), name)
+        }
+        for name in ["Push-ups", "Decline Push-ups", "Inverted Row", "Pull-ups", "Plank", "Bodyweight Squat",
+                     "Walking Lunges", "Hanging Leg Raises", "Glute Bridge", "Band Row", "Bench Dips", "Cat-cow",
+                     "Rowing Machine"] {
+            XCTAssertFalse(WeightLoad.takesWeight(name), name)
+        }
+    }
+
     func testExactPhrasesStayOnThePhone() {
         XCTAssertEqual(change("bump it to 40"), .to(40))
         XCTAssertEqual(change("add 5 pounds"), .by(5))
@@ -292,5 +305,24 @@ final class SetCountSidesTests: XCTestCase {
         XCTAssertFalse(c.switchSides(finished: nil))
         XCTAssertNil(c.sidesToLog)
         XCTAssertNil(c.currentSide)
+    }
+}
+
+/// 2026-11-08: a typed request became an exercise, and "Weight?" mid-workout
+/// was dropped unanswered.
+final class WorkoutTalkTests: XCTestCase {
+    func testOnlyExerciseNamesAreAdded() {
+        XCTAssertTrue(WorkoutEdit.looksLikeExercise("curls"))
+        XCTAssertTrue(WorkoutEdit.looksLikeExercise("face pulls"))
+        XCTAssertFalse(WorkoutEdit.looksLikeExercise("a logical workout plan for today based on muscle groups"))
+        XCTAssertFalse(WorkoutEdit.looksLikeExercise("something for my back"))
+    }
+
+    func testShortWorkoutQuestionsGetThrough() {
+        XCTAssertTrue(WorkoutVoice.worthSendingMidWorkout("Weight?", justAsked: false))
+        XCTAssertTrue(WorkoutVoice.worthSendingMidWorkout("what now", justAsked: false))
+        XCTAssertTrue(WorkoutVoice.worthSendingMidWorkout("how heavy", justAsked: false))
+        XCTAssertFalse(WorkoutVoice.worthSendingMidWorkout("uh huh", justAsked: false))
+        XCTAssertFalse(WorkoutVoice.worthSendingMidWorkout("wow", justAsked: false))
     }
 }

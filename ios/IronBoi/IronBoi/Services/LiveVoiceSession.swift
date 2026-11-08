@@ -51,11 +51,20 @@ final class LiveVoiceSession: ObservableObject {
         var label: String { self == .gemini ? "Gemini" : "OpenAI" }
     }
     static let providerKey = "liveVoiceProvider"
+    /// The engine the server last gave a live session (its default when
+    /// nothing is picked in settings).
+    static let servedProviderKey = "liveVoiceServedProvider"
     /// The engine picked on this phone, or nil for the server's default
     /// (what staging serves). Sent only when picked, so the picker never
     /// claims one engine while the server uses the other.
     static var chosenProvider: Provider? {
         Provider(rawValue: UserDefaults.standard.string(forKey: providerKey) ?? "")
+    }
+    /// Coach's voice is off in settings: the live coach's audio never
+    /// plays, however the session came back (a retry, a reconnect, a
+    /// workout restarting it). Its words still arrive as captions.
+    var muted = false {
+        didSet { if muted, state == .speaking || buffersPlaying > 0 { hub.stopPlayback(); buffersPlaying = 0; agentMeter.reset(); uplink.coachSpeaking = false; if state == .speaking { state = .listening } } }
     }
     /// Set while a count is running: the coach's audio is dropped (its mic
     /// can be closed for a whole set, but the exercise intro still has to
@@ -451,6 +460,10 @@ final class LiveVoiceSession: ObservableObject {
             AudioHub.log("live timing: mint \(Self.ms(since: mintStarted)) ms")
             model = ticket.model
             activeProvider = Provider(rawValue: ticket.provider ?? "") ?? .gemini
+            // Remember which engine the server gave us: with no pick in
+            // settings, the phone's own lines must be read by this same
+            // engine (VoiceCache.engine), not a guess.
+            UserDefaults.standard.set(activeProvider.rawValue, forKey: Self.servedProviderKey)
             // Never retune echo cancellation here: the regular coach may
             // have its tap on the mic right now, and it set the session up.
             try hub.start()
@@ -1201,6 +1214,7 @@ final class LiveVoiceSession: ObservableObject {
     private func play(_ buffer: AVAudioPCMBuffer) {
         // You're counting a set (the mic to the coach is muted for it): the
         // coach stays quiet until it's logged, even audio already on its way.
+        if muted { return }
         if quietForCount || Date() < quietUntil {
             // Dropping an answer to something just asked: owe it, and say
             // it once the floor is free (an app line ends, a count closes).

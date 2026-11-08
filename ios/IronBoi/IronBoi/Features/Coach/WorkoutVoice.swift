@@ -122,8 +122,18 @@ enum WorkoutVoice {
         let t = normalized(transcript)
         func says(_ pattern: String) -> Bool { t.range(of: pattern, options: .regularExpression) != nil }
         if justAsked, says(#"^\W*(yes|yeah|yep|yup|no|nope|sure|correct|right|exactly|that's right)\b"#) { return true }
-        guard meaningful.count >= 2 else { return false }
         let aboutWorkout = says(#"\b(heavy|heavier|light|lighter|weight|pounds?|lbs?|kilos?|reps?|sets?|hurts?|hurting|pain|sore|tired|form|next|skip|swap|done|finish|knee|back|shoulder|elbow|wrist|hip|ankle|neck|rest|break|water|easier|harder|instead|change|demo|show)\b"#)
+        // A short question about the workout gets through on one real word:
+        // "Weight?", "What now?", "How heavy?" were dropped for having only
+        // one, and nothing answered.
+        // A workout word alone ("Back.", "Next.") is too often the room or the
+        // music, so it needs to be asked ("Weight?"); a question word leading
+        // ("What now", "How heavy") is enough on its own.
+        if meaningful.count == 1,
+           says(#"^\W*(what|how|which|should)\b"#) || (aboutWorkout && transcript.contains("?")) {
+            return true
+        }
+        guard meaningful.count >= 2 else { return false }
         if justAsked || aboutWorkout { return true }
         return meaningful.count >= 3 && (isQuestionOrRequest(transcript) || words.count >= 6)
     }

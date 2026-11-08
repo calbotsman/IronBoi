@@ -86,7 +86,10 @@ enum WorkoutEdit: Equatable {
             return .addCardio(name: cardio.name, minutes: cardio.minutes, now: cardio.now)
         }
         if let m = first(#"\b(?:add|adding|throw in|throwing in|tack on|put in|add in|also do|squeeze in)(?: some| a few| a| an)? (.+)$"#) {
-            let rest = m[0]
+            // "…to my routine", "…at the end of the workout": where, not what.
+            let rest = m[0].replacingOccurrences(
+                of: #"\s+(?:(?:to|into|onto|in|for)|at the end of) (?:my|the|this|today'?s) (?:workout|session|routine|plan|day)s?$"#,
+                with: "", options: .regularExpression)
             // "Add ten pounds", "add a plate", "add another set": weight or
             // volume, not a new lift.
             let amount = #"(?:a|an|another|some|more|one|two|three|four|five|ten|fifteen|twenty|\d+(?:\.\d+)?)"#
@@ -98,7 +101,7 @@ enum WorkoutEdit: Equatable {
             let weight = first(#"\bat (\d+(?:\.\d+)?)"#).flatMap { Double($0[0]) }
             let now = rest.range(of: #"\b(now|next|first)\b"#, options: .regularExpression) != nil
             let name = cleanName(rest)
-            guard !name.isEmpty, find(name) == nil else { return nil }
+            guard !name.isEmpty, find(name) == nil, looksLikeExercise(name) else { return nil }
             return .add(name: name, sets: sets, reps: reps, weight: weight, now: now)
         }
         if let m = first(#"\b(?:do|go to|switch to|start with|jump to|move to|move on to|hit|skip ahead to|skip to) (?:the )?(.+?)(?: first| next| now| right now)$"#),
@@ -120,6 +123,18 @@ enum WorkoutEdit: Equatable {
             }
         }
         return nil
+    }
+
+    /// Whether what follows "add" / "put in" names an exercise, not a
+    /// request. "Put in a logical workout plan for today based on muscle
+    /// groups…" was added to the workout as an exercise; anything like that
+    /// goes to the coach instead.
+    static func looksLikeExercise(_ name: String) -> Bool {
+        let words = name.split(separator: " ")
+        guard !words.isEmpty, words.count <= 7 else { return false }
+        let lower = name.lowercased()
+        let request = #"\b(workouts?|plans?|routines?|programs?|programmes?|sessions?|today|tomorrow|based|logical|something|anything|muscle groups?|days?|week|warm ?up|cool ?down|for me|that|it)\b"#
+        return lower.range(of: request, options: .regularExpression) == nil
     }
 
     // MARK: - Cardio

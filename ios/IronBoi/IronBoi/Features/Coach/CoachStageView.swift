@@ -257,7 +257,12 @@ struct CoachStageView: View {
     /// Nothing below the body: it sits near the middle of the screen with
     /// the status line pinned just under it.
     private var centered: Bool { !cardOpen && appModel.pendingPlanAdjustmentProposal == nil }
-    private var restFocus: CGPoint { CGPoint(x: stageSize.width / 2, y: stageSize.height * 0.42) }
+    /// Where the body rests. With a timer showing (rest, a hold, a warm-up
+    /// move) it sits higher, so the clock and its buttons fit above the
+    /// workout card instead of running into it.
+    private var restFocus: CGPoint {
+        CGPoint(x: stageSize.width / 2, y: stageSize.height * (timerPanel != nil ? 0.30 : 0.42))
+    }
     private static let stageArea = "coachStageArea"
     /// Where the pinned caption starts: just under the coach's body.
     private var captionTop: CGFloat { restFocus.y + stageSize.width * 0.225 + 36 }
@@ -367,7 +372,9 @@ struct CoachStageView: View {
     private static let reelOn = false
     #endif
 
-    var body: some View {
+    /// The stage with its animations. Split from `body`, whose one long
+    /// modifier chain had grown past what the compiler type-checks in time.
+    private var animatedStage: some View {
         stageShowingOnRequest
         #if DEBUG
         .overlay(alignment: .topTrailing) {
@@ -386,9 +393,14 @@ struct CoachStageView: View {
         .animation(MyoTheme.Motion.fade, value: appModel.pendingEffortSessionId)
         .animation(MyoTheme.Motion.fade, value: showReminderSetup)
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
+    }
+
+    var body: some View {
+        animatedStage
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
         .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
+        .onChange(of: appModel.tappedSetDone) { _, tap in setTapped(tap) }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
         .onChange(of: liveWorkoutNote) { _, note in
             // Connecting or standing by, it queues: the live coach is
@@ -412,6 +424,8 @@ struct CoachStageView: View {
             // A line that can't be spoken in the coach's voice is shown
             // instead; the voice never switches to the phone's own.
             voice.onUnspoken = { text in show(notice: text) }
+            voice.muted = !speaksReplies
+            live.muted = !speaksReplies
             appModel.warmVoice()
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
@@ -764,6 +778,7 @@ struct CoachStageView: View {
                             .padding(.horizontal, MyoTheme.Spacing.lg)
                             // Never past the workout card or the controls.
                             .frame(maxHeight: captionRoom, alignment: .top)
+                            .clipped()
                     }
                     // A leftover from an earlier day doesn't block today's start.
                     if askingSkipRestDay {
@@ -828,7 +843,7 @@ struct CoachStageView: View {
         if paused {
             return TimerPanel(title: "Paused", endsAt: nil,
                               next: currentExercise.map { "Up next: " + Self.short($0.name) },
-                              tip: pausedRestLeft.map { "\(Int($0.rounded())) s of rest left" },
+                              frozen: pausedRestLeft,
                               primary: ("Resume", { resumeWorkout() }), secondary: nil)
         }
         if let routine = guided {
@@ -837,33 +852,25 @@ struct CoachStageView: View {
             let side = move.eachSide ? (routine.side == 0 ? " · first side" : " · other side") : ""
             return TimerPanel(
                 title: (routine.kind == .warmup ? "Warm-up" : "Cooldown") + " \(routine.index + 1) of \(routine.moves.count)",
-                endsAt: routine.endsAt, next: move.name + side, tip: upNext ?? move.cue,
+                endsAt: routine.endsAt, next: move.name + side, note: upNext, pending: move.seconds,
                 primary: ("Next", { advanceGuided() }),
                 secondary: ("End", { finishGuided(skipped: true) }))
         }
         guard appModel.activeWorkout != nil else { return nil }
         if let holdEndsAt {
-            return TimerPanel(title: "Hold", endsAt: holdEndsAt, next: currentExercise.map { Self.short($0.name) }, tip: nil,
+            let cardio = currentExercise.map { ExerciseKnowledge.isCardio($0.name) } ?? false
+            return TimerPanel(title: cardio ? "Cardio" : "Hold", endsAt: holdEndsAt,
+                              next: currentExercise.map { Self.short($0.name) },
                               primary: ("Done", { finishHold(early: true) }), secondary: nil)
         }
         if let restEndsAt {
-            return TimerPanel(title: "Rest", endsAt: restEndsAt, next: restNextLabel.isEmpty ? nil : "Next: " + restNextLabel,
-                              tip: restTip,
+            // Just the name: the workout card right below has the set, reps
+            // and weight.
+            return TimerPanel(title: "Rest", endsAt: restEndsAt, next: currentExercise.map { "Next: " + Self.short($0.name) },
                               primary: ("Skip", { _ = handleRestCommand("skip") }),
                               secondary: ("+30s", { _ = handleRestCommand("thirty more") }))
         }
         return nil
-    }
-
-    /// One thing to think about while resting: the next form cue Coach
-    /// hasn't said yet, or a breath.
-    private var restTip: String? {
-        guard let exercise = currentExercise else { return nil }
-        if let cue = ExerciseKnowledge.lookup(exercise.name).cues.first(where: { !(lastAdvice?.text.contains($0) ?? false) }),
-           !advisor.muted.contains(.cue) {
-            return cue
-        }
-        return "Slow breaths. Let your heart rate come down."
     }
 
     @ViewBuilder
@@ -900,7 +907,17 @@ struct CoachStageView: View {
     /// Voice turned off mid-conversation: stop talking now; live voice
     /// only talks, so the regular coach takes over in captions.
     private func voiceSettingChanged(_ on: Bool) {
+        // What was being said moves to the screen: read it before muting,
+        // which stops the voice.
+        let interrupted = !on && voice.isSpeaking ? voice.spokenText : nil
+        voice.muted = !on
+        live.muted = !on
         guard !on else { captionReply = nil; return }
+        if let interrupted { captionReply = interrupted }
+        // No live coach while the voice is off: no retry or restart brings
+        // it back (applyLive keeps it to the regular coach).
+        liveRetryTask?.cancel()
+        liveRetryTask = nil
         if live.isRunning {
             endConversation()
             talkTapped(fromMic: true)
@@ -1060,9 +1077,9 @@ struct CoachStageView: View {
             HStack(spacing: 6) {
                 if let index = currentExerciseIndex {
                     // Mid-workout: the things you reach for between sets.
-                    quickTap("Explain again", systemImage: "arrow.counterclockwise") {
-                        introduce(exercise: index, first: false, replay: true)
-                    }
+                    // The set action first: the row is narrow beside the
+                    // buttons, and "Explain again" first pushed "Set done"
+                    // off the edge.
                     if currentExercise.map({ ExerciseKnowledge.isTimed($0.name) }) == true {
                         if holdEndsAt == nil {
                             quickTap(currentExercise.map { ExerciseKnowledge.isCardio($0.name) } == true ? "Start timer" : "Start hold",
@@ -1072,6 +1089,9 @@ struct CoachStageView: View {
                         }
                     } else {
                         quickTap("Set done", systemImage: "checkmark") { handleTyped("set done") }
+                    }
+                    quickTap("Explain again", systemImage: "arrow.counterclockwise") {
+                        introduce(exercise: index, first: false, replay: true)
                     }
                 } else {
                 if appModel.isNewToTraining {
@@ -1362,7 +1382,8 @@ struct CoachStageView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
-        if showIsolationTip {
+        // Not while a timer shows: it pushes the workout card up into it.
+        if showIsolationTip, timerPanel == nil {
             isolationTip.transition(.opacity.combined(with: .move(edge: .bottom)))
         }
         if let liveBadge {
@@ -1633,6 +1654,13 @@ struct CoachStageView: View {
     }
 
     private func connectLive() {
+        // Voice off: live only talks, so it isn't started at all; the
+        // regular coach answers on screen.
+        guard speaksReplies else {
+            AudioHub.log("live: not starting, coach voice is off")
+            openRegularMic()
+            return
+        }
         // After any reconnect or handover, the coach is told where you are.
         live.onReconnected = { [live] in
             if let note = liveWorkoutNote { live.note(note) }
@@ -2264,6 +2292,33 @@ struct CoachStageView: View {
     /// The count is over: the set is logged with the reps actually done —
     /// fewer, exact, or more than the target — and Coach says so briefly.
     /// A stray "one" or "two" that never became a set is dropped.
+    /// A set ticked on the workout card: the same as a counted one — the
+    /// rest starts and Coach says so. Tapping used to log the set silently,
+    /// with no rest timer. A count running for it is closed without logging
+    /// a second set.
+    private func setTapped(_ tap: AppModel.TappedSet?) {
+        // Paused: the tap only marks the set; no rest, nothing said.
+        guard let tap, Date().timeIntervalSince(tap.at) < 2, appModel.activeWorkout != nil, guided == nil, !paused else { return }
+        if setCount != nil {
+            closeCountTask?.cancel()
+            closeCountTask = nil
+            setCount = nil
+            countBase = 0
+            voiceInput.holdOpen = false
+            liveEarsReopened = false
+            updateLiveUplink()
+            // The counted words mustn't start a new count or reach Coach.
+            markRestartHandled()
+            voiceInput.stop()
+        }
+        // A hold or its countdown running: the tap is that set, so the hold
+        // must not log another when it ends.
+        if holdEndsAt != nil || holdCountdownTask != nil { cancelHold() }
+        if restEndsAt != nil { cancelRest() }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        confirm(afterSet("Set \(tap.setNumber) done.", exerciseIndex: tap.exerciseIndex))
+    }
+
     private func finishCount() {
         closeCountTask?.cancel()
         closeCountTask = nil
@@ -2864,16 +2919,20 @@ struct CoachStageView: View {
         }
         holdCountdownTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            for _ in 0..<150 where voice.isSpeaking { try? await Task.sleep(nanoseconds: 200_000_000) }
+            // Wait for whoever is talking: the phone's voice or the live
+            // coach (it was only the phone's, so "Go" landed mid-sentence).
+            for _ in 0..<150 where voice.isSpeaking || (live.isActive && live.state == .speaking) {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
             // Time to get down into it.
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            for n in [3, 2, 1] {
+            // Three ticks, not "three, two, one" spoken: each number was its
+            // own line, fetched and played a second apart, so a slow one got
+            // cut off by the next and each cut the live coach off too: a
+            // jumble of false starts before "Go". Ticks are instant.
+            for _ in 0..<3 {
                 guard !Task.isCancelled, currentExerciseIndex == index, holdEndsAt == nil, restEndsAt == nil else { return }
-                if speaksReplies, tips != .quiet, conversationActive {
-                    voice.speak("\(n)", messageId: "local-\(UUID().uuidString)")
-                } else {
-                    AudioHub.shared.play(cue: .tick)
-                }
+                AudioHub.shared.play(cue: .tick)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }

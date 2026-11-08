@@ -200,10 +200,38 @@ private struct WeeklyPlanView: View {
                     isToday: day.dayKey == todayKey,
                     isBusy: appModel.isWorkoutBusy
                 ) {
-                    Task {
-                        await appModel.startWorkout(dayKey: day.dayKey)
-                    }
+                    // Another day's session asks first: it used to start at
+                    // once, with no word on what it replaced.
+                    if day.dayKey == todayKey { start(day) } else { pendingDay = day }
                 }
+            }
+        }
+        .alert(pendingDay.map { "Do \($0.name) today?" } ?? "",
+               isPresented: Binding(get: { pendingDay != nil }, set: { if !$0 { pendingDay = nil } }),
+               presenting: pendingDay) { day in
+            Button("Not now", role: .cancel) {}
+            Button("Start it") { start(day) }
+        } message: { day in
+            Text(todayLine(replacing: day))
+        }
+    }
+
+    @State private var pendingDay: PlannedWorkoutDay?
+
+    private func todayLine(replacing day: PlannedWorkoutDay) -> String {
+        let today = plan.days.first { $0.dayKey == todayKey }
+        let what = today.map { $0.exercises.isEmpty ? "your rest day" : $0.name } ?? "today's plan"
+        return "\(day.dayKey)'s session replaces \(what), just for today."
+    }
+
+    /// Starts it, then closes this screen so you land on the coach with the
+    /// workout loaded, rather than staying here wondering if it worked.
+    private func start(_ day: PlannedWorkoutDay) {
+        Task {
+            await appModel.startWorkout(dayKey: day.dayKey)
+            if appModel.activeWorkout != nil {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                appModel.showProfile = false
             }
         }
     }
@@ -342,7 +370,7 @@ private struct PlannedWorkoutDayCard: View {
 
                     if !day.exercises.isEmpty {
                         Button(action: start) {
-                            Label(isBusy ? "Starting..." : "Start \(day.dayKey)", systemImage: "play.fill")
+                            Label(isBusy ? "Starting…" : isToday ? "Start today's workout" : "Do this today", systemImage: "play.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -477,7 +505,7 @@ private struct PlannedExerciseDetailSheet: View {
         HStack(spacing: 10) {
             StatTile(label: "Sets", value: "\(exercise.sets)")
             StatTile(label: isTimed ? "Sec" : "Reps", value: "\(exercise.reps)")
-            StatTile(label: "Weight", value: exercise.weight > 0 ? WeightLoad.label(exercise.weight, for: exercise.name) : "BW")
+            StatTile(label: "Weight", value: exercise.weight > 0 ? WeightLoad.label(exercise.weight, for: exercise.name) : WeightLoad.takesWeight(exercise.name) ? "Set" : "BW")
         }
     }
 
@@ -580,7 +608,7 @@ private struct PlannedExerciseDetailSheet: View {
 
     private var detailSubtitle: String {
         let repLabel = isTimed ? "seconds" : "reps"
-        let weight = exercise.weight > 0 ? " at \(WeightLoad.label(exercise.weight, for: exercise.name))" : " bodyweight"
+        let weight = exercise.weight > 0 ? " at \(WeightLoad.label(exercise.weight, for: exercise.name))" : WeightLoad.takesWeight(exercise.name) ? ", weight not set yet" : " bodyweight"
         return "\(exercise.sets) sets x \(exercise.reps) \(repLabel)\(weight)"
     }
 
@@ -630,6 +658,7 @@ private struct ActiveWorkoutView: View {
     let workout: ActiveWorkoutSession
     @State private var selectedExercise: ActiveWorkoutExercise?
     @State private var swappingExercise: ActiveWorkoutExercise?
+    @State private var confirmFinish = false
 
     var body: some View {
         ScrollView {
@@ -645,22 +674,25 @@ private struct ActiveWorkoutView: View {
                 }
 
                 Button {
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    Task {
-                        await appModel.finishActiveWorkout()
-                    }
+                    if completedSets < totalSets { confirmFinish = true } else { finish() }
                 } label: {
-                    Label(appModel.isWorkoutBusy ? "Finishing..." : "End Workout", systemImage: "checkmark.circle.fill")
+                    Label(appModel.isWorkoutBusy ? "Finishing…" : "Finish workout", systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .tint(MyoColor.Action.primary.color)
                 .foregroundStyle(MyoColor.Text.primary.color)
-                .disabled(appModel.isWorkoutBusy)
+                .disabled(appModel.isWorkoutBusy || completedSets == 0)
                 .padding(.top, 8)
             }
             .padding()
+        }
+        .alert("Finish the workout?", isPresented: $confirmFinish) {
+            Button("Keep going", role: .cancel) {}
+            Button("Finish") { finish() }
+        } message: {
+            Text("\(completedSets) of \(totalSets) sets done. The rest won't be logged.")
         }
         .sheet(item: $selectedExercise) { exercise in
             ExerciseDetailSheet(
@@ -684,6 +716,11 @@ private struct ActiveWorkoutView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private func finish() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Task { await appModel.finishActiveWorkout() }
     }
 
     private var header: some View {
@@ -763,7 +800,7 @@ private struct WorkoutExerciseCard: View {
             // Weight is recorded here or nowhere — the set toggle stamps
             // whatever this shows. Bodyweight movements (target 0) get no
             // control; a stepper on push-ups is noise.
-            if exercise.targetWeight > 0 {
+            if exercise.targetWeight > 0 || appModel.workingWeight(for: exercise) > 0 || WeightLoad.takesWeight(exercise.name) {
                 WorkoutWeightStepper(
                     weight: appModel.workingWeight(for: exercise),
                     basis: WeightLoad.basis(for: exercise.name),
@@ -910,7 +947,7 @@ private struct ExerciseDetailSheet: View {
         HStack(spacing: 10) {
             StatTile(label: "Sets", value: "\(exercise.targetSets)")
             StatTile(label: isTimed ? "Sec" : "Reps", value: "\(exercise.targetReps)")
-            StatTile(label: "Weight", value: exercise.targetWeight > 0 ? WeightLoad.label(exercise.targetWeight, for: exercise.name) : "BW")
+            StatTile(label: "Weight", value: exercise.targetWeight > 0 ? WeightLoad.label(exercise.targetWeight, for: exercise.name) : WeightLoad.takesWeight(exercise.name) ? "Set" : "BW")
         }
     }
 
@@ -958,7 +995,7 @@ private struct ExerciseDetailSheet: View {
 
     private var detailSubtitle: String {
         let repLabel = isTimed ? "seconds" : "reps"
-        let weight = exercise.targetWeight > 0 ? " at \(WeightLoad.label(exercise.targetWeight, for: exercise.name))" : " bodyweight"
+        let weight = exercise.targetWeight > 0 ? " at \(WeightLoad.label(exercise.targetWeight, for: exercise.name))" : WeightLoad.takesWeight(exercise.name) ? ", weight not set yet" : " bodyweight"
         return "\(exercise.targetSets) sets x \(exercise.targetReps) \(repLabel)\(weight)"
     }
 

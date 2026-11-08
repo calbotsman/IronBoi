@@ -104,6 +104,14 @@ export function wavFromPcm16(pcm: Buffer, sampleRate = 24000): Buffer {
   return Buffer.concat([header, pcm]);
 }
 
+/**
+ * One engine attempt's limit. The phone waits about 4 s for a line, so a
+ * request that hangs past this is aborted and retried once instead of
+ * holding the line (and the function) open; a late answer is still saved
+ * on the phone for next time.
+ */
+const ENGINE_TIMEOUT_MS = 6_000;
+
 export const GEMINI_TTS_MODEL_DEFAULT = "gemini-2.5-flash-preview-tts";
 export const OPENAI_TTS_MODEL_DEFAULT = "gpt-4o-mini-tts";
 
@@ -111,6 +119,7 @@ async function synthesizeWithGemini(text: string, voice: string, apiKey: string,
   const model = process.env.IRONBOI_GEMINI_TTS_MODEL || GEMINI_TTS_MODEL_DEFAULT;
   const res = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: "POST",
+    signal: AbortSignal.timeout(ENGINE_TIMEOUT_MS),
     headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
       contents: [{ parts: [{ text }] }],
@@ -132,6 +141,7 @@ async function synthesizeWithGemini(text: string, voice: string, apiKey: string,
 async function synthesizeWithOpenAI(text: string, voice: string, apiKey: string, fetchImpl: typeof fetch): Promise<string> {
   const res = await fetchImpl("https://api.openai.com/v1/audio/speech", {
     method: "POST",
+    signal: AbortSignal.timeout(ENGINE_TIMEOUT_MS),
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: process.env.IRONBOI_OPENAI_TTS_MODEL || OPENAI_TTS_MODEL_DEFAULT,

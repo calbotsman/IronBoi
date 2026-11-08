@@ -135,19 +135,6 @@ final class CoachVoice: NSObject, ObservableObject {
         }
     }
 
-    /// When Coach last drew a breath; not again within a few seconds, or
-    /// it starts to sound like panting.
-    private var lastBreathAt = Date.distantPast
-
-    private func breathes(before chunk: String, index: Int) -> Bool {
-        let words = chunk.split(separator: " ").count
-        guard words >= 6, Date().timeIntervalSince(lastBreathAt) > 6 else { return false }
-        // First sentence of something real: usually. Later ones: sometimes.
-        guard index == 0 ? Double.random(in: 0...1) < 0.75 : (words >= 12 && Double.random(in: 0...1) < 0.35) else { return false }
-        lastBreathAt = Date()
-        return true
-    }
-
     func speak(_ text: String, messageId: String) {
         let spoken = Self.speakable(text)
         guard !spoken.isEmpty else { return }
@@ -164,7 +151,14 @@ final class CoachVoice: NSObject, ObservableObject {
         self.lines = spoken
     }
 
+    /// Coach's voice is off in settings: nothing is said, whoever asks.
+    /// Every caller shows its words on screen already.
+    var muted = false {
+        didSet { if muted, isSpeaking { stop() } }
+    }
+
     private func play(_ chunks: [String], messageId: String) {
+        guard !muted else { return }
         // A chunk of only punctuation is "too small" for the server, and
         // that error used to drop the rest of the reply to the robot voice.
         let chunks = chunks.filter { $0.rangeOfCharacter(from: .alphanumerics) != nil }
@@ -247,13 +241,10 @@ final class CoachVoice: NSObject, ObservableObject {
                     continue
                 }
                 guard gen == self.generation else { return }
-                // Breathe like a person: in before a real sentence (not a
-                // one-word "Go."), and now and then between longer ones,
-                // with gaps that aren't all the same length.
-                if self.breathes(before: unit.text, index: index), let breath = AudioHub.breath() {
-                    await self.hub.play(breath)
-                    guard gen == self.generation else { return }
-                } else if index > 0 {
+                // A short, uneven pause between sentences. (No synthesized
+                // breath: it isn't the coach's voice, and it came out as a
+                // sniffle.)
+                if index > 0 {
                     try? await Task.sleep(nanoseconds: UInt64.random(in: 30_000_000...110_000_000))
                     guard gen == self.generation else { return }
                 }
