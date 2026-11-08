@@ -13,6 +13,7 @@ struct LiveWorkoutCard: View {
     private var progress: Double { totalSets == 0 ? 0 : Double(doneSets) / Double(totalSets) }
     private var currentIndex: Int? { appModel.currentExerciseIndex }
     @State private var confirmDiscard = false
+    @State private var confirmFinish = false
 
     /// Started on an earlier day: it's a leftover, not today's session.
     private var startedDay: String? {
@@ -64,9 +65,14 @@ struct LiveWorkoutCard: View {
                             .font(.body.weight(.semibold))
                             .foregroundStyle(MyoColor.Text.primary.color)
                             .lineLimit(1)
+                        // The line you read from across the gym: the ledger
+                        // size, not a caption, in secondary ink (tertiary
+                        // was about 3.4:1 on cream).
                         Text(nextSetLine(exercise))
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(MyoColor.Text.tertiary.color)
+                            .myoStyle(.numeric)
+                            .foregroundStyle(MyoColor.Text.secondary.color)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     } else {
                         Text("All sets done")
                             .font(.body.weight(.semibold))
@@ -165,11 +171,10 @@ struct LiveWorkoutCard: View {
 
             MyoHairline()
 
+            // Asks first when sets are left, like Discard does: one tap
+            // ended the workout for good.
             Button {
-                Task {
-                    await appModel.finishActiveWorkout()
-                    if appModel.activeWorkout == nil { expanded = false }
-                }
+                if doneSets < totalSets { confirmFinish = true } else { finish() }
             } label: {
                 HStack(spacing: MyoTheme.Spacing.sm) {
                     if appModel.isWorkoutBusy { ProgressView().tint(MyoTheme.Colors.cream) }
@@ -185,12 +190,25 @@ struct LiveWorkoutCard: View {
             .padding(.horizontal, MyoTheme.Spacing.md)
             .padding(.top, MyoTheme.Spacing.md)
 
+            if doneSets == 0 {
+                Text("Log a set to finish, or discard it.")
+                    .font(.footnote)
+                    .foregroundStyle(MyoColor.Text.tertiary.color)
+                    .padding(.top, MyoTheme.Spacing.xs)
+            }
+
             Button("Discard workout") { confirmDiscard = true }
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(MyoColor.Text.tertiary.color)
                 .frame(minHeight: 44)
                 .padding(.bottom, MyoTheme.Spacing.xs)
                 .disabled(appModel.isWorkoutBusy)
+        }
+        .alert("Finish the workout?", isPresented: $confirmFinish) {
+            Button("Keep going", role: .cancel) {}
+            Button("Finish") { finish() }
+        } message: {
+            Text("\(doneSets) of \(totalSets) sets done. The rest won't be logged.")
         }
         .alert("Discard this workout?", isPresented: $confirmDiscard) {
             Button("Keep it", role: .cancel) {}
@@ -202,6 +220,13 @@ struct LiveWorkoutCard: View {
             }
         } message: {
             Text("Nothing from it will be saved to your history.")
+        }
+    }
+
+    private func finish() {
+        Task {
+            await appModel.finishActiveWorkout()
+            if appModel.activeWorkout == nil { expanded = false }
         }
     }
 
@@ -335,9 +360,6 @@ private struct ProgressRing: View {
                 .trim(from: 0, to: progress)
                 .stroke(MyoTheme.Colors.coachAmber, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(Int((progress * 100).rounded()))")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(MyoColor.Text.secondary.color)
         }
         .accessibilityLabel("\(Int((progress * 100).rounded())) percent done")
     }

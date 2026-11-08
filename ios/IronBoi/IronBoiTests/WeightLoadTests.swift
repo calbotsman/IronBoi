@@ -307,3 +307,22 @@ final class SetCountSidesTests: XCTestCase {
         XCTAssertNil(c.currentSide)
     }
 }
+
+/// 2026-11-08: a typed request became an exercise, and "Weight?" mid-workout
+/// was dropped unanswered.
+final class WorkoutTalkTests: XCTestCase {
+    func testOnlyExerciseNamesAreAdded() {
+        XCTAssertTrue(WorkoutEdit.looksLikeExercise("curls"))
+        XCTAssertTrue(WorkoutEdit.looksLikeExercise("face pulls"))
+        XCTAssertFalse(WorkoutEdit.looksLikeExercise("a logical workout plan for today based on muscle groups"))
+        XCTAssertFalse(WorkoutEdit.looksLikeExercise("something for my back"))
+    }
+
+    func testShortWorkoutQuestionsGetThrough() {
+        XCTAssertTrue(WorkoutVoice.worthSendingMidWorkout("Weight?", justAsked: false))
+        XCTAssertTrue(WorkoutVoice.worthSendingMidWorkout("what now", justAsked: false))
+        XCTAssertTrue(WorkoutVoice.worthSendingMidWorkout("how heavy", justAsked: false))
+        XCTAssertFalse(WorkoutVoice.worthSendingMidWorkout("uh huh", justAsked: false))
+        XCTAssertFalse(WorkoutVoice.worthSendingMidWorkout("wow", justAsked: false))
+    }
+}

@@ -200,10 +200,38 @@ private struct WeeklyPlanView: View {
                     isToday: day.dayKey == todayKey,
                     isBusy: appModel.isWorkoutBusy
                 ) {
-                    Task {
-                        await appModel.startWorkout(dayKey: day.dayKey)
-                    }
+                    // Another day's session asks first: it used to start at
+                    // once, with no word on what it replaced.
+                    if day.dayKey == todayKey { start(day) } else { pendingDay = day }
                 }
+            }
+        }
+        .alert(pendingDay.map { "Do \($0.name) today?" } ?? "",
+               isPresented: Binding(get: { pendingDay != nil }, set: { if !$0 { pendingDay = nil } }),
+               presenting: pendingDay) { day in
+            Button("Not now", role: .cancel) {}
+            Button("Start it") { start(day) }
+        } message: { day in
+            Text(todayLine(replacing: day))
+        }
+    }
+
+    @State private var pendingDay: PlannedWorkoutDay?
+
+    private func todayLine(replacing day: PlannedWorkoutDay) -> String {
+        let today = plan.days.first { $0.dayKey == todayKey }
+        let what = today.map { $0.exercises.isEmpty ? "your rest day" : $0.name } ?? "today's plan"
+        return "\(day.dayKey)'s session replaces \(what), just for today."
+    }
+
+    /// Starts it, then closes this screen so you land on the coach with the
+    /// workout loaded, rather than staying here wondering if it worked.
+    private func start(_ day: PlannedWorkoutDay) {
+        Task {
+            await appModel.startWorkout(dayKey: day.dayKey)
+            if appModel.activeWorkout != nil {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                appModel.showProfile = false
             }
         }
     }
@@ -342,7 +370,7 @@ private struct PlannedWorkoutDayCard: View {
 
                     if !day.exercises.isEmpty {
                         Button(action: start) {
-                            Label(isBusy ? "Starting..." : "Start \(day.dayKey)", systemImage: "play.fill")
+                            Label(isBusy ? "Starting…" : isToday ? "Start today's workout" : "Do this today", systemImage: "play.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -630,6 +658,7 @@ private struct ActiveWorkoutView: View {
     let workout: ActiveWorkoutSession
     @State private var selectedExercise: ActiveWorkoutExercise?
     @State private var swappingExercise: ActiveWorkoutExercise?
+    @State private var confirmFinish = false
 
     var body: some View {
         ScrollView {
@@ -645,12 +674,9 @@ private struct ActiveWorkoutView: View {
                 }
 
                 Button {
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    Task {
-                        await appModel.finishActiveWorkout()
-                    }
+                    if completedSets < totalSets { confirmFinish = true } else { finish() }
                 } label: {
-                    Label(appModel.isWorkoutBusy ? "Finishing..." : "End Workout", systemImage: "checkmark.circle.fill")
+                    Label(appModel.isWorkoutBusy ? "Finishing…" : "Finish workout", systemImage: "checkmark.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -661,6 +687,12 @@ private struct ActiveWorkoutView: View {
                 .padding(.top, 8)
             }
             .padding()
+        }
+        .alert("Finish the workout?", isPresented: $confirmFinish) {
+            Button("Keep going", role: .cancel) {}
+            Button("Finish") { finish() }
+        } message: {
+            Text("\(completedSets) of \(totalSets) sets done. The rest won't be logged.")
         }
         .sheet(item: $selectedExercise) { exercise in
             ExerciseDetailSheet(
@@ -684,6 +716,11 @@ private struct ActiveWorkoutView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+    }
+
+    private func finish() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Task { await appModel.finishActiveWorkout() }
     }
 
     private var header: some View {

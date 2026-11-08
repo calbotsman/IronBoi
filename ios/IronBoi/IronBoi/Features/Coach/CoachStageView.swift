@@ -772,6 +772,7 @@ struct CoachStageView: View {
                             .padding(.horizontal, MyoTheme.Spacing.lg)
                             // Never past the workout card or the controls.
                             .frame(maxHeight: captionRoom, alignment: .top)
+                            .clipped()
                     }
                     // A leftover from an earlier day doesn't block today's start.
                     if askingSkipRestDay {
@@ -836,7 +837,7 @@ struct CoachStageView: View {
         if paused {
             return TimerPanel(title: "Paused", endsAt: nil,
                               next: currentExercise.map { "Up next: " + Self.short($0.name) },
-                              tip: pausedRestLeft.map { "\(Int($0.rounded())) s of rest left" },
+                              frozen: pausedRestLeft,
                               primary: ("Resume", { resumeWorkout() }), secondary: nil)
         }
         if let routine = guided {
@@ -845,35 +846,25 @@ struct CoachStageView: View {
             let side = move.eachSide ? (routine.side == 0 ? " · first side" : " · other side") : ""
             return TimerPanel(
                 title: (routine.kind == .warmup ? "Warm-up" : "Cooldown") + " \(routine.index + 1) of \(routine.moves.count)",
-                endsAt: routine.endsAt, next: move.name + side, tip: upNext ?? move.cue,
+                endsAt: routine.endsAt, next: move.name + side, note: upNext, pending: move.seconds,
                 primary: ("Next", { advanceGuided() }),
                 secondary: ("End", { finishGuided(skipped: true) }))
         }
         guard appModel.activeWorkout != nil else { return nil }
         if let holdEndsAt {
-            return TimerPanel(title: "Hold", endsAt: holdEndsAt, next: currentExercise.map { Self.short($0.name) }, tip: nil,
+            let cardio = currentExercise.map { ExerciseKnowledge.isCardio($0.name) } ?? false
+            return TimerPanel(title: cardio ? "Cardio" : "Hold", endsAt: holdEndsAt,
+                              next: currentExercise.map { Self.short($0.name) },
                               primary: ("Done", { finishHold(early: true) }), secondary: nil)
         }
         if let restEndsAt {
             // Just the name: the workout card right below has the set, reps
             // and weight.
             return TimerPanel(title: "Rest", endsAt: restEndsAt, next: currentExercise.map { "Next: " + Self.short($0.name) },
-                              tip: restTip,
                               primary: ("Skip", { _ = handleRestCommand("skip") }),
                               secondary: ("+30s", { _ = handleRestCommand("thirty more") }))
         }
         return nil
-    }
-
-    /// One thing to think about while resting: the next form cue Coach
-    /// hasn't said yet, or a breath.
-    private var restTip: String? {
-        guard let exercise = currentExercise else { return nil }
-        if let cue = ExerciseKnowledge.lookup(exercise.name).cues.first(where: { !(lastAdvice?.text.contains($0) ?? false) }),
-           !advisor.muted.contains(.cue) {
-            return cue
-        }
-        return "Slow breaths. Let your heart rate come down."
     }
 
     @ViewBuilder
@@ -1080,9 +1071,9 @@ struct CoachStageView: View {
             HStack(spacing: 6) {
                 if let index = currentExerciseIndex {
                     // Mid-workout: the things you reach for between sets.
-                    quickTap("Explain again", systemImage: "arrow.counterclockwise") {
-                        introduce(exercise: index, first: false, replay: true)
-                    }
+                    // The set action first: the row is narrow beside the
+                    // buttons, and "Explain again" first pushed "Set done"
+                    // off the edge.
                     if currentExercise.map({ ExerciseKnowledge.isTimed($0.name) }) == true {
                         if holdEndsAt == nil {
                             quickTap(currentExercise.map { ExerciseKnowledge.isCardio($0.name) } == true ? "Start timer" : "Start hold",
@@ -1092,6 +1083,9 @@ struct CoachStageView: View {
                         }
                     } else {
                         quickTap("Set done", systemImage: "checkmark") { handleTyped("set done") }
+                    }
+                    quickTap("Explain again", systemImage: "arrow.counterclockwise") {
+                        introduce(exercise: index, first: false, replay: true)
                     }
                 } else {
                 if appModel.isNewToTraining {
@@ -1382,7 +1376,8 @@ struct CoachStageView: View {
 
     private var controls: some View {
         VStack(alignment: .leading, spacing: MyoTheme.Spacing.sm) {
-        if showIsolationTip {
+        // Not while a timer shows: it pushes the workout card up into it.
+        if showIsolationTip, timerPanel == nil {
             isolationTip.transition(.opacity.combined(with: .move(edge: .bottom)))
         }
         if let liveBadge {
