@@ -77,6 +77,11 @@ describe("training history builder", () => {
     expect(session.lifts[0].sets[0]).toEqual({ lb: 135, reps: 8 });
   });
 
+  it("skips impossible sets so one typo can't freeze History", () => {
+    const [session] = normalizeSessions([log(MON, "Barbell Bench Press", [[2500, 5], [135, 8]])]);
+    expect(session.lifts[0].sets).toEqual([{ lb: 135, reps: 8 }]);
+  });
+
   it("weeks are Monday to Sunday", () => {
     expect(weekStartOf("2026-11-08")).toBe(MON); // Sunday
     expect(weekStartOf(MON)).toBe(MON);

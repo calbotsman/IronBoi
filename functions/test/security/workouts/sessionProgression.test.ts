@@ -196,6 +196,25 @@ describe("session progression", () => {
     expect(ups).toEqual([]);
   });
 
+  it("one automatic step per lift per 7 days", () => {
+    const finished = [{
+      exerciseIndex: 0, name: "Barbell Bench Press", targetSets: 3, targetReps: 8, targetWeight: 160, exerciseDone: true,
+      completedSets: [0, 1, 2].map((setIndex) => ({ setIndex, completed: true, reps: 8, weight: 160 })),
+    }];
+    const stepped = new Map([["barbell_bench_press", {
+      userId: USER_ID, exerciseKey: "barbell_bench_press", exerciseName: "Barbell Bench Press",
+      anchorWeightLb: 160, anchorDate: START, source: "user_session" as const, updatedAt: `${START}T13:00:00.000Z`,
+    }]]);
+    const plan = { Mon: { ...DAY, exercises: [{ ...DAY.exercises[0], weight: 160 }] } };
+    // Three days after the last step: held.
+    expect(planSessionProgression({ exercises: finished, planDays: plan, baselines: stepped, date: "2026-08-07" })).toEqual([]);
+    // A week later (the weekly rule now prescribes 165), all reps at 165: steps again.
+    const weekLater = [{ ...finished[0], targetWeight: 165,
+      completedSets: [0, 1, 2].map((setIndex) => ({ setIndex, completed: true, reps: 8, weight: 165 })) }];
+    expect(planSessionProgression({ exercises: weekLater, planDays: plan, baselines: stepped, date: "2026-08-11" })
+      .map((up) => up.toLb)).toEqual([170]);
+  });
+
   it("a kettlebell lift never steps by itself: the next bell is a big jump", () => {
     const kbDay = { name: "Legs", muscles: [], exercises: [{ name: "KB Goblet Squat", sets: 3, reps: 10, weight: 35 }] };
     const ups = planSessionProgression({

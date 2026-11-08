@@ -48,7 +48,7 @@ export async function writeTrainingHistory(
   // One extra day of slack: localDate can sit a day before the UTC date.
   const since = addDays(today, -7 * HISTORY_WEEKS - 1);
   const [logsSnap, planSnap, programSnap, profileSnap, baselines, eventsSnap] = await Promise.all([
-    db.collection(`${userRoot(userId)}/workoutLogs`).where("date", ">=", since).orderBy("date", "asc").limit(MAX_LOGS).get(),
+    db.collection(`${userRoot(userId)}/workoutLogs`).where("date", ">=", since).orderBy("date", "desc").limit(MAX_LOGS).get(),
     db.doc(workoutPlanPath(userId, "current")).get(),
     db.doc(trainingProgramPath(userId)).get(),
     db.doc(profilePath(userId)).get(),
@@ -58,7 +58,8 @@ export async function writeTrainingHistory(
       .then((snap) => snap.docs.map((doc) => doc.data()))
       .catch(() => [] as DocumentData[]),
   ]);
-  const logs = logsSnap.docs.map((doc) => doc.data());
+  // Newest MAX_LOGS (desc), back in date order for the builder.
+  const logs = logsSnap.docs.map((doc) => doc.data()).reverse();
   const history = buildTrainingHistory({
     userId,
     today,

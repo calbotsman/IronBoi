@@ -310,7 +310,9 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       error: "ramp_weeks_missing",
     };
   }
-  if (isReentryRamp && (await trainedWithinDays(input.db, input.userId, input.clientDate ?? currentDateISO(), LAYOFF_MIN_DAYS))) {
+  if (isReentryRamp && (await trainedWithinDays(input.db, input.userId, input.clientDate ?? currentDateISO(), LAYOFF_MIN_DAYS)
+    // A read failure falls through to the usual ramp checks, not a throw.
+    .catch(() => false))) {
     // A few missed sessions are not a layoff. The tester's missed week got
     // a "returning from a layoff" ramp scaling every lift down while they
     // were training two days out of three; the prompt says not to, and this

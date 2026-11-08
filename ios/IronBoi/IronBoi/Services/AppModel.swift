@@ -2563,7 +2563,11 @@ final class AppModel: NSObject, ObservableObject {
 
     private static func makeWorkoutLogSummary(from data: [String: Any]) -> WorkoutLogSummary? {
         guard let sessionId = data["sessionId"] as? String,
-              let date = data["date"] as? String else { return nil }
+              let utcDate = data["date"] as? String else { return nil }
+        // The day it was done where you are: `date` is the UTC day, so an
+        // evening workout in the US landed on tomorrow. Older logs lack
+        // localDate and keep the UTC day.
+        let date = (data["localDate"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? utcDate
 
         // postSessionNotes is written as "dayKey: workoutName" — take the name.
         let notes = (data["postSessionNotes"] as? String ?? "").trimmingCharacters(in: .whitespaces)

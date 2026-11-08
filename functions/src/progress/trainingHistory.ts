@@ -108,6 +108,10 @@ export function normalizeSessions(logs: Loose[]): Session[] {
         const kg = finite(set.loadKg);
         if (reps === null || kg === null || reps <= 0 || kg <= 0) continue;
         const lb = toLb(kg);
+        // A misheard "2,000 lb" or a typo would become a record or startLb
+        // past the contract's bounds, and the strict parse would then fail
+        // every rebuild for a year: History frozen. Skip impossible sets.
+        if (lb > 2000 || reps > 500) continue;
         loaded.push({ lb, reps: Math.round(reps) });
         volumeLb += reps * kg * KG_TO_LB;
       }
@@ -441,7 +445,13 @@ function eventsByLift(events: Loose[]): Map<string, Array<LiftEvent & { createdA
     });
     byKey.set(event.exerciseKey, list);
   }
-  for (const list of byKey.values()) list.sort((a, b) => cmp(b.date, a.date) || cmp(b.createdAt, a.createdAt));
+  // Same day, same instant (a heavier-than-prescribed session writes both
+  // changed_in_workout and session_up): the step leads, so the intro's "up 5
+  // from last time" finds it first.
+  const stepFirst = (kind: string) => (kind === "session_up" || kind === "weekly_up" || kind === "deload" ? 0 : 1);
+  for (const list of byKey.values()) {
+    list.sort((a, b) => cmp(b.date, a.date) || cmp(b.createdAt, a.createdAt) || stepFirst(a.kind) - stepFirst(b.kind));
+  }
   return byKey;
 }
 

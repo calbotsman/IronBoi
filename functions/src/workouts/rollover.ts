@@ -9,7 +9,7 @@ import { normalizeExerciseKey } from "./exerciseCatalog.js";
 import type { z } from "zod";
 import type { PlannedExercise } from "../contracts/coach-agent.js";
 import { roundToPlate, resolvePrescribedWeight, type BaselineMap } from "./exerciseBaselines.js";
-import { exerciseBaselinePath, progressionEventPath, userRoot } from "../paths.js";
+import { exerciseBaselinePath, progressionEventPath, progressionEventsCollection, userRoot } from "../paths.js";
 import { lbText, progressionEventDoc, progressionEventId, writeProgressionEvent } from "./progressionEvents.js";
 import { addDays } from "../progress/trainingHistory.js";
 import {
@@ -326,6 +326,25 @@ export async function gateProgression(
       if (snap.exists) steppedAtFinish.add(sessionUpRefs[index].key);
     });
   }
+  // Any session step since each lift's last gate, not just one on its
+  // latest session: Monday's step then Thursday held lighter must not turn
+  // into a second step at the gate. One single-field query (no index).
+  const sessionUpDates = new Map<string, string>();
+  const gateStarts = [...progressing.keys()].map((key) => {
+    const baseline = baselines.get(key);
+    return baseline ? (baseline.lastGateDate ?? baseline.anchorDate) : undefined;
+  }).filter((date): date is string => typeof date === "string");
+  if (gateStarts.length > 0) {
+    const earliest = gateStarts.sort()[0];
+    const eventsSnap = await db.collection(progressionEventsCollection(userId)).where("date", ">=", earliest).get()
+      .catch(() => null);
+    for (const doc of eventsSnap?.docs ?? []) {
+      const event = doc.data();
+      if (event.kind !== "session_up" || typeof event.exerciseKey !== "string" || typeof event.date !== "string") continue;
+      const seen = sessionUpDates.get(event.exerciseKey);
+      if (!seen || event.date > seen) sessionUpDates.set(event.exerciseKey, event.date);
+    }
+  }
 
   const batch = db.batch();
   let writes = 0;
@@ -365,7 +384,10 @@ export async function gateProgression(
         next.consecutiveHolds = holds;
         outcome = "hold_missed_reps";
       }
-    } else if (steppedAtFinish.has(key) && recent!.date >= (baseline.lastGateDate ?? baseline.anchorDate)) {
+    } else if (
+      (steppedAtFinish.has(key) && recent!.date >= (baseline.lastGateDate ?? baseline.anchorDate))
+      || (sessionUpDates.get(key) ?? "") >= (baseline.lastGateDate ?? baseline.anchorDate)
+    ) {
       // Restart the clock at the gate instead: the step stands, nothing stacks.
       next = { ...next, anchorDate: options.today, holdWeeks: 0, consecutiveHolds: 0 };
       outcome = "stepped_at_finish";

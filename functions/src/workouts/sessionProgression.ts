@@ -39,6 +39,14 @@ type PlanExercise = { name: string; weight: number; progression?: ExerciseProgre
 // For lifts with no rule at all (kettlebells, unknown names): the step a gym
 // can actually load. Light isolation work moves in the smaller step.
 const DEFAULT_STEP_LB = 5;
+const SESSION_STEP_MIN_DAYS = 7;
+
+function daysBetween(fromISO: string, toISO: string): number {
+  const from = Date.parse(`${fromISO.slice(0, 10)}T00:00:00Z`);
+  const to = Date.parse(`${toISO.slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return Number.POSITIVE_INFINITY;
+  return Math.round((to - from) / 86_400_000);
+}
 const LIGHT_STEP_LB = 2.5;
 const DEFAULT_CAP_MULTIPLE = 1.3;
 // Logged weights carry rounding from the app's steppers; a hair under the
@@ -84,6 +92,13 @@ export function planSessionProgression(input: {
     const planExercise = planExercises.get(key);
     // An explicit "none" is a coach decision to hold this lift; respect it.
     if (planExercise?.progression?.mode === "none") continue;
+
+    // One automatic step per lift per 7 days. Trained three times a week
+    // (and tapped sets count as target reps), a step every session would
+    // climb 15 lb a week; once a week is the pace the owner asked for:
+    // "hit every rep, go up, and the coach says so".
+    const baseline = input.baselines.get(key);
+    if (baseline?.source === "user_session" && daysBetween(baseline.anchorDate, input.date) < SESSION_STEP_MIN_DAYS) continue;
 
     const prescribed = currentPrescription(exercise, planExercise, input.baselines, input.date);
     if (exercise.targetWeight + WEIGHT_SLACK_LB < prescribed) continue;
