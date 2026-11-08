@@ -418,6 +418,8 @@ struct CoachStageView: View {
             // A line that can't be spoken in the coach's voice is shown
             // instead; the voice never switches to the phone's own.
             voice.onUnspoken = { text in show(notice: text) }
+            voice.muted = !speaksReplies
+            live.muted = !speaksReplies
             appModel.warmVoice()
             voiceInput.onFailure = { endConversation() }
             lastCueCheckedReplyId = lastCoachMessage?.id
@@ -908,7 +910,13 @@ struct CoachStageView: View {
     /// Voice turned off mid-conversation: stop talking now; live voice
     /// only talks, so the regular coach takes over in captions.
     private func voiceSettingChanged(_ on: Bool) {
+        voice.muted = !on
+        live.muted = !on
         guard !on else { captionReply = nil; return }
+        // No live coach while the voice is off: no retry or restart brings
+        // it back (applyLive keeps it to the regular coach).
+        liveRetryTask?.cancel()
+        liveRetryTask = nil
         if live.isRunning {
             endConversation()
             talkTapped(fromMic: true)
@@ -1641,6 +1649,13 @@ struct CoachStageView: View {
     }
 
     private func connectLive() {
+        // Voice off: live only talks, so it isn't started at all; the
+        // regular coach answers on screen.
+        guard speaksReplies else {
+            AudioHub.log("live: not starting, coach voice is off")
+            openRegularMic()
+            return
+        }
         // After any reconnect or handover, the coach is told where you are.
         live.onReconnected = { [live] in
             if let note = liveWorkoutNote { live.note(note) }

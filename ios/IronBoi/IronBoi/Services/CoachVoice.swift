@@ -151,7 +151,14 @@ final class CoachVoice: NSObject, ObservableObject {
         self.lines = spoken
     }
 
+    /// Coach's voice is off in settings: nothing is said, whoever asks.
+    /// Every caller shows its words on screen already.
+    var muted = false {
+        didSet { if muted, isSpeaking { stop() } }
+    }
+
     private func play(_ chunks: [String], messageId: String) {
+        guard !muted else { return }
         // A chunk of only punctuation is "too small" for the server, and
         // that error used to drop the rest of the reply to the robot voice.
         let chunks = chunks.filter { $0.rangeOfCharacter(from: .alphanumerics) != nil }

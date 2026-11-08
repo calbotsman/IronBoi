@@ -63,6 +63,12 @@ final class LiveVoiceSession: ObservableObject {
     /// Set while a count is running: the coach's audio is dropped (its mic
     /// can be closed for a whole set, but the exercise intro still has to
     /// play, so playback follows the count, not the mic).
+    /// Coach's voice is off in settings: the live coach's audio never
+    /// plays, however the session came back (a retry, a reconnect, a
+    /// workout restarting it). Its words still arrive as captions.
+    var muted = false {
+        didSet { if muted, state == .speaking || buffersPlaying > 0 { hub.stopPlayback(); buffersPlaying = 0; agentMeter.reset(); uplink.coachSpeaking = false; if state == .speaking { state = .listening } } }
+    }
     var quietForCount = false {
         didSet { if !quietForCount { settleOwedAnswer() } }
     }
@@ -1208,6 +1214,7 @@ final class LiveVoiceSession: ObservableObject {
     private func play(_ buffer: AVAudioPCMBuffer) {
         // You're counting a set (the mic to the coach is muted for it): the
         // coach stays quiet until it's logged, even audio already on its way.
+        if muted { return }
         if quietForCount || Date() < quietUntil {
             // Dropping an answer to something just asked: owe it, and say
             // it once the floor is free (an app line ends, a count closes).
