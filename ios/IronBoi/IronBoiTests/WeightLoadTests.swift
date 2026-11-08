@@ -5,6 +5,18 @@ import XCTest
 final class WeightRequestTests: XCTestCase {
     private func change(_ text: String) -> WeightRequest.Change? { WeightLoad.request(in: text)?.change }
 
+    /// A lift with no weight set yet reads "Set weight", not "bodyweight".
+    func testWhichLiftsTakeAWeight() {
+        for name in ["Single Arm Row", "Single-arm DB Row", "Goblet Squat", "Lateral Raises", "Overhead Press",
+                     "Romanian Deadlift", "Farmer Carry", "KB Swing", "Cable Row"] {
+            XCTAssertTrue(WeightLoad.takesWeight(name), name)
+        }
+        for name in ["Push-ups", "Decline Push-ups", "Inverted Row", "Pull-ups", "Plank", "Bodyweight Squat",
+                     "Walking Lunges", "Hanging Leg Raises", "Glute Bridge", "Band Row", "Bench Dips", "Cat-cow"] {
+            XCTAssertFalse(WeightLoad.takesWeight(name), name)
+        }
+    }
+
     func testExactPhrasesStayOnThePhone() {
         XCTAssertEqual(change("bump it to 40"), .to(40))
         XCTAssertEqual(change("add 5 pounds"), .by(5))

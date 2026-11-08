@@ -228,7 +228,8 @@ struct LiveWorkoutCard: View {
                 .accessibilityAddTraits(isCurrent || exercise.exerciseDone ? [] : .isButton)
                 .accessibilityHint(isCurrent || exercise.exerciseDone ? "" : "Do this one next")
                 Spacer(minLength: 0)
-                if exercise.targetWeight > 0 {
+                if exercise.targetWeight > 0 || appModel.workingWeight(for: exercise) > 0
+                    || WeightLoad.takesWeight(exercise.name) {
                     weightStepper(exercise)
                 } else {
                     Text(ExerciseKnowledge.isCardio(exercise.name) ? "cardio" : "bodyweight")
@@ -276,11 +277,12 @@ struct LiveWorkoutCard: View {
         let weight = appModel.workingWeight(for: exercise)
         return HStack(spacing: 2) {
             stepButton("minus", label: "Less weight") {
-                appModel.setWorkoutExerciseWeight(exerciseIndex: exercise.exerciseIndex, weight: weight - 5)
+                appModel.setWorkoutExerciseWeight(exerciseIndex: exercise.exerciseIndex, weight: max(0, weight - 5))
             }
-            Text(WeightLoad.label(weight, for: exercise.name))
+            .disabled(weight <= 0)
+            Text(weight > 0 ? WeightLoad.label(weight, for: exercise.name) : "Set weight")
                 .font(.system(.footnote, design: .monospaced).weight(.semibold))
-                .foregroundStyle(MyoColor.Text.primary.color)
+                .foregroundStyle(weight > 0 ? MyoColor.Text.primary.color : MyoTheme.Colors.ochre)
                 .frame(minWidth: 54)
                 .lineLimit(1)
             stepButton("plus", label: "More weight") {

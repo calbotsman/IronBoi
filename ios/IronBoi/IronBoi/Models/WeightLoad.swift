@@ -104,6 +104,21 @@ enum WeightLoad {
         "Suitcase Carry": .one,
     ]
 
+    /// A lift that's done with a weight, even when the plan doesn't have
+    /// one yet (0 means "not set" as well as "bodyweight": a swap across
+    /// load classes, or a lift you've no history on). "Single Arm Row" at 0
+    /// read "bodyweight" and hid the weight control; it needs "Set weight".
+    static func takesWeight(_ exerciseName: String) -> Bool {
+        if catalogBasis[exerciseName] != nil { return true }
+        let lower = exerciseName.lowercased()
+        func has(_ pattern: String) -> Bool { lower.range(of: pattern, options: .regularExpression) != nil }
+        if has(implementPattern) || has(oneObjectPattern) || has(barPattern)
+            || has(#"\b(weighted|cable|machine|plate|landmine|sled)\b"#) { return true }
+        let bodyweight = #"\b(push[- ]?ups?|pull[- ]?ups?|chin[- ]?ups?|inverted|bodyweight|body weight|air squats?|band|plank|dips?|pike|bridges?|jumps?|jumping|burpees?|leg raises?|calf raises?|sit[- ]?ups?|crunch(es)?|mountain|bird dog|dead bug|superman|nordic|stretch|walk|jog|run|sprints?|yoga|mobility|foam|lunges?|split squats?|step[- ]?ups?|single[- ]leg)\b"#
+        if has(bodyweight) { return false }
+        return has(#"\b(rows?|press(es)?|curls?|deadlifts?|rdls?|squats?|lunges?|raises?|fly|flyes|flys|flies|shrugs?|extensions?|thrusts?|swings?|carry|carries|cleans?|snatch(es)?|pullovers?|skull ?crushers?)\b"#)
+    }
+
     static func basis(for exerciseName: String) -> LoadBasis {
         if let known = catalogBasis[exerciseName] { return known }
         // "Seated Arnold Press" is still an Arnold Press.

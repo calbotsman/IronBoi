@@ -477,7 +477,7 @@ private struct PlannedExerciseDetailSheet: View {
         HStack(spacing: 10) {
             StatTile(label: "Sets", value: "\(exercise.sets)")
             StatTile(label: isTimed ? "Sec" : "Reps", value: "\(exercise.reps)")
-            StatTile(label: "Weight", value: exercise.weight > 0 ? WeightLoad.label(exercise.weight, for: exercise.name) : "BW")
+            StatTile(label: "Weight", value: exercise.weight > 0 ? WeightLoad.label(exercise.weight, for: exercise.name) : WeightLoad.takesWeight(exercise.name) ? "Set" : "BW")
         }
     }
 
@@ -580,7 +580,7 @@ private struct PlannedExerciseDetailSheet: View {
 
     private var detailSubtitle: String {
         let repLabel = isTimed ? "seconds" : "reps"
-        let weight = exercise.weight > 0 ? " at \(WeightLoad.label(exercise.weight, for: exercise.name))" : " bodyweight"
+        let weight = exercise.weight > 0 ? " at \(WeightLoad.label(exercise.weight, for: exercise.name))" : WeightLoad.takesWeight(exercise.name) ? ", weight not set yet" : " bodyweight"
         return "\(exercise.sets) sets x \(exercise.reps) \(repLabel)\(weight)"
     }
 
@@ -763,7 +763,7 @@ private struct WorkoutExerciseCard: View {
             // Weight is recorded here or nowhere — the set toggle stamps
             // whatever this shows. Bodyweight movements (target 0) get no
             // control; a stepper on push-ups is noise.
-            if exercise.targetWeight > 0 {
+            if exercise.targetWeight > 0 || appModel.workingWeight(for: exercise) > 0 || WeightLoad.takesWeight(exercise.name) {
                 WorkoutWeightStepper(
                     weight: appModel.workingWeight(for: exercise),
                     basis: WeightLoad.basis(for: exercise.name),
@@ -910,7 +910,7 @@ private struct ExerciseDetailSheet: View {
         HStack(spacing: 10) {
             StatTile(label: "Sets", value: "\(exercise.targetSets)")
             StatTile(label: isTimed ? "Sec" : "Reps", value: "\(exercise.targetReps)")
-            StatTile(label: "Weight", value: exercise.targetWeight > 0 ? WeightLoad.label(exercise.targetWeight, for: exercise.name) : "BW")
+            StatTile(label: "Weight", value: exercise.targetWeight > 0 ? WeightLoad.label(exercise.targetWeight, for: exercise.name) : WeightLoad.takesWeight(exercise.name) ? "Set" : "BW")
         }
     }
 
@@ -958,7 +958,7 @@ private struct ExerciseDetailSheet: View {
 
     private var detailSubtitle: String {
         let repLabel = isTimed ? "seconds" : "reps"
-        let weight = exercise.targetWeight > 0 ? " at \(WeightLoad.label(exercise.targetWeight, for: exercise.name))" : " bodyweight"
+        let weight = exercise.targetWeight > 0 ? " at \(WeightLoad.label(exercise.targetWeight, for: exercise.name))" : WeightLoad.takesWeight(exercise.name) ? ", weight not set yet" : " bodyweight"
         return "\(exercise.targetSets) sets x \(exercise.targetReps) \(repLabel)\(weight)"
     }
 
