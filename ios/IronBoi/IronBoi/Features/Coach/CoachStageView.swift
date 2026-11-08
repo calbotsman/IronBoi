@@ -389,6 +389,7 @@ struct CoachStageView: View {
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
         .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
+        .onChange(of: appModel.tappedSetDone) { _, tap in setTapped(tap) }
         .onChange(of: live.isActive) { _, _ in keepAwake() }
         .onChange(of: liveWorkoutNote) { _, note in
             // Connecting or standing by, it queues: the live coach is
@@ -2264,6 +2265,26 @@ struct CoachStageView: View {
     /// The count is over: the set is logged with the reps actually done —
     /// fewer, exact, or more than the target — and Coach says so briefly.
     /// A stray "one" or "two" that never became a set is dropped.
+    /// A set ticked on the workout card: the same as a counted one — the
+    /// rest starts and Coach says so. Tapping used to log the set silently,
+    /// with no rest timer. A count running for it is closed without logging
+    /// a second set.
+    private func setTapped(_ tap: AppModel.TappedSet?) {
+        guard let tap, Date().timeIntervalSince(tap.at) < 2, appModel.activeWorkout != nil, guided == nil else { return }
+        if setCount != nil {
+            closeCountTask?.cancel()
+            closeCountTask = nil
+            setCount = nil
+            countBase = 0
+            voiceInput.holdOpen = false
+            liveEarsReopened = false
+            updateLiveUplink()
+        }
+        if restEndsAt != nil { cancelRest() }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        confirm(afterSet("Set \(tap.setNumber) done.", exerciseIndex: tap.exerciseIndex))
+    }
+
     private func finishCount() {
         closeCountTask?.cancel()
         closeCountTask = nil

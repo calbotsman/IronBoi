@@ -901,6 +901,15 @@ final class AppModel: NSObject, ObservableObject {
     /// what to do next.
     @Published private(set) var planChangesAccepted = 0
 
+    /// A set marked done by a tap (the workout card's set circles), so the
+    /// coach screen does what it does for a counted set: rest, and say so.
+    struct TappedSet: Equatable {
+        let exerciseIndex: Int
+        let setNumber: Int
+        let at: Date
+    }
+    @Published private(set) var tappedSetDone: TappedSet?
+
     /// The no-backend preview (debug builds only); always false in Release.
     private var inPreview: Bool {
         #if DEBUG
@@ -1407,7 +1416,12 @@ final class AppModel: NSObject, ObservableObject {
         let allSetsDone = workout.exercises[exerciseIndex].completedSets.allSatisfy(\.completed)
         workout.exercises[exerciseIndex].exerciseDone = allSetsDone
         workout.updatedAt = Self.isoString(from: Date())
+        let nowDone = workout.exercises[exerciseIndex].completedSets[setIndex].completed
         activeWorkout = workout
+        if nowDone {
+            tappedSetDone = TappedSet(exerciseIndex: exerciseIndex,
+                                      setNumber: workout.exercises[exerciseIndex].completedSetCount, at: Date())
+        }
     }
 
     /// Marks the next open set of an exercise done with the reps actually
