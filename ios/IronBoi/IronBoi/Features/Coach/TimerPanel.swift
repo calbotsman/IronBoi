@@ -24,7 +24,9 @@ struct TimerPanel: View {
         ViewThatFits(in: .vertical) {
             panel(clockSize: 64, showTitle: true, showNext: true, showNote: true)
             panel(clockSize: 48, showTitle: true, showNext: true, showNote: false)
-            panel(clockSize: 36, showTitle: false, showNext: false, showNote: false)
+            // Tightest: the clock and the buttons on one 44 pt row, so the
+            // buttons can never be the part that's cut off.
+            compactRow
         }
         .frame(maxWidth: .infinity)
         .transition(.opacity)
@@ -74,6 +76,20 @@ struct TimerPanel: View {
                     if let primary { pill(primary.label, action: primary.action) }
                 }
             }
+        }
+    }
+
+    private var compactRow: some View {
+        HStack(spacing: MyoTheme.Spacing.sm) {
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                Text(clockText)
+                    .font(.system(.title, design: .rounded).weight(.light))
+                    .monospacedDigit()
+                    .foregroundStyle(MyoColor.Text.primary.color)
+            }
+            .accessibilityLabel("\(title), \(clockText) left")
+            if let secondary { pill(secondary.label, action: secondary.action) }
+            if let primary { pill(primary.label, action: primary.action) }
         }
     }
 

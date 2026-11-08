@@ -683,7 +683,7 @@ private struct ActiveWorkoutView: View {
                 .controlSize(.large)
                 .tint(MyoColor.Action.primary.color)
                 .foregroundStyle(MyoColor.Text.primary.color)
-                .disabled(appModel.isWorkoutBusy)
+                .disabled(appModel.isWorkoutBusy || completedSets == 0)
                 .padding(.top, 8)
             }
             .padding()

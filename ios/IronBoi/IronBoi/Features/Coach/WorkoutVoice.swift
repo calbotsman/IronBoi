@@ -126,7 +126,11 @@ enum WorkoutVoice {
         // A short question about the workout gets through on one real word:
         // "Weight?", "What now?", "How heavy?" were dropped for having only
         // one, and nothing answered.
-        if meaningful.count == 1, aboutWorkout || says(#"^\W*(what|how|which|should|is|can)\b"#) || transcript.contains("?") {
+        // A workout word alone ("Back.", "Next.") is too often the room or the
+        // music, so it needs to be asked ("Weight?"); a question word leading
+        // ("What now", "How heavy") is enough on its own.
+        if meaningful.count == 1,
+           says(#"^\W*(what|how|which|should)\b"#) || (aboutWorkout && transcript.contains("?")) {
             return true
         }
         guard meaningful.count >= 2 else { return false }
