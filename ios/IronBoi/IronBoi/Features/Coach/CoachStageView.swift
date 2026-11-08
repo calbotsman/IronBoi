@@ -372,7 +372,9 @@ struct CoachStageView: View {
     private static let reelOn = false
     #endif
 
-    var body: some View {
+    /// The stage with its animations. Split from `body`, whose one long
+    /// modifier chain had grown past what the compiler type-checks in time.
+    private var animatedStage: some View {
         stageShowingOnRequest
         #if DEBUG
         .overlay(alignment: .topTrailing) {
@@ -391,6 +393,10 @@ struct CoachStageView: View {
         .animation(MyoTheme.Motion.fade, value: appModel.pendingEffortSessionId)
         .animation(MyoTheme.Motion.fade, value: showReminderSetup)
         .animation(MyoTheme.Motion.fade, value: appModel.pendingPlanAdjustmentProposal?.id)
+    }
+
+    var body: some View {
+        animatedStage
         // The screen must not sleep mid-set: a locked phone drops the mic.
         .onChange(of: conversationActive) { _, _ in keepAwake() }
         .onChange(of: appModel.activeWorkout == nil) { _, _ in keepAwake() }
