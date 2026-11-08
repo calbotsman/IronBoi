@@ -117,13 +117,15 @@ describe("first day: starter session, recap, effort", () => {
   });
 
   it("a later finish compares with earlier workouts", async () => {
+    // Reps short the first time, so the weight holds (every rep hit would
+    // have stepped the next session up: sessionProgression.ts).
     const first = await startWorkoutSession(db, USER_ID, { dayKey: "Mon", planId: "current" }, PLAN);
-    await finish(first, "2026-10-12T18:22:00.000Z");
+    await finish(first, "2026-10-12T18:22:00.000Z", 9);
     const second = await startWorkoutSession(db, USER_ID, { dayKey: "Mon", planId: "current" }, PLAN);
     const result = await finish(second, "2026-10-14T18:22:00.000Z", 12);
 
     expect(result.recap?.firstWorkout).toBe(false);
-    expect(result.recap?.lines[1]).toBe("Goblet Squat: 12 reps at 35 lb, 2 more reps than your best.");
+    expect(result.recap?.lines[1]).toBe("Goblet Squat: 12 reps at 35 lb, 3 more reps than your best.");
     // firstWorkoutAt stays the first one.
     expect((await db.doc(profilePath(USER_ID)).get()).get("firstWorkoutAt")).toBe("2026-10-12T18:22:00.000Z");
   });
