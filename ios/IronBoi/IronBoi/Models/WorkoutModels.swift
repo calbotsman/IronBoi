@@ -171,6 +171,27 @@ struct FinishWorkoutResponse: Decodable {
     /// What the coach says as the workout ends — built by the server from
     /// the logged sets. Missing when it couldn't be built (older backend).
     let recap: WorkoutRecap?
+    /// Records, next-time weights and the streak (the contract's
+    /// WorkoutRecap). Read from `recap` (its fields alongside `lines`) or a
+    /// separate `trainingRecap`; missing or malformed means no card, never
+    /// a failed finish.
+    let trainingRecap: TrainingRecapModel?
+
+    private enum CodingKeys: String, CodingKey {
+        case ok, activeWorkout, baselineSuggestions, recap, trainingRecap
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        activeWorkout = try container.decode(ActiveWorkoutSession.self, forKey: .activeWorkout)
+        baselineSuggestions = try container.decodeIfPresent([BaselineSuggestion].self, forKey: .baselineSuggestions)
+        // A recap in a shape this build doesn't know costs the recap, not the workout.
+        recap = try? container.decodeIfPresent(WorkoutRecap.self, forKey: .recap)
+        let separate = try? container.decodeIfPresent(TrainingRecapModel.self, forKey: .trainingRecap)
+        let merged = try? container.decodeIfPresent(TrainingRecapModel.self, forKey: .recap)
+        trainingRecap = separate ?? merged
+    }
 }
 
 /// The end of a workout, in three short lines: what you did, one thing
@@ -178,6 +199,94 @@ struct FinishWorkoutResponse: Decodable {
 struct WorkoutRecap: Decodable, Equatable {
     let lines: [String]
     let firstWorkout: Bool
+}
+
+/// What this workout moved, for the card after it: records set, weights
+/// that go up next time, the streak. Mirror of WorkoutRecap in
+/// functions/src/contracts/coach-agent.ts (pounds). Named apart from
+/// `WorkoutRecap` above, which is the spoken three lines.
+struct TrainingRecapModel: Equatable {
+    struct NextWeight: Equatable, Identifiable {
+        var id: String { exerciseName }
+        let exerciseName: String
+        let fromLb: Double
+        let toLb: Double
+        let reason: String
+    }
+
+    struct ComparedToLast: Equatable, Identifiable {
+        var id: String { exerciseName }
+        let exerciseName: String
+        let deltaLb: Double?
+        let deltaReps: Int?
+    }
+
+    let records: [PersonalRecordModel]
+    let nextWeights: [NextWeight]
+    let comparedToLast: [ComparedToLast]
+    let volumeLb: Double
+    let previousVolumeLb: Double?
+    let streakWeeks: Int
+
+    /// Worth a card: a record, a weight going up, or a streak running.
+    var hasNews: Bool { !records.isEmpty || !nextWeights.isEmpty || streakWeeks > 0 }
+}
+
+extension TrainingRecapModel: Decodable {
+    private enum CodingKeys: String, CodingKey {
+        case records, nextWeights, comparedToLast, volumeLb, previousVolumeLb, streakWeeks
+    }
+
+    // Every field optional, so one odd entry drops that entry, not the recap.
+    private struct RawRecord: Decodable {
+        let exerciseName: String?
+        let kind: String?
+        let weightLb: Double?
+        let reps: Int?
+        let e1rmLb: Double?
+        let date: String?
+    }
+
+    private struct RawNextWeight: Decodable {
+        let exerciseName: String?
+        let fromLb: Double?
+        let toLb: Double?
+        let reason: String?
+    }
+
+    private struct RawCompared: Decodable {
+        let exerciseName: String?
+        let deltaLb: Double?
+        let deltaReps: Int?
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // The spoken recap ({lines, firstWorkout}) has none of these: not one of us.
+        guard container.contains(.records) || container.contains(.nextWeights) || container.contains(.streakWeeks) else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: decoder.codingPath, debugDescription: "Not a training recap"))
+        }
+        let rawRecords = try? container.decodeIfPresent([RawRecord].self, forKey: .records)
+        records = (rawRecords ?? []).compactMap { raw in
+            guard let name = raw.exerciseName, let kind = raw.kind else { return nil }
+            return PersonalRecordModel(exerciseName: name, kind: kind, weightLb: raw.weightLb ?? 0,
+                                       reps: raw.reps ?? 0, e1rmLb: raw.e1rmLb, date: raw.date ?? "")
+        }
+        let rawNext = try? container.decodeIfPresent([RawNextWeight].self, forKey: .nextWeights)
+        nextWeights = (rawNext ?? []).compactMap { raw in
+            guard let name = raw.exerciseName, let from = raw.fromLb, let to = raw.toLb else { return nil }
+            return NextWeight(exerciseName: name, fromLb: from, toLb: to, reason: raw.reason ?? "")
+        }
+        let rawCompared = try? container.decodeIfPresent([RawCompared].self, forKey: .comparedToLast)
+        comparedToLast = (rawCompared ?? []).compactMap { raw in
+            guard let name = raw.exerciseName else { return nil }
+            return ComparedToLast(exerciseName: name, deltaLb: raw.deltaLb, deltaReps: raw.deltaReps)
+        }
+        volumeLb = (try? container.decodeIfPresent(Double.self, forKey: .volumeLb)) ?? 0
+        previousVolumeLb = try? container.decodeIfPresent(Double.self, forKey: .previousVolumeLb)
+        streakWeeks = (try? container.decodeIfPresent(Int.self, forKey: .streakWeeks)) ?? 0
+    }
 }
 
 /// "How did that feel?" after a workout.

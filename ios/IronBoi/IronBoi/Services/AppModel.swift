@@ -141,6 +141,9 @@ final class AppModel: NSObject, ObservableObject {
     /// What the coach says as the workout that just finished ends; the coach
     /// screen takes it once (consumeRecap) when the workout closes.
     @Published private(set) var lastRecap: WorkoutRecap?
+    /// Records, next-time weights and the streak from the workout that just
+    /// finished: the card on the coach screen, until it's closed.
+    @Published private(set) var lastTrainingRecap: TrainingRecapModel?
     /// The workout waiting on "How did that feel?".
     @Published private(set) var pendingEffortSessionId: String?
     /// When the workout that just finished started — the reminder card
@@ -897,6 +900,82 @@ final class AppModel: NSObject, ObservableObject {
         return nil
     }
 
+    // MARK: - Training history, as the workout brain reads it
+
+    /// This week's days from the training history (dayKey → day), or empty
+    /// when the doc is missing or from another week.
+    var thisWeekDays: [String: TrainingDay] {
+        guard let history = trainingHistory, history.thisWeek.weekStart == Self.currentWeekStartISO() else { return [:] }
+        var days: [String: TrainingDay] = [:]
+        for day in history.calendar where day.date >= history.thisWeek.weekStart {
+            days[day.dayKey] = day
+        }
+        return days
+    }
+
+    /// A workout's already logged today (per the history doc).
+    var trainedToday: Bool {
+        guard let today = thisWeekDays[Self.currentDayKey()] else { return false }
+        return today.status == "done" || today.status == "extra"
+    }
+
+    /// A session to do today in place of a rest day (or on top of the week).
+    struct SessionOffer: Equatable {
+        let day: PlannedWorkoutDay
+        /// Set when it's a session missed earlier this week.
+        let missed: MissedSession?
+
+        /// "Thursday's Upper Pull" for a missed one, else the session's name.
+        var spokenName: String {
+            guard let missed else { return day.name }
+            return "\(AppModel.weekdayName(missed.dayKey))'s \(missed.name)"
+        }
+    }
+
+    /// The most recent session missed this week that doesn't train what was
+    /// trained yesterday or today, and is still in the plan.
+    var missedSessionOffer: SessionOffer? {
+        guard let history = trainingHistory, history.thisWeek.weekStart == Self.currentWeekStartISO(),
+              let days = currentWorkoutPlan?.days else { return nil }
+        let today = Self.currentDateISO()
+        let recent = Set(history.recentMuscles.map { $0.lowercased() })
+        for missed in history.missedThisWeek where missed.date < today {
+            guard let day = days.first(where: { $0.dayKey == missed.dayKey && !$0.exercises.isEmpty }) else { continue }
+            let muscles = missed.muscles.isEmpty ? day.muscles : missed.muscles
+            if muscles.contains(where: { recent.contains($0.lowercased()) }) { continue }
+            return SessionOffer(day: day, missed: missed)
+        }
+        return nil
+    }
+
+    /// What "skip my rest day" does: a missed session first, else the next
+    /// planned one.
+    var sessionOffer: SessionOffer? {
+        missedSessionOffer ?? nextPlannedDay.map { SessionOffer(day: $0, missed: nil) }
+    }
+
+    /// The step the history says this lift took since it was last done
+    /// (up a step, or a deload), when today's weight is that new weight.
+    func weightChange(for exerciseName: String, at weight: Double) -> ProgressionEventModel? {
+        guard weight > 0, let history = trainingHistory else { return nil }
+        let name = exerciseName.lowercased()
+        guard let lift = history.lifts.first(where: { $0.exerciseName.lowercased() == name }),
+              let event = lift.events.first,
+              ["session_up", "weekly_up", "deload"].contains(event.kind),
+              // Since the last time it was done, and not done again today.
+              event.date >= lift.lastDate, lift.lastDate < Self.currentDateISO(),
+              abs(event.toLb - weight) < 0.5, abs(event.toLb - event.fromLb) >= 0.5
+        else { return nil }
+        return event
+    }
+
+    /// "Thu" → "Thursday".
+    nonisolated static func weekdayName(_ dayKey: String) -> String {
+        let names = ["Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday",
+                     "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"]
+        return names[dayKey] ?? dayKey
+    }
+
     /// A logged set anywhere in the session in progress.
     var activeWorkoutHasProgress: Bool {
         activeWorkout?.exercises.contains { $0.completedSets.contains(where: \.completed) } ?? false
@@ -949,8 +1028,10 @@ final class AppModel: NSObject, ObservableObject {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
-        // A new workout: no rest running, no heart readings from the last one.
+        // A new workout: no rest running, no heart readings from the last one,
+        // no progress card from the last one.
         noteRest(endsAt: nil)
+        lastTrainingRecap = nil
         noteTimedBlock(nil)
         HeartRateHub.shared.reset()
         Task { await self.refreshAlternatives(force: false) }
@@ -1583,6 +1664,14 @@ final class AppModel: NSObject, ObservableObject {
         if isPreviewSession {
             let sets = performed.reduce(0) { $0 + $1.completedSetCount }
             lastRecap = WorkoutRecap(lines: ["\(performed.count) moves, \(sets) sets."], firstWorkout: workoutLogs.isEmpty)
+            // A sample card, enough to see it: the first lift with a weight goes up one step.
+            let lifted = performed.first { $0.targetWeight > 0 }
+            lastTrainingRecap = TrainingRecapModel(
+                records: [], nextWeights: lifted.map {
+                    [TrainingRecapModel.NextWeight(exerciseName: $0.name, fromLb: $0.targetWeight,
+                                                   toLb: $0.targetWeight + 5, reason: "every rep hit")]
+                } ?? [],
+                comparedToLast: [], volumeLb: 0, previousVolumeLb: nil, streakWeeks: 2)
             pendingEffortSessionId = activeWorkout.sessionId
             self.activeWorkout = nil
             pendingSessionChanges = changes
@@ -1607,6 +1696,7 @@ final class AppModel: NSObject, ObservableObject {
             // Set before the workout closes: the coach screen reads it the
             // moment activeWorkout goes nil.
             lastRecap = response.recap
+            lastTrainingRecap = response.trainingRecap.flatMap { $0.hasNews ? $0 : nil }
             pendingEffortSessionId = activeWorkout.sessionId
             TrainingReminders.shared.markTrainedToday()
             if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
@@ -1664,6 +1754,11 @@ final class AppModel: NSObject, ObservableObject {
 
     func skipEffortQuestion() {
         pendingEffortSessionId = nil
+    }
+
+    /// The progress card was closed (or a new workout began).
+    func dismissTrainingRecap() {
+        lastTrainingRecap = nil
     }
 
     // MARK: - Exercise swaps
@@ -2779,6 +2874,23 @@ final class AppModel: NSObject, ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
     }
+
+    /// This week's Monday (weeks run Monday to Sunday, as the history's do),
+    /// as the same kind of ISO date.
+    private static func currentWeekStartISO() -> String {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone.current
+        let monday = calendar.dateInterval(of: .weekOfYear, for: Date())?.start ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: monday)
+    }
+
+    /// Today's date as the history doc writes it ("2026-11-08").
+    var todayISO: String { Self.currentDateISO() }
 
     private static func jsonObject<T: Encodable>(from value: T) throws -> Any {
         let data = try JSONEncoder().encode(value)
