@@ -36,6 +36,10 @@ targets:
     info:
       path: IronBoi/Info.plist
       properties:
+        # Same version and build as the phone app: an embedded Watch app
+        # (or widget) with a different one uploads fine but won't install.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Coach keeps talking and listening with the screen off or the
         # phone in a pocket; the audio session carries the app.
         # bluetooth-central: a heart-rate strap keeps streaming with the
@@ -213,6 +217,10 @@ targets:
     info:
       path: RestWidget/Info.plist
       properties:
+        # Same version and build as the phone app: an embedded Watch app
+        # (or widget) with a different one uploads fine but won't install.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: MYO Rest
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -241,6 +249,10 @@ targets:
     info:
       path: MYOWatch/Info.plist
       properties:
+        # Same version and build as the phone app: an embedded Watch app
+        # (or widget) with a different one uploads fine but won't install.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: MYO
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.thecombinationrule.ironboi
