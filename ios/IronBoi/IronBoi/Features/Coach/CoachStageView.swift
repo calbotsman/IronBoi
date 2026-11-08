@@ -910,9 +910,13 @@ struct CoachStageView: View {
     /// Voice turned off mid-conversation: stop talking now; live voice
     /// only talks, so the regular coach takes over in captions.
     private func voiceSettingChanged(_ on: Bool) {
+        // What was being said moves to the screen: read it before muting,
+        // which stops the voice.
+        let interrupted = !on && voice.isSpeaking ? voice.spokenText : nil
         voice.muted = !on
         live.muted = !on
         guard !on else { captionReply = nil; return }
+        if let interrupted { captionReply = interrupted }
         // No live coach while the voice is off: no retry or restart brings
         // it back (applyLive keeps it to the regular coach).
         liveRetryTask?.cancel()
@@ -2292,7 +2296,8 @@ struct CoachStageView: View {
     /// with no rest timer. A count running for it is closed without logging
     /// a second set.
     private func setTapped(_ tap: AppModel.TappedSet?) {
-        guard let tap, Date().timeIntervalSince(tap.at) < 2, appModel.activeWorkout != nil, guided == nil else { return }
+        // Paused: the tap only marks the set; no rest, nothing said.
+        guard let tap, Date().timeIntervalSince(tap.at) < 2, appModel.activeWorkout != nil, guided == nil, !paused else { return }
         if setCount != nil {
             closeCountTask?.cancel()
             closeCountTask = nil
@@ -2301,7 +2306,13 @@ struct CoachStageView: View {
             voiceInput.holdOpen = false
             liveEarsReopened = false
             updateLiveUplink()
+            // The counted words mustn't start a new count or reach Coach.
+            markRestartHandled()
+            voiceInput.stop()
         }
+        // A hold or its countdown running: the tap is that set, so the hold
+        // must not log another when it ends.
+        if holdEndsAt != nil || holdCountdownTask != nil { cancelHold() }
         if restEndsAt != nil { cancelRest() }
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         confirm(afterSet("Set \(tap.setNumber) done.", exerciseIndex: tap.exerciseIndex))

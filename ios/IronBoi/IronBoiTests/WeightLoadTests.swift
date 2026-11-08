@@ -8,11 +8,12 @@ final class WeightRequestTests: XCTestCase {
     /// A lift with no weight set yet reads "Set weight", not "bodyweight".
     func testWhichLiftsTakeAWeight() {
         for name in ["Single Arm Row", "Single-arm DB Row", "Goblet Squat", "Lateral Raises", "Overhead Press",
-                     "Romanian Deadlift", "Farmer Carry", "KB Swing", "Cable Row"] {
+                     "Romanian Deadlift", "Farmer Carry", "Farmer's Walk", "KB Swing", "Cable Row"] {
             XCTAssertTrue(WeightLoad.takesWeight(name), name)
         }
         for name in ["Push-ups", "Decline Push-ups", "Inverted Row", "Pull-ups", "Plank", "Bodyweight Squat",
-                     "Walking Lunges", "Hanging Leg Raises", "Glute Bridge", "Band Row", "Bench Dips", "Cat-cow"] {
+                     "Walking Lunges", "Hanging Leg Raises", "Glute Bridge", "Band Row", "Bench Dips", "Cat-cow",
+                     "Rowing Machine"] {
             XCTAssertFalse(WeightLoad.takesWeight(name), name)
         }
     }

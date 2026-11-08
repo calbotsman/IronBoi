@@ -33,8 +33,9 @@ final class VoiceCache: @unchecked Sendable {
         // the live coach. Guessing Gemini here while the server defaulted to
         // OpenAI read app lines in Google's voice and replies in OpenAI's:
         // two different people in one workout.
-        let provider = defaults.string(forKey: "liveVoiceProvider")
-            ?? defaults.string(forKey: "liveVoiceServedProvider")
+        // "Default" in settings stores "", not nil: treat it as no pick.
+        let picked = defaults.string(forKey: "liveVoiceProvider").flatMap { $0.isEmpty ? nil : $0 }
+        let provider = picked ?? defaults.string(forKey: "liveVoiceServedProvider")
         return provider == "openai" ? "openai" : "gemini"
     }
 
