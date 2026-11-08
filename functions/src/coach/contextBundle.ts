@@ -37,6 +37,25 @@ export type CoachContextBundleV1 = {
   // `today`, override-resolved, every exercise with sets/reps/weight. Null
   // when the user has no plan yet.
   currentPlan: CoachContextPlan | null;
+  // From derivedSummaries/training_history: this calendar week Mon→Sun
+  // with each day's status, and per-lift progress lines. Null until the
+  // doc exists (or when progress is gated off). Optional so bundles built
+  // by older callers/fixtures still type-check.
+  thisWeek?: CoachContextThisWeek | null;
+  liftProgress?: string[] | null;
+};
+
+export type CoachContextThisWeek = {
+  today?: string;
+  streakWeeks?: number;
+  planned?: number;
+  done?: number;
+  // "Mon done: Upper Push" … one per day, Monday first.
+  days: string[];
+  // Most recent first: the sessions to offer on a rest day.
+  missed: Array<{ date: string; dayKey: string; name: string; muscles: string[] }>;
+  // Muscles trained yesterday or today (don't offer a session that hits them).
+  recentMuscles: string[];
 };
 
 /**
@@ -238,6 +257,8 @@ export function buildCoachContextBundle(
     progressSummary: context.progressSummary
       ? progressSummaryForPrompt(context.progressSummary)
       : null,
+    thisWeek: context.trainingHistory ? thisWeekForPrompt(context.trainingHistory) : null,
+    liftProgress: context.trainingHistory ? liftProgressForPrompt(context.trainingHistory) : null,
     // Defaults to null for callers/fixtures built before this field existed.
     currentPlan: context.currentPlan
       ? planForPrompt(context.currentPlan, today ?? now.slice(0, 10))
@@ -507,6 +528,76 @@ function progressSummaryForPrompt(summary: DocumentData): CoachContextProgressSu
     // undefined (dropped by compactObject) when empty, so docs without
     // highlights keep their pre-slice-5 prompt bytes.
   }) as CoachContextProgressSummary;
+}
+
+const MAX_PROMPT_LIFTS = 12;
+
+// The training history doc is server-built and contract-checked at write
+// time, but the bundle is the token boundary: every field is re-picked and
+// re-capped here.
+function thisWeekForPrompt(history: DocumentData): CoachContextThisWeek {
+  const streak = isPlainObject(history.streak) ? history.streak : {};
+  const week = isPlainObject(history.thisWeek) ? history.thisWeek : {};
+  const weekStart = stringValue(week.weekStart, 10);
+  const calendar = Array.isArray(history.calendar) ? history.calendar.filter(isPlainObject) : [];
+  const days = calendar
+    .filter((day) => weekStart !== undefined && typeof day.date === "string" && day.date >= weekStart)
+    .slice(0, 7)
+    .map((day) => {
+      const name = stringValue(day.name, 80);
+      return `${stringValue(day.dayKey, 3) ?? "?"} ${stringValue(day.date, 10) ?? ""} ${stringValue(day.status, 10) ?? "?"}${name ? `: ${name}` : ""}`;
+    });
+  const missed = (Array.isArray(history.missedThisWeek) ? history.missedThisWeek : [])
+    .filter(isPlainObject)
+    .slice(0, 7)
+    .map((day) => ({
+      date: stringValue(day.date, 10) ?? "",
+      dayKey: stringValue(day.dayKey, 3) ?? "",
+      name: stringValue(day.name, 80) ?? "",
+      muscles: stringArray(day.muscles, 12, 40),
+    }))
+    .filter((day) => day.date && day.name);
+  return compactObject({
+    today: stringValue(history.today, 10),
+    streakWeeks: numberValue(streak.currentWeeks),
+    planned: numberValue(week.planned),
+    done: numberValue(week.done),
+    days,
+    missed,
+    recentMuscles: stringArray(history.recentMuscles, 20, 40),
+  }) as CoachContextThisWeek;
+}
+
+// One line per lift: "Goblet Squat: 25 → 35 lb (since 2026-10-13, 9
+// sessions); last change 2026-11-04 30→35 session_up (All 3×10 hit at 30
+// lb); best: heaviest 35×10 on 2026-11-04".
+function liftProgressForPrompt(history: DocumentData): string[] {
+  const lifts = Array.isArray(history.lifts) ? history.lifts.filter(isPlainObject) : [];
+  return lifts.slice(0, MAX_PROMPT_LIFTS).map((lift) => {
+    const name = stringValue(lift.exerciseName, 80) ?? "Lift";
+    const start = numberValue(lift.startLb);
+    const current = numberValue(lift.currentLb);
+    const parts = [`${name}: ${start ?? "?"} → ${current ?? "?"} lb (since ${stringValue(lift.firstDate, 10) ?? "?"}, ${numberValue(lift.sessions) ?? 0} sessions)`];
+    const last = (Array.isArray(lift.events) ? lift.events : []).find(isPlainObject);
+    if (last) {
+      parts.push(`last change ${stringValue(last.date, 10) ?? "?"} ${numberValue(last.fromLb) ?? "?"}→${numberValue(last.toLb) ?? "?"} ${stringValue(last.kind, 30) ?? ""} (${oneLineText(stringValue(last.reason, 160) ?? "")})`);
+    }
+    const prs = (Array.isArray(lift.prs) ? lift.prs : []).filter(isPlainObject).slice(0, 3)
+      .map((pr) => `${stringValue(pr.kind, 20) ?? "best"} ${numberValue(pr.weightLb) ?? "?"}×${numberValue(pr.reps) ?? "?"} on ${stringValue(pr.date, 10) ?? "?"}`);
+    if (prs.length > 0) parts.push(`best: ${prs.join(", ")}`);
+    return parts.join("; ");
+  });
+}
+
+function stringArray(value: unknown, max: number, maxLength: number): string[] {
+  return (Array.isArray(value) ? value : [])
+    .map((entry) => stringValue(entry, maxLength))
+    .filter((entry): entry is string => Boolean(entry))
+    .slice(0, max);
+}
+
+function oneLineText(text: string): string {
+  return text.replace(/[<>]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function numberArray(value: unknown): number[] | undefined {

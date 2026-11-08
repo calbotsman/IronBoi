@@ -36,6 +36,10 @@ import {
   loadBaselines,
   resolvePrescribedWeight,
 } from "./exerciseBaselines.js";
+import { ambiguousLifts, applySessionProgression, type SessionUp } from "./sessionProgression.js";
+import { buildTrainingRecap } from "../progress/trainingHistory.js";
+import { logTrainingHistoryFailure, writeTrainingHistory } from "../progress/trainingHistoryStore.js";
+import type { TrainingRecap } from "../contracts/coach-agent.js";
 
 export const StartWorkoutSessionRequest = z.object({
   dayKey: z.string().min(1),
@@ -304,6 +308,13 @@ export async function finishWorkoutSession(
       ...(request.replacedWith
         ? { sessionKind: request.replacedWith.kind, activity: request.replacedWith.activity }
         : {}),
+      // Server-written too: what History's calendar needs. localDate is the
+      // user's own day (`date` is the UTC day of completion, tomorrow for an
+      // evening workout west of Greenwich); dayKey + workoutName say which
+      // plan day this was, so a missed Thursday done on Saturday counts.
+      ...(request.clientDate ? { localDate: request.clientDate } : {}),
+      dayKey,
+      workoutName,
       serverRecordedAt: FieldValue.serverTimestamp(),
     }),
   ]);
@@ -312,11 +323,69 @@ export async function finishWorkoutSession(
   // card listing what changed, and nothing moves until they tap Apply
   // (applyExerciseBaselines). Returning suggestions from the same call the
   // client already makes avoids a second round trip on the finish screen.
-  const baselineSuggestions = deriveBaselineSuggestions(completedExercises);
+  const changedInWorkout = deriveBaselineSuggestions(completedExercises);
+  const sessionDate = request.clientDate ?? request.completedAt.slice(0, 10);
+
+  // Double progression: every rep hit at the prescribed weight → next
+  // session one step up, written with its reason. Best effort: the workout
+  // is saved; a failure here costs the step, never the finish.
+  let ups: SessionUp[] = [];
+  try {
+    ups = await applySessionProgression(db, userId, {
+      sessionId: request.sessionId,
+      date: sessionDate,
+      exercises: completedExercises,
+      changedInWorkout,
+      now: new Date().toISOString(),
+    });
+  } catch (error) {
+    safeLogger.warn("Session progression failed", {
+      event: "session_progression_failed",
+      userId,
+      errorDetail: error instanceof Error ? error.message.slice(0, 200) : "unknown_error",
+    });
+  }
+  // A lift that just stepped up already has its new anchor; offering
+  // "update to the weight you lifted" would pull it back down a step.
+  const stepped = new Set(ups.map((up) => up.exerciseKey));
+  const baselineSuggestions = changedInWorkout.filter((suggestion) => !stepped.has(normalizeExerciseKey(suggestion.exerciseName)));
 
   const recap = await recapFinishedWorkout(db, userId, request, completedExercises, startedAt, priorLogs);
+  const trainingRecap = await trainingRecapFor(db, userId, request.sessionId, sessionDate, ups);
 
-  return { activeWorkout: completedSession, workoutLog: log, baselineSuggestions, recap };
+  return {
+    activeWorkout: completedSession,
+    workoutLog: log,
+    baselineSuggestions,
+    recap,
+    ...(trainingRecap ? { trainingRecap } : {}),
+  };
+}
+
+/**
+ * Rebuilds the training history doc (History listens to it) and derives the
+ * finish card's numbers from the same read. Never fails the finish: on any
+ * error it logs and returns undefined, and the next trigger heals the doc.
+ */
+async function trainingRecapFor(
+  db: Firestore,
+  userId: string,
+  sessionId: string,
+  today: string,
+  ups: SessionUp[],
+): Promise<TrainingRecap | undefined> {
+  try {
+    const { history, sessions } = await writeTrainingHistory(db, userId, today);
+    return buildTrainingRecap({
+      sessionId,
+      sessions,
+      nextWeights: ups.map((up) => ({ exerciseName: up.exerciseName.slice(0, 80), fromLb: up.fromLb, toLb: up.toLb, reason: up.reason })),
+      streakWeeks: history.streak.currentWeeks,
+    });
+  } catch (error) {
+    logTrainingHistoryFailure(userId, "workout_finished", error);
+    return undefined;
+  }
 }
 
 /**
@@ -473,30 +542,6 @@ async function loadWorkoutDay(
 
   const dayData = readDay(planDays, dayKey) ?? readFirstWorkoutDay(planDays);
   return { day: PlannedWorkoutDay.parse(dayData), fromOverride: false, planDays };
-}
-
-// Lifts the plan prescribes at more than one weight across the week
-// (Deadlift 4x6 @135 Tue, 5x5 @155 Fri). Anchors are keyed by exercise, so
-// auto-seeding one of them would drag the other day to its number; those
-// lifts keep the plan's own weights until the user or the coach anchors
-// them deliberately.
-function ambiguousLifts(planDays: unknown): Set<string> {
-  const weights = new Map<string, Set<number>>();
-  if (planDays && typeof planDays === "object") {
-    for (const day of Object.values(planDays as Record<string, unknown>)) {
-      const exercises = (day as { exercises?: unknown })?.exercises;
-      if (!Array.isArray(exercises)) continue;
-      for (const exercise of exercises) {
-        if (!exercise || typeof exercise !== "object") continue;
-        const { name, weight } = exercise as { name?: unknown; weight?: unknown };
-        if (typeof name !== "string" || typeof weight !== "number") continue;
-        const key = normalizeExerciseKey(name);
-        if (!weights.has(key)) weights.set(key, new Set());
-        weights.get(key)!.add(weight);
-      }
-    }
-  }
-  return new Set([...weights.entries()].filter(([, set]) => set.size > 1).map(([key]) => key));
 }
 
 function readDay(planDays: unknown, dayKey: string): DocumentData | undefined {

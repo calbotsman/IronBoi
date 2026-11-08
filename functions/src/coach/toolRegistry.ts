@@ -579,6 +579,8 @@ export function buildCoachToolRegistry(
           "reason: returning_from_layoff needs rampWeeks. Re-send with 2–6 weeks of {intensityPct, note}, e.g. [{intensityPct:60,...},{intensityPct:80,...},{intensityPct:100,...}].",
         ramp_not_valid_while_unwell:
           "The user is still symptomatic from an illness. Do NOT propose a ramp — say plainly that returning to training while still unwell should be cleared with their clinician first, and keep the reply brief.",
+        ramp_not_valid_trained_recently:
+          "They trained in the last 10 days, so this is not a layoff and a ramp is the wrong tool. Don't propose one. If <this_week> shows missed sessions, offer the most recent one that doesn't hit recentMuscles, by name; otherwise adjust with a normal scope.",
         ramp_not_valid_for_this_category:
           "This user's own words describe pain or a pregnancy/postpartum context, so a ramp is the wrong tool — it scales their existing plan down but cannot work AROUND anything. Follow the pain triage instead: ask the red-flag questions, then call adapt_plan with dayPatches containing substitute exercises.",
         ramp_requires_reentry_ramp_scope:
