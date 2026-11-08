@@ -29,7 +29,13 @@ final class VoiceCache: @unchecked Sendable {
         // so this works off the main thread too.
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: "liveVoiceBeta") as? Bool ?? true else { return "chirp" }
-        return defaults.string(forKey: "liveVoiceProvider") == "openai" ? "openai" : "gemini"
+        // Your pick in settings, else the engine the server actually gave
+        // the live coach. Guessing Gemini here while the server defaulted to
+        // OpenAI read app lines in Google's voice and replies in OpenAI's:
+        // two different people in one workout.
+        let provider = defaults.string(forKey: "liveVoiceProvider")
+            ?? defaults.string(forKey: "liveVoiceServedProvider")
+        return provider == "openai" ? "openai" : "gemini"
     }
 
     private func url(for text: String, engine: String) -> URL {
