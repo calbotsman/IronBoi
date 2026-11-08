@@ -143,7 +143,7 @@ struct CoachView: View {
                     Image("MYOWordmark")
                         .resizable()
                         .scaledToFit()
-                        .frame(height: 46)
+                        .frame(height: 92)
                         .accessibilityLabel("MYO")
                     Text("Your new personal trainer.")
                         .myoStyle(.title)
