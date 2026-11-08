@@ -9,7 +9,9 @@ import { normalizeExerciseKey } from "./exerciseCatalog.js";
 import type { z } from "zod";
 import type { PlannedExercise } from "../contracts/coach-agent.js";
 import { roundToPlate, resolvePrescribedWeight, type BaselineMap } from "./exerciseBaselines.js";
-import { exerciseBaselinePath, userRoot } from "../paths.js";
+import { exerciseBaselinePath, progressionEventPath, userRoot } from "../paths.js";
+import { lbText, progressionEventDoc, progressionEventId, writeProgressionEvent } from "./progressionEvents.js";
+import { addDays } from "../progress/trainingHistory.js";
 import {
   parseTrainingProgramDocument,
   syncCurrentWeekSnapshot,
@@ -291,7 +293,7 @@ export async function gateProgression(
     .limit(GATE_LOG_LIMIT)
     .get();
   // Most recent logged sets per exercise, with the log's date.
-  const latest = new Map<string, { date: string; reps: number[] }>();
+  const latest = new Map<string, { date: string; reps: number[]; sessionId: string }>();
   for (const doc of logsSnap.docs) {
     const data = doc.data();
     const date = typeof data.date === "string" ? data.date : "";
@@ -305,8 +307,24 @@ export async function gateProgression(
             .map((set) => (isRecord(set) && typeof set.reps === "number" ? set.reps : undefined))
             .filter((value): value is number => value !== undefined)
         : [];
-      latest.set(key, { date, reps });
+      latest.set(key, { date, reps, sessionId: doc.id });
     }
+  }
+
+  // Lifts whose latest session already earned its step at finish
+  // (sessionProgression.ts writes a session_up event for it). The week's
+  // advance was given there; adding the weekly step on top would count the
+  // same week twice.
+  const sessionUpRefs = [...progressing.keys()]
+    .map((key) => ({ key, recent: latest.get(key) }))
+    .filter((entry): entry is { key: string; recent: { date: string; reps: number[]; sessionId: string } } => entry.recent !== undefined)
+    .map(({ key, recent }) => ({ key, ref: db.doc(progressionEventPath(userId, progressionEventId(recent.sessionId, "session_up", key))) }));
+  const steppedAtFinish = new Set<string>();
+  if (sessionUpRefs.length > 0) {
+    const snaps = await db.getAll(...sessionUpRefs.map((entry) => entry.ref));
+    snaps.forEach((snap, index) => {
+      if (snap.exists) steppedAtFinish.add(sessionUpRefs[index].key);
+    });
   }
 
   const batch = db.batch();
@@ -347,9 +365,42 @@ export async function gateProgression(
         next.consecutiveHolds = holds;
         outcome = "hold_missed_reps";
       }
+    } else if (steppedAtFinish.has(key) && recent!.date >= (baseline.lastGateDate ?? baseline.anchorDate)) {
+      // Restart the clock at the gate instead: the step stands, nothing stacks.
+      next = { ...next, anchorDate: options.today, holdWeeks: 0, consecutiveHolds: 0 };
+      outcome = "stepped_at_finish";
     } else {
       next.consecutiveHolds = 0;
       outcome = "advance";
+    }
+    // What the user was prescribed going in, and what they get now: the
+    // timeline's from → to. Holds are written too (that's the "why didn't
+    // it move?" answer); an advance that doesn't move the bar this week
+    // (a +5 every 2 weeks rule, off week) isn't a change, so no event.
+    const before = resolvePrescribedWeight(exercise, new Map([[key, baseline]]), addDays(options.today, -1));
+    const after = resolvePrescribedWeight(exercise, new Map([[key, next]]), options.today);
+    const eventKind =
+      outcome === "advance" ? (after > before ? "weekly_up" : null)
+        : outcome === "stepped_at_finish" ? null
+          : (outcome as "hold_missed_reps" | "hold_not_trained" | "deload");
+    if (eventKind) {
+      const reason = {
+        weekly_up: `Trained it and hit your reps: up ${lbText(after - before)} lb`,
+        hold_missed_reps: `Reps came up short last time: holding at ${lbText(after)} lb`,
+        hold_not_trained: `Not trained since the last step: holding at ${lbText(after)} lb`,
+        deload: `Reps short two weeks running: down 10% to ${lbText(after)} lb, building back up`,
+      }[eventKind];
+      writeProgressionEvent(db, batch, progressionEventDoc({
+        userId,
+        scope: options.today,
+        kind: eventKind,
+        exerciseName: baseline.exerciseName,
+        date: options.today,
+        fromLb: eventKind === "deload" ? resolvePrescribedWeight(exercise, new Map([[key, baseline]]), options.today) : before,
+        toLb: after,
+        reason,
+        now: options.now,
+      }));
     }
     baselines.set(key, next);
     // Optional fields a loaded baseline never had arrive as explicit

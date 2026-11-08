@@ -32,6 +32,8 @@ import { sweepCoachFollowUps } from "./followups/sweep.js";
 import { runHabitMetrics } from "./journey/metrics.js";
 import { TrainingSetupChange, updateTrainingSetup } from "./workouts/trainingSetup.js";
 import { recomputeProgressSummaryIfStale } from "./progress/store.js";
+import { refreshTrainingHistoryIfStale } from "./progress/trainingHistoryStore.js";
+import { currentDateISO } from "./workouts/planAdjustments.js";
 import type { CoachConfig } from "./coach/prompt.js";
 import {
   CoachMemoryFact,
@@ -790,6 +792,18 @@ export const rateWorkoutSessionCallable = onCall(CALLABLE_OPTS, async (request) 
   return { ok: true, ...result };
 });
 
+// History's training history doc (derivedSummaries/training_history) is
+// about "this week" and "today": the app calls this when it opens, with its
+// own date, so a new day's missed session and streak are right before the
+// coach or the Plan screen read them. Rebuilds only when the doc is over an
+// hour old or was built for another date.
+export const refreshTrainingHistoryCallable = onCall(CALLABLE_OPTS, async (request) => {
+  const userId = requireUserId(request.auth);
+  const parsed = z.object({ clientDate: z.string().date().optional() }).strict().parse(request.data ?? {});
+  const { rebuilt } = await refreshTrainingHistoryIfStale(db, userId, parsed.clientDate ?? currentDateISO());
+  return { ok: true, rebuilt };
+});
+
 // --- Exercise swaps & weight rebaselining ------------------------------
 //
 // These mutate the plan WITHOUT a review card, under the narrow-deterministic-
@@ -1287,6 +1301,15 @@ export const onWorkoutLogCreated = onDocumentCreated(
           error instanceof Error ? error.message.slice(0, 180) : "unknown_error",
       });
     }
+    // Training history: the finish already rebuilt it, so this is a no-op
+    // read then; it catches logs written any other way (logWorkout).
+    // Never throws (it logs its own failure).
+    const logged = event.data?.data();
+    await refreshTrainingHistoryIfStale(
+      db,
+      userId,
+      typeof logged?.localDate === "string" ? logged.localDate : currentDateISO(),
+    );
     // Social prototype: friends see "trained today" + streak. No-op unless
     // the flag is on and this user consented.
     const date = event.data?.data()?.date;

@@ -581,6 +581,25 @@ describe("re-entry ramp", () => {
       expect(result).toMatchObject({ category: "readiness_low", riskLevel: "low" });
     });
 
+    it("refuses a ramp when the user trained in the last 10 days: missed sessions aren't a layoff", async () => {
+      // Trained 4 days ago, then missed a couple: the case the tester hit.
+      await db.doc(`users/${USER_ID}/workoutLogs/recent`).set({
+        userId: USER_ID, sessionId: "recent", date: "2026-07-23", source: "manual", exercises: [], createdAt: "2026-07-23T12:00:00.000Z",
+      });
+      const result = await proposeRampWithRawText("I fell off this week, ease me back in");
+      expect(result).toMatchObject({ proposalId: null, error: "ramp_not_valid_trained_recently" });
+      expect((await db.collection(`users/${USER_ID}/planAdjustmentProposals`).get()).empty).toBe(true);
+    });
+
+    it("allows the ramp once the last session is over 10 days back", async () => {
+      await db.doc(`users/${USER_ID}/workoutLogs/old`).set({
+        userId: USER_ID, sessionId: "old", date: "2026-07-14", source: "manual", exercises: [], createdAt: "2026-07-14T12:00:00.000Z",
+      });
+      const result = await proposeRampWithRawText("I fell off for a couple of weeks, ease me back in");
+      expect(result).toMatchObject({ category: "readiness_low", riskLevel: "low" });
+      expect(result.proposalId).toEqual(expect.any(String));
+    });
+
     it("refuses returning_from_layoff with no ramp instead of persisting a dead-end card", async () => {
       const result = await createPlanAdjustmentProposalFromTool({
         db,

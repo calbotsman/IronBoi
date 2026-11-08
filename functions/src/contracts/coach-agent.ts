@@ -942,9 +942,10 @@ export const TrainingHistory = z.object({
   recentRecords: z.array(PersonalRecord).max(10),
 }).strict();
 
-// Returned by finishWorkoutSession (as `recap`) for the post-workout card
-// and the coach's wrap-up line.
-export const WorkoutRecap = z.object({
+// Returned by finishWorkoutSession as `trainingRecap` (beside the existing
+// journey `recap` {lines, firstWorkout}, which stays as it was) for the
+// post-workout card and the coach's wrap-up line.
+export const TrainingRecap = z.object({
   // Records set in THIS session.
   records: z.array(PersonalRecord).max(5),
   // Weights changed for next time because of this session.
@@ -1341,7 +1342,7 @@ export type ProgressionEvent = z.infer<typeof ProgressionEvent>;
 export type ProgressionEventKind = z.infer<typeof ProgressionEventKind>;
 export type PersonalRecord = z.infer<typeof PersonalRecord>;
 export type TrainingHistory = z.infer<typeof TrainingHistory>;
-export type WorkoutRecap = z.infer<typeof WorkoutRecap>;
+export type TrainingRecap = z.infer<typeof TrainingRecap>;
 export type CoachingLens = z.infer<typeof CoachingLens>;
 export type AuditEventType = z.infer<typeof AuditEventType>;
 export type AuditActor = z.infer<typeof AuditActor>;

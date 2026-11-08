@@ -937,4 +937,73 @@ describe("coach context bundle", () => {
       "Lateral Raises 4x15 @20 lb (+5 lb/4wk)",
     ]);
   });
+
+  it("bundle_surfaces_this_week_and_lift_progress_from_training_history_flag_on_only", () => {
+    const bundle = buildCoachContextBundle(
+      {
+        profile: null,
+        recentFacts: [],
+        recentLogs: [],
+        sessionHistory: [],
+        pendingProposalCount: 0,
+        recentPlanChanges: [],
+        progressSummary: null,
+        currentPlan: null,
+        trainingHistory: {
+          userId: "attacker-user",
+          serverUpdatedAt: "sentinel-should-not-leak",
+          today: "2026-11-06",
+          streak: { currentWeeks: 3, bestWeeks: 5, thisWeekMet: false },
+          thisWeek: { weekStart: "2026-11-02", planned: 3, done: 1, volumeLb: 5000 },
+          calendar: [
+            { date: "2026-10-26", dayKey: "Mon", status: "done", name: "Last week" },
+            { date: "2026-11-02", dayKey: "Mon", status: "done", name: "Upper Push" },
+            { date: "2026-11-04", dayKey: "Wed", status: "missed", name: "Lower" },
+            { date: "2026-11-05", dayKey: "Thu", status: "missed", name: "Upper Pull" },
+            { date: "2026-11-06", dayKey: "Fri", status: "rest" },
+          ],
+          missedThisWeek: [
+            { date: "2026-11-05", dayKey: "Thu", name: "Upper Pull", muscles: ["lats"] },
+            { date: "2026-11-04", dayKey: "Wed", name: "Lower", muscles: ["quads", "glutes"] },
+          ],
+          recentMuscles: ["chest"],
+          lifts: [{
+            exerciseKey: "bent_over_barbell_row", exerciseName: "Bent-over Barbell Row",
+            currentLb: 100, startLb: 85, firstDate: "2026-10-13", lastDate: "2026-11-02", sessions: 4,
+            events: [{ date: "2026-11-02", kind: "session_up", fromLb: 95, toLb: 100, reason: "All 3×8 hit at 95 lb" }],
+            e1rmSeries: [],
+            prs: [{ exerciseName: "Bent-over Barbell Row", kind: "heaviest", weightLb: 95, reps: 8, date: "2026-11-02" }],
+          }],
+          recentRecords: [],
+        },
+      },
+      { userId: "u", sessionId: "s", now: "2026-11-06T12:00:00.000Z", today: "2026-11-06" },
+    );
+
+    expect(bundle.thisWeek).toMatchObject({ streakWeeks: 3, planned: 3, done: 1, recentMuscles: ["chest"] });
+    // Only this week's days, Monday first.
+    expect(bundle.thisWeek?.days).toEqual([
+      "Mon 2026-11-02 done: Upper Push",
+      "Wed 2026-11-04 missed: Lower",
+      "Thu 2026-11-05 missed: Upper Pull",
+      "Fri 2026-11-06 rest",
+    ]);
+    expect(bundle.thisWeek?.missed[0]).toEqual({ date: "2026-11-05", dayKey: "Thu", name: "Upper Pull", muscles: ["lats"] });
+    expect(bundle.liftProgress).toEqual([
+      "Bent-over Barbell Row: 85 → 100 lb (since 2026-10-13, 4 sessions); last change 2026-11-02 95→100 session_up (All 3×8 hit at 95 lb); best: heaviest 95×8 on 2026-11-02",
+    ]);
+
+    const { userMessage, system } = assembleCoachPrompt(coachConfig, bundle, "it's my rest day", { toolsEnabled: true });
+    expect(userMessage).toContain("<this_week>");
+    expect(userMessage).toContain("<lift_progress>");
+    expect(userMessage).not.toContain("attacker-user");
+    expect(userMessage).not.toContain("sentinel-should-not-leak");
+    expect(system).toContain("offer the most recent missed session whose muscles don't overlap recentMuscles");
+    expect(system).toContain("NOT a layoff");
+    expect(system).toContain("<this_week>, <lift_progress>");
+
+    const flagOff = assembleCoachPrompt(coachConfig, bundle, "hi");
+    expect(flagOff.userMessage).not.toContain("<this_week>");
+    expect(flagOff.system).not.toContain("<this_week>");
+  });
 });
