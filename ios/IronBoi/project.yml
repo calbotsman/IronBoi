@@ -10,7 +10,7 @@ options:
 settings:
   base:
     MARKETING_VERSION: 0.1.0
-    CURRENT_PROJECT_VERSION: 70
+    CURRENT_PROJECT_VERSION: 71
 packages:
   Firebase:
     url: https://github.com/firebase/firebase-ios-sdk.git
@@ -297,6 +297,7 @@ targets:
       - path: IronBoi/Models/SessionAlternatives.swift
       # Live voice reconnect rules (LiveVoicePolicyTests.swift).
       - path: IronBoi/Services/LiveVoicePolicy.swift
+      - path: IronBoi/Services/BackupVoicePolicy.swift
       # Recovery baselines and thresholds (RecoveryBaselineTests.swift).
       - path: IronBoi/Services/RecoveryBaseline.swift
     settings:

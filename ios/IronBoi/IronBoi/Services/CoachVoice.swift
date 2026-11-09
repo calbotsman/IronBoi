@@ -76,7 +76,8 @@ final class CoachVoice: NSObject, ObservableObject {
         let engine = VoiceCache.engine
         return Task {
             if let saved = VoiceCache.shared.audio(for: text, engine: engine) { return saved }
-            guard let fetchAudio, !VoiceCache.shared.lowSignal else { return nil }
+            guard let fetchAudio else { return nil }
+            if VoiceCache.shared.lowSignal { return await Self.backupVoice(for: text, after: engine, fetchAudio) }
             let deadline = Date().addingTimeInterval(4)
             for attempt in 0..<2 {
                 let remaining = deadline.timeIntervalSinceNow
@@ -102,9 +103,32 @@ final class CoachVoice: NSObject, ObservableObject {
             }
             // Counted once per line, and never for a line that was simply
             // no longer wanted (the coach moved on).
-            if !Task.isCancelled { VoiceCache.shared.noteFailure() }
+            guard !Task.isCancelled else { return nil }
+            VoiceCache.shared.noteFailure()
+            return await Self.backupVoice(for: text, after: engine, fetchAudio)
+        }
+    }
+
+    /// The coach's engine keeps failing: see if the backup can read this
+    /// line. If it can, the engine is down and the backup takes over until
+    /// the next workout (BackupVoicePolicy); if not, it's the signal.
+    private static func backupVoice(
+        for text: String, after engine: String,
+        _ fetchAudio: @escaping (String, String) async throws -> (Data, String)
+    ) async -> Data? {
+        guard VoiceCache.shared.shouldTryBackupVoice(after: engine) else { return nil }
+        let backup = BackupVoicePolicy.backupEngine
+        guard let (data, served) = try? await withDeadline(3, { try await fetchAudio(text, backup) }), served == backup else {
+            AudioHub.log("voice: backup voice failed too")
             return nil
         }
+        if !VoiceCache.shared.usingBackupVoice {
+            AudioHub.log("voice: \(engine) is failing, backup voice until the next workout")
+        }
+        VoiceCache.shared.backupVoiceAnswered()
+        VoiceCache.shared.store(data, for: text, engine: backup)
+        VoiceCache.shared.noteSuccess()
+        return data
     }
 
     /// Gets lines ready ahead of time (today's workout script), a few at a

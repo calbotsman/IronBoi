@@ -1098,6 +1098,7 @@ final class AppModel: NSObject, ObservableObject {
                 ]
             )
             activeWorkout = response.activeWorkout
+            VoiceCache.shared.resetBackupVoice()
             // The Peloton moment: MYO opens on the Watch by itself, if there is one.
             startWatchWorkout()
         } catch {
