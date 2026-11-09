@@ -22,6 +22,7 @@ import {
   planAdjustmentProposalsCollectionPath,
   profilePath,
   trainingProgramPath,
+  userRoot,
   workoutPlanPath,
 } from "../paths.js";
 import { ensureTrainingProgram, parseTrainingProgramDocument, type TrainingProgramType } from "./program.js";
@@ -183,6 +184,16 @@ export function validateReentryRamp(
   return { ok: true };
 }
 
+// A ramp is for coming back after time off: with a workout logged in the
+// last this-many days, there was no time off.
+export const LAYOFF_MIN_DAYS = 10;
+
+async function trainedWithinDays(db: Firestore, userId: string, today: string, days: number): Promise<boolean> {
+  const since = new Date(Date.parse(`${today}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+  const snap = await db.collection(`${userRoot(userId)}/workoutLogs`).where("date", ">=", since).limit(1).get();
+  return !snap.empty;
+}
+
 const INJURY_SAFETY_NOTES = [
   "Stop immediately if pain sharpens, radiates, or changes character.",
   "This is training guidance, not medical advice — see a clinician if pain persists or worsens.",
@@ -297,6 +308,24 @@ export async function createPlanAdjustmentProposalFromTool(input: {
       needsScopeConfirmation: false,
       ...diag(),
       error: "ramp_weeks_missing",
+    };
+  }
+  if (isReentryRamp && (await trainedWithinDays(input.db, input.userId, input.clientDate ?? currentDateISO(), LAYOFF_MIN_DAYS)
+    // A read failure falls through to the usual ramp checks, not a throw.
+    .catch(() => false))) {
+    // A few missed sessions are not a layoff. The tester's missed week got
+    // a "returning from a layoff" ramp scaling every lift down while they
+    // were training two days out of three; the prompt says not to, and this
+    // is the gate that holds when the prompt doesn't.
+    return {
+      proposalId: null,
+      category,
+      riskLevel,
+      requiresFollowUp,
+      dayKey: undefined,
+      needsScopeConfirmation: false,
+      ...diag(),
+      error: "ramp_not_valid_trained_recently",
     };
   }
   if (isReentryRamp) {

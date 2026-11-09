@@ -256,6 +256,7 @@ export async function orchestrateCoachTurn({
     const context = await loadCoachContext(db, userId, sessionId, {
       includePlanChanges: toolLoopEnabled,
       includeProgress: toolLoopEnabled,
+      today: clientDate ?? currentDateISO(),
     });
     const retrievedCorpus = retrieveResearchCorpus({
       userContent,

@@ -43,6 +43,8 @@ struct CoachStageView: View {
     /// "Skip your rest day?" — asked on screen, and out loud when it was
     /// asked for out loud.
     @State private var askingSkipRestDay = false
+    /// The day a missed session was last mentioned on opening: once a day.
+    @AppStorage("missedSessionOfferedOn") private var missedOfferedOn = ""
     /// Start is swapping out a stale session; that's not the workout ending.
     @State private var restartingWorkout = false
     /// A short on-screen note under the coach ("Your workout's ready…"),
@@ -278,8 +280,16 @@ struct CoachStageView: View {
     }
 
     /// Any card that needs the space below the body.
-    private var cardOpen: Bool {
-        swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || (appModel.pendingEffortSessionId != nil && !inRoutine) || !appModel.pendingBaselineSuggestions.isEmpty || showReminderSetup || (showTodayCard && appModel.activeWorkout == nil) || (appModel.activeWorkout != nil && workoutExpanded)
+    private var cardOpen: Bool { questionCardOpen || workoutCardOpen }
+    // Split in two: one long || chain is slow for the type-checker.
+    private var questionCardOpen: Bool {
+        let effort = appModel.pendingEffortSessionId != nil && !inRoutine
+        return swapChoice != nil || !appModel.pendingSessionChanges.isEmpty || effort || showsTrainingRecap
+    }
+    private var workoutCardOpen: Bool {
+        let today = showTodayCard && appModel.activeWorkout == nil
+        let live = appModel.activeWorkout != nil && workoutExpanded
+        return !appModel.pendingBaselineSuggestions.isEmpty || showReminderSetup || today || live
     }
     /// What you're saying, as shown: the live coach's transcript when it
     /// has one (better in a noisy gym), else the phone's — and never a run
@@ -291,6 +301,11 @@ struct CoachStageView: View {
 
     /// A warm-up or cooldown is on (or on offer): its panel, not a card.
     private var inRoutine: Bool { guided != nil || cooldownOffer != nil }
+
+    /// The progress card after a workout (records, next time, streak).
+    private var showsTrainingRecap: Bool {
+        appModel.lastTrainingRecap != nil && appModel.activeWorkout == nil && !inRoutine
+    }
 
     /// The newest coach reply already checked for a move, so history
     /// loading on launch never sets the body off.
@@ -343,6 +358,18 @@ struct CoachStageView: View {
         }
     }
 
+    /// The stage, mentioning a missed session once a day when the app opens.
+    /// Its own property so neither `body` nor `animatedStage` grows.
+    private var stageWithOffers: some View {
+        stageShowingOnRequest
+            .onAppear { offerMissedSessionOnce() }
+            .onChange(of: appModel.trainingHistory?.computedAt) { _, _ in offerMissedSessionOnce() }
+            .onChange(of: appModel.currentWorkoutPlan == nil) { _, _ in offerMissedSessionOnce() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { offerMissedSessionOnce() }
+            }
+    }
+
     /// Set done on the Watch: a hold or cardio block ends now; otherwise the
     /// next set of this lift is logged at its target reps, and rest starts,
     /// as when you say "set done".
@@ -375,7 +402,7 @@ struct CoachStageView: View {
     /// The stage with its animations. Split from `body`, whose one long
     /// modifier chain had grown past what the compiler type-checks in time.
     private var animatedStage: some View {
-        stageShowingOnRequest
+        stageWithOffers
         #if DEBUG
         .overlay(alignment: .topTrailing) {
             if ProcessInfo.processInfo.environment["MYO_TUNER"] == "1" { OrbPhysicsTuner() }
@@ -712,6 +739,10 @@ struct CoachStageView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else if !appModel.pendingBaselineSuggestions.isEmpty {
                     WeightFollowUpCard(suggestions: appModel.pendingBaselineSuggestions)
+                        .padding(.horizontal, MyoTheme.Spacing.md)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else if showsTrainingRecap, let recap = appModel.lastTrainingRecap {
+                    TrainingRecapCard(recap: recap, onClose: closeTrainingRecap)
                         .padding(.horizontal, MyoTheme.Spacing.md)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                 } else if showReminderSetup {
@@ -1104,7 +1135,7 @@ struct CoachStageView: View {
                     }
                 }
                 if appModel.activeWorkout == nil {
-                    quickTap("Today's workout", systemImage: "list.bullet") { showTodayCard = true }
+                    quickTap("Today's workout", systemImage: "list.bullet") { appModel.dismissTrainingRecap(); showTodayCard = true }
                 }
                 quickTap("Adjust my workout", systemImage: "slider.horizontal.3") {
                     talk("I need to adjust my workout.")
@@ -1279,8 +1310,7 @@ struct CoachStageView: View {
                 Text("Skip your rest day?")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(MyoColor.Text.primary.color)
-                Text(appModel.nextPlannedDay.map { "You'd do \($0.name) today instead." }
-                     ?? "Coach will put together a workout for today.")
+                Text(skipRestDayDetail)
                     .font(.subheadline)
                     .foregroundStyle(MyoColor.Text.secondary.color)
                     .multilineTextAlignment(.center)
@@ -1296,7 +1326,7 @@ struct CoachStageView: View {
                 }
                 .buttonStyle(.plain)
                 Button { answerSkipRestDay(true) } label: {
-                    Text(appModel.nextPlannedDay.map { "Yes, do \($0.name)" } ?? "Yes, build one")
+                    Text(appModel.sessionOffer.map { "Yes, do \($0.day.name)" } ?? "Yes, build one")
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -1311,6 +1341,13 @@ struct CoachStageView: View {
         .padding(MyoTheme.Spacing.lg)
         .frame(maxWidth: .infinity)
         .myoCard()
+    }
+
+    /// Under "Skip your rest day?": the session it would be, a missed one first.
+    private var skipRestDayDetail: String {
+        guard let offer = appModel.sessionOffer else { return "Coach will put together a workout for today." }
+        if offer.missed != nil { return "You missed \(offer.spokenName). Do it today?" }
+        return "You'd do \(offer.day.name) today instead."
     }
 
     /// The first session is on offer any day; after that, rest days ask.
@@ -3183,6 +3220,8 @@ struct CoachStageView: View {
         if appModel.activeWorkout != nil {
             workoutExpanded = true
         } else {
+            // The progress card would sit in front of it.
+            appModel.dismissTrainingRecap()
             showTodayCard = true
         }
     }
@@ -3235,6 +3274,7 @@ struct CoachStageView: View {
             // A leftover finished on the way in isn't this workout's ending.
             _ = appModel.consumeRecap()
             appModel.skipEffortQuestion()
+            appModel.dismissTrainingRecap()
             guard appModel.activeWorkout != nil else { return }
             askingSkipRestDay = false
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -3411,7 +3451,9 @@ struct CoachStageView: View {
         director.perform(.celebrate)
         try? AudioHub.shared.start()
         AudioHub.shared.play(cue: .fanfare)
-        let said = ((lastCloseOut.map { [$0] } ?? []) + [opener] + (recap?.lines ?? [])).joined(separator: " ")
+        let headline = Self.progressHeadline(appModel.lastTrainingRecap, spoken: recap?.lines ?? [])
+        let said = ((lastCloseOut.map { [$0] } ?? []) + [opener] + (recap?.lines ?? []) + (headline.map { [$0] } ?? []))
+            .joined(separator: " ")
         lastCloseOut = nil
         if recap != nil { show(notice: recap?.lines.first ?? opener) }
         if !appModel.pendingSessionChanges.isEmpty, conversationActive {
@@ -3440,6 +3482,19 @@ struct CoachStageView: View {
                 voice.speak(said + " How did that feel?", messageId: "local-\(UUID().uuidString)")
             }
         }
+    }
+
+    /// One thing from the progress recap, said at the end: a weight that goes
+    /// up next time, else a record the spoken recap didn't already name.
+    private static func progressHeadline(_ progress: TrainingRecapModel?, spoken lines: [String]) -> String? {
+        guard let progress else { return nil }
+        if let up = progress.nextWeights.first(where: { $0.toLb > $0.fromLb }) {
+            return "Up \(WeightLoad.number(up.toLb - up.fromLb)) on \(short(up.exerciseName)) next time."
+        }
+        if let record = progress.records.first, !lines.contains(where: { $0.contains("New best") }) {
+            return "New best on \(short(record.exerciseName))."
+        }
+        return nil
     }
 
     /// The first thing said when a workout ends: a proper finish.
@@ -3472,6 +3527,27 @@ struct CoachStageView: View {
     private func skipEffort() {
         appModel.skipEffortQuestion()
         offerRemindersIfNotAsked()
+    }
+
+    private func closeTrainingRecap() {
+        withAnimation(MyoTheme.Motion.fade) { appModel.dismissTrainingRecap() }
+    }
+
+    /// Once a day, opening the app with a session missed this week and
+    /// nothing trained yet: one short offer. On a rest day it's the
+    /// rest-day question; otherwise a note, since today has its own session.
+    private func offerMissedSessionOnce() {
+        guard let offer = appModel.missedSessionOffer, missedOfferedOn != appModel.todayISO,
+              appModel.activeWorkout == nil, !appModel.trainedToday, !appModel.isNewToTraining,
+              !conversationActive, !live.isActive, !voice.isSpeaking, !cardOpen,
+              !askingSkipRestDay, !askingMicPermission, welcomeCard == nil
+        else { return }
+        missedOfferedOn = appModel.todayISO
+        if appModel.isRestDay {
+            withAnimation(MyoTheme.Motion.fade) { askSkipRestDay(spoken: false) }
+        } else {
+            show(notice: "You missed \(offer.spokenName). It's on your Plan if you want it today.")
+        }
     }
 
     /// Once, after a workout: "Want a nudge on training days?" — at the time
@@ -3589,17 +3665,23 @@ struct CoachStageView: View {
         askedAt = Date()
         questionAskedAt = Date()
         if spoken, speaksReplies {
-            let offer = appModel.nextPlannedDay.map { "do \($0.name) instead" } ?? "have me build you a workout"
+            let line: String
+            if let offer = appModel.sessionOffer, offer.missed != nil {
+                line = "Today's a rest day. You missed \(offer.spokenName). Want to do it today?"
+            } else {
+                let offer = appModel.sessionOffer.map { "do \($0.day.name) instead" } ?? "have me build you a workout"
+                line = "Today's a rest day. Want to skip it and \(offer)?"
+            }
             markRestartHandled()
-            voice.speak("Today's a rest day. Want to skip it and \(offer)?", messageId: "local-\(UUID().uuidString)")
+            voice.speak(line, messageId: "local-\(UUID().uuidString)")
         }
     }
 
     private func answerSkipRestDay(_ yes: Bool) {
         guard askingSkipRestDay else { return }
         askingSkipRestDay = false
-        if yes, let next = appModel.nextPlannedDay {
-            beginWorkout(dayKey: next.dayKey)
+        if yes, let offer = appModel.sessionOffer {
+            beginWorkout(dayKey: offer.day.dayKey)
         } else if yes {
             // Nothing in the plan to pull forward: have Coach build one —
             // answered the way you asked (typed stays typed).
@@ -3695,7 +3777,11 @@ struct CoachStageView: View {
         var cues: [ExerciseLesson.BodyCue] = []
         if !teach {
             let weight = appModel.workingWeight(for: exercise)
-            let load = weight > 0 ? " at \(WeightLoad.spoken(weight, for: exercise.name))" : ""
+            var load = weight > 0 ? " at \(WeightLoad.spoken(weight, for: exercise.name))" : ""
+            // One clause when the weight moved since last time: "up 5 from last time".
+            if !replay, let step = appModel.weightChange(for: exercise.name, at: weight) {
+                load += Self.weightStepClause(step)
+            }
             let lead = replay ? "Here it is again" : first ? (tone == .hype ? "Let's go! First up" : "First up") : "Next up"
             let side = eachSide(exercise) ? " each side" : ""
             if ExerciseKnowledge.isCardio(exercise.name) {
@@ -3761,6 +3847,13 @@ struct CoachStageView: View {
             }
             resumeListening()
         }
+    }
+
+    /// ", up 5 from last time" / ", down 5 to reset", after the weight.
+    private static func weightStepClause(_ step: ProgressionEventModel) -> String {
+        let delta = step.toLb - step.fromLb
+        let amount = WeightLoad.number(abs(delta))
+        return delta > 0 ? ", up \(amount) from last time" : ", down \(amount) to reset"
     }
 
     /// Moves the body to the beat for this spoken line.

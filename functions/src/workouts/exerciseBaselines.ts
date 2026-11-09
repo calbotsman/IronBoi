@@ -21,6 +21,7 @@ import {
   ExerciseBaseline,
   ExerciseProgression,
   PlannedWorkoutDay,
+  type TrainingProgram,
 } from "../contracts/coach-agent.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import {
@@ -28,10 +29,12 @@ import {
   exerciseBaselinesCollectionPath,
 } from "../paths.js";
 import { normalizeExerciseKey } from "./exerciseCatalog.js";
+import { lbText, progressionEventDoc, writeProgressionEvent } from "./progressionEvents.js";
 
 type ExerciseBaselineType = z.infer<typeof ExerciseBaseline>;
 type ExerciseProgressionType = z.infer<typeof ExerciseProgression>;
 type PlannedWorkoutDayType = z.infer<typeof PlannedWorkoutDay>;
+type TrainingProgramType = z.infer<typeof TrainingProgram>;
 
 export type BaselineMap = Map<string, ExerciseBaselineType>;
 
@@ -163,7 +166,7 @@ type FinishedExercise = {
 // The MODE, not the last set and not the max: a lifter who does 3 sets at 30
 // and one mistaken tap at 60 worked at 30. Ties break heavy, because between
 // two equally-represented weights the heavier one is the one they proved.
-function workedWeight(exercise: FinishedExercise): number | null {
+export function workedWeight(exercise: FinishedExercise): number | null {
   const weights = exercise.completedSets
     .filter((set) => set.completed && typeof set.weight === "number")
     .map((set) => set.weight as number);
@@ -273,6 +276,48 @@ export function applyBaselinesToDays(
   return { days: next, changed };
 }
 
+// What a set of anchors changes in the docs the user reads: the plan's
+// weekday days and the program's current-and-future weeks. Past weeks stay
+// as they were (history isn't rewritten), and dailyOverrides are left alone:
+// they are dated adjustments the user approved as a specific thing.
+// Undefined for a doc that wouldn't change, so callers skip the write.
+export function baselinePropagation(
+  planData: FirebaseFirestore.DocumentData | undefined,
+  program: TrainingProgramType | undefined,
+  baselines: BaselineMap,
+  todayISO: string,
+): {
+  planDays?: Record<string, PlannedWorkoutDayType>;
+  programWeeks?: TrainingProgramType["weeks"];
+} {
+  const rawDays = planData && isPlainRecord(planData.days) ? planData.days : {};
+  const planDays: Record<string, PlannedWorkoutDayType> = {};
+  for (const [dayKey, rawDay] of Object.entries(rawDays)) {
+    const parsed = PlannedWorkoutDay.safeParse(rawDay);
+    if (!parsed.success) continue;
+    const patched = applyBaselinesToDay(parsed.data, baselines, todayISO);
+    if (patched !== parsed.data) planDays[dayKey] = patched;
+  }
+
+  let programChanged = false;
+  const weeks = program?.weeks.map((week) => {
+    if (week.weekIndex < program.activeWeekIndex) return week;
+    const { days, changed } = applyBaselinesToDays(week.days, baselines, todayISO);
+    if (!changed) return week;
+    programChanged = true;
+    return { ...week, days };
+  });
+
+  return {
+    ...(Object.keys(planDays).length > 0 ? { planDays } : {}),
+    ...(programChanged && weeks ? { programWeeks: weeks } : {}),
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function baselineDocFor(
   userId: string,
   exerciseName: string,
@@ -318,11 +363,24 @@ export async function reanchorForApprovedEdit(
       const existing = baselines.get(key);
       if (!existing || !(exercise.weight > 0)) continue;
       if (roundToPlate(exercise.weight) === existing.anchorWeightLb) continue;
+      const next = baselineDocFor(userId, exercise.name, exercise.weight, anchorDate, "coach", now);
       batch.set(
         baselineRefFor(db, userId, exercise.name),
-        { ...baselineDocFor(userId, exercise.name, exercise.weight, anchorDate, "coach", now), serverUpdatedAt: FieldValue.serverTimestamp() },
+        { ...next, serverUpdatedAt: FieldValue.serverTimestamp() },
         { merge: true },
       );
+      // History's timeline: the weight moved because the user approved it.
+      writeProgressionEvent(db, batch, progressionEventDoc({
+        userId,
+        scope: anchorDate,
+        kind: "plan_change",
+        exerciseName: exercise.name,
+        date: anchorDate,
+        fromLb: existing.anchorWeightLb,
+        toLb: next.anchorWeightLb,
+        reason: `You approved a plan change: ${lbText(next.anchorWeightLb)} lb from now on`,
+        now,
+      }));
       count += 1;
     }
   }

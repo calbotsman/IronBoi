@@ -816,6 +816,157 @@ export const ProgressLensHighlight = z.object({
   note: z.string().min(1).max(200),
 }).strict();
 
+// ---------------------------------------------------------------------------
+// Training intelligence (docs/plans/myo-training-intelligence.md)
+// ---------------------------------------------------------------------------
+
+// Why a lift's prescribed weight changed. Written server-side to
+// users/{uid}/progressionEvents/{eventId}; every change to what the user is
+// told to lift gets one, so History can show the timeline with reasons.
+export const ProgressionEventKind = z.enum([
+  "session_up",          // every rep hit at this weight last session → next session one step up
+  "weekly_up",           // the weekly rollover advanced it (progression rule)
+  "hold_missed_reps",    // reps missed → stays
+  "hold_not_trained",    // not trained since the last step → stays
+  "deload",              // two missed-rep holds → down 10%
+  "changed_in_workout",  // the user (or the coach, by voice) lifted a different weight than prescribed
+  "plan_change",         // an approved plan adjustment changed it
+]);
+
+export const ProgressionEvent = z.object({
+  userId: z.string().min(1),
+  eventId: z.string().min(1).max(200),
+  exerciseKey: z.string().min(1).max(120),
+  exerciseName: z.string().min(1).max(80),
+  date: z.string().date(),
+  kind: ProgressionEventKind,
+  fromLb: z.number().nonnegative().max(2000),
+  toLb: z.number().nonnegative().max(2000),
+  // Plain words for the timeline: "all 3×10 hit at 35 lb".
+  reason: z.string().max(160),
+  sessionId: z.string().min(1).optional(),
+  createdAt: ISODateTime,
+}).strict();
+
+export const PersonalRecord = z.object({
+  exerciseName: z.string().min(1).max(80),
+  // heaviest = most weight for any reps; most_reps = most reps at a weight
+  // the user has lifted before; best_e1rm = best Epley estimate.
+  kind: z.enum(["heaviest", "most_reps", "best_e1rm"]),
+  weightLb: z.number().nonnegative().max(2000),
+  reps: z.number().int().nonnegative().max(500),
+  e1rmLb: z.number().nonnegative().max(3000).optional(),
+  date: z.string().date(),
+  sessionId: z.string().min(1).optional(),
+}).strict();
+
+// done = a workout logged that day; missed = a planned training day in the
+// past with no log; rest = no training planned and none logged; today =
+// today, not yet trained; planned = a future training day this week;
+// extra = trained on a day that wasn't planned.
+export const TrainingDayStatus = z.enum(["done", "missed", "rest", "today", "planned", "extra"]);
+
+// users/{uid}/derivedSummaries/training_history — built server-side after
+// every finished workout (and when stale on read). Everything History and
+// the workout brain need in one small doc. Weights are POUNDS (the app's
+// unit); logs store kg and are converted.
+export const TrainingHistory = z.object({
+  userId: z.string().min(1),
+  computedAt: ISODateTime,
+  // The user's local date it was built for (clientDate when known).
+  today: z.string().date(),
+  // Weeks are calendar weeks, Monday to Sunday. A week counts when the
+  // sessions logged in it reach the plan's training days for that week.
+  // The current week only adds to the streak once it's met; while it's in
+  // progress it neither adds nor breaks.
+  streak: z.object({
+    currentWeeks: z.number().int().nonnegative(),
+    bestWeeks: z.number().int().nonnegative(),
+    thisWeekMet: z.boolean(),
+  }).strict(),
+  thisWeek: z.object({
+    weekStart: z.string().date(),
+    planned: z.number().int().nonnegative(),
+    done: z.number().int().nonnegative(),
+    volumeLb: z.number().nonnegative(),
+    // Mean perceivedEffort (1-10) of this week's sessions, when any gave one.
+    avgEffort: z.number().min(1).max(10).optional(),
+  }).strict(),
+  // The last 8 full weeks plus the current week, oldest first, one entry per
+  // day up to the end of this week (Sunday).
+  calendar: z.array(z.object({
+    date: z.string().date(),
+    dayKey: z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+    status: TrainingDayStatus,
+    // The planned session's name (missed/planned/today) or the logged
+    // workout's title (done/extra).
+    name: z.string().max(80).optional(),
+    sessionId: z.string().min(1).optional(),
+  }).strict()).max(63),
+  // This week's missed planned days, most recent first, with the muscles
+  // each trains (for "do Thursday's session today?" and muscle-overlap checks).
+  missedThisWeek: z.array(z.object({
+    date: z.string().date(),
+    dayKey: z.enum(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]),
+    name: z.string().max(80),
+    muscles: z.array(z.string().max(40)).max(12),
+  }).strict()).max(7),
+  // Muscles trained in sessions logged yesterday or today (for the 48 h
+  // overlap rule when picking a session).
+  recentMuscles: z.array(z.string().max(40)).max(20),
+  // Lifts with load history, most recently trained first.
+  lifts: z.array(z.object({
+    exerciseKey: z.string().min(1).max(120),
+    exerciseName: z.string().min(1).max(80),
+    // What the plan prescribes now (baseline / plan weight), else the last
+    // weight lifted.
+    currentLb: z.number().nonnegative().max(2000),
+    // The first weight logged for it.
+    startLb: z.number().nonnegative().max(2000),
+    firstDate: z.string().date(),
+    lastDate: z.string().date(),
+    sessions: z.number().int().nonnegative(),
+    // Newest first.
+    events: z.array(z.object({
+      date: z.string().date(),
+      kind: ProgressionEventKind,
+      fromLb: z.number().nonnegative().max(2000),
+      toLb: z.number().nonnegative().max(2000),
+      reason: z.string().max(160),
+    }).strict()).max(20),
+    // Best e1RM per session (lb), oldest first, up to 12 points.
+    e1rmSeries: z.array(z.object({ date: z.string().date(), value: z.number().nonnegative() }).strict()).max(12),
+    prs: z.array(PersonalRecord).max(3),
+  }).strict()).max(12),
+  // Newest first, across all lifts.
+  recentRecords: z.array(PersonalRecord).max(10),
+}).strict();
+
+// Returned by finishWorkoutSession as `trainingRecap` (beside the existing
+// journey `recap` {lines, firstWorkout}, which stays as it was) for the
+// post-workout card and the coach's wrap-up line.
+export const TrainingRecap = z.object({
+  // Records set in THIS session.
+  records: z.array(PersonalRecord).max(5),
+  // Weights changed for next time because of this session.
+  nextWeights: z.array(z.object({
+    exerciseName: z.string().min(1).max(80),
+    fromLb: z.number().nonnegative().max(2000),
+    toLb: z.number().nonnegative().max(2000),
+    reason: z.string().max(160),
+  }).strict()).max(10),
+  // Per lift vs the last time it was done (top set): weight and reps deltas.
+  comparedToLast: z.array(z.object({
+    exerciseName: z.string().min(1).max(80),
+    deltaLb: z.number().optional(),
+    deltaReps: z.number().int().optional(),
+  }).strict()).max(10),
+  volumeLb: z.number().nonnegative(),
+  previousVolumeLb: z.number().nonnegative().optional(),
+  // Streak after this session (weeks).
+  streakWeeks: z.number().int().nonnegative(),
+}).strict();
+
 export const ProgressSummary = z.object({
   userId: z.string().min(1),
   computedAt: ISODateTime,
@@ -1187,6 +1338,11 @@ export type BodyWeightPoint = z.infer<typeof BodyWeightPoint>;
 export type ProgressLiftTrend = z.infer<typeof ProgressLiftTrend>;
 export type ProgressLensHighlight = z.infer<typeof ProgressLensHighlight>;
 export type ProgressSummary = z.infer<typeof ProgressSummary>;
+export type ProgressionEvent = z.infer<typeof ProgressionEvent>;
+export type ProgressionEventKind = z.infer<typeof ProgressionEventKind>;
+export type PersonalRecord = z.infer<typeof PersonalRecord>;
+export type TrainingHistory = z.infer<typeof TrainingHistory>;
+export type TrainingRecap = z.infer<typeof TrainingRecap>;
 export type CoachingLens = z.infer<typeof CoachingLens>;
 export type AuditEventType = z.infer<typeof AuditEventType>;
 export type AuditActor = z.infer<typeof AuditActor>;

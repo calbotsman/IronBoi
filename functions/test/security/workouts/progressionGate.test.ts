@@ -66,7 +66,9 @@ describe("progression rep gate", () => {
     await seed({ Mon: { name: "Push", muscles: [], exercises: [bench(155)] } });
     const first = await train(START, 8);
     expect(first.exercises[0].targetWeight).toBe(155);
-    expect((await baseline())?.source).toBe("plan_seed");
+    // Every rep hit: the step is earned at the finish (sessionProgression.ts),
+    // and the rollover below keeps it instead of adding a second one.
+    expect(await baseline()).toMatchObject({ source: "user_session", anchorWeightLb: 160 });
 
     await rolloverTrainingPrograms(db, "2026-08-10");
     expect(await planWeight()).toBe(160);

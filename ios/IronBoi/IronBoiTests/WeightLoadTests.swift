@@ -326,3 +326,41 @@ final class WorkoutTalkTests: XCTestCase {
         XCTAssertFalse(WorkoutVoice.worthSendingMidWorkout("wow", justAsked: false))
     }
 }
+
+/// The finish callable's progress recap (records, next time, streak): read
+/// from `recap` beside the spoken lines, or from `trainingRecap`; the
+/// spoken-only shape and junk mean no card, never an error.
+final class TrainingRecapDecodingTests: XCTestCase {
+    private func decode(_ json: String) -> TrainingRecapModel? {
+        try? JSONDecoder().decode(TrainingRecapModel.self, from: Data(json.utf8))
+    }
+
+    func testFullRecap() throws {
+        let recap = try XCTUnwrap(decode("""
+        {"lines": ["3 moves."], "firstWorkout": false,
+         "records": [{"exerciseName": "KB Goblet Squat", "kind": "heaviest", "weightLb": 35, "reps": 10, "date": "2026-11-04"}],
+         "nextWeights": [{"exerciseName": "Rows", "fromLb": 35, "toLb": 40, "reason": "all 3x10 hit"}],
+         "comparedToLast": [{"exerciseName": "Rows", "deltaLb": 5}],
+         "volumeLb": 4200, "streakWeeks": 3}
+        """))
+        XCTAssertEqual(recap.records.first?.exerciseName, "KB Goblet Squat")
+        XCTAssertEqual(recap.records.first?.reps, 10)
+        XCTAssertEqual(recap.nextWeights.first?.toLb, 40)
+        XCTAssertEqual(recap.comparedToLast.first?.deltaLb, 5)
+        XCTAssertNil(recap.comparedToLast.first?.deltaReps)
+        XCTAssertEqual(recap.streakWeeks, 3)
+        XCTAssertNil(recap.previousVolumeLb)
+        XCTAssertTrue(recap.hasNews)
+    }
+
+    func testSpokenOnlyRecapIsNotOne() {
+        XCTAssertNil(decode(#"{"lines": ["3 moves."], "firstWorkout": true}"#))
+    }
+
+    func testOddEntriesAreDropped() throws {
+        let recap = try XCTUnwrap(decode(#"{"records": [{"kind": "heaviest"}], "nextWeights": "nope", "streakWeeks": 0}"#))
+        XCTAssertTrue(recap.records.isEmpty)
+        XCTAssertTrue(recap.nextWeights.isEmpty)
+        XCTAssertFalse(recap.hasNews)
+    }
+}

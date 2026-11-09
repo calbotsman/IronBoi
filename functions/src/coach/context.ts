@@ -1,9 +1,11 @@
 import type { DocumentData, Firestore } from "firebase-admin/firestore";
+import { refreshTrainingHistoryIfStale } from "../progress/trainingHistoryStore.js";
 import {
   coachSessionPath,
   profilePath,
   progressSummaryPath,
   coachNotesPath,
+  trainingHistoryPath,
   userRoot,
   workoutPlanPath,
 } from "../paths.js";
@@ -32,6 +34,10 @@ export type CoachLoadedContext = {
   // user has no plan yet or the read failed. Before 2026-09-03 the coach
   // never saw this at all and answered "I can't see your full plan".
   currentPlan: DocumentData | null;
+  // derivedSummaries/training_history (progress/trainingHistoryStore.ts):
+  // the week Mon→Sun, missed sessions, lift timelines. Same gating and
+  // degradation as progressSummary; optional so older fixtures still build.
+  trainingHistory?: DocumentData | null;
 };
 
 // A fact is "confirmed-for-prompt" if either:
@@ -53,6 +59,10 @@ export async function loadCoachContext(
     // carries facts, notes and workouts, so only safety facts are read here
     // (fresh and authoritative), no logs and no notes.
     memory?: "full" | "safety_only";
+    // The user's local date. With includeProgress, the training history is
+    // rebuilt first when it was built for another day or over an hour ago:
+    // "you missed Thursday" has to be about this week, not last.
+    today?: string;
   } = {},
 ): Promise<CoachLoadedContext> {
   const safetyOnly = options.memory === "safety_only";
@@ -90,6 +100,13 @@ export async function loadCoachContext(
         .catch(() => null)
     : Promise.resolve(null);
 
+  const trainingHistoryPromise = options.includeProgress
+    ? (options.today
+        ? refreshTrainingHistoryIfStale(db, userId, options.today).then((result) => result.history)
+        : db.doc(trainingHistoryPath(userId)).get().then((snap) => (snap.exists ? snap.data() ?? null : null)))
+        .catch(() => null)
+    : Promise.resolve(null);
+
   // Never gated: a coach that can't see the plan can't coach. Degraded to
   // null on failure like the other advisory reads — a plan-read hiccup
   // must not take the whole turn down.
@@ -108,6 +125,7 @@ export async function loadCoachContext(
     recentPlanChanges,
     progressSummary,
     currentPlan,
+    trainingHistory,
   ] =
     await Promise.all([
       db.doc(profilePath(userId)).get(),
@@ -149,6 +167,7 @@ export async function loadCoachContext(
       recentPlanChangesPromise,
       progressSummaryPromise,
       currentPlanPromise,
+      trainingHistoryPromise,
     ]);
 
   const allFacts = recentFactsSnap.docs
@@ -170,5 +189,6 @@ export async function loadCoachContext(
     recentPlanChanges,
     progressSummary,
     currentPlan,
+    trainingHistory,
   };
 }

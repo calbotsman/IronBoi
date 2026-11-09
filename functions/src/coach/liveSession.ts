@@ -358,6 +358,7 @@ export async function buildLiveSystemInstruction(args: {
     loadCoachContext(args.db, args.userId, LIVE_SESSION_ID, {
       includePlanChanges: true,
       includeProgress: true,
+      today: args.today,
       memory: useBrief ? "safety_only" : "full",
     }),
     useBrief

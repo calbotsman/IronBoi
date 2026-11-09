@@ -17,15 +17,13 @@
 
 import type { Firestore } from "firebase-admin/firestore";
 import { FieldValue } from "firebase-admin/firestore";
-import { z } from "zod";
-import { PlannedWorkoutDay } from "../contracts/coach-agent.js";
 import { recordAuditEventBestEffort } from "../audit/log.js";
 import { safeLogger } from "../logging/safeLogger.js";
 import { trainingProgramPath, workoutPlanPath, workoutSessionPath } from "../paths.js";
 import { normalizeExerciseKey } from "./exerciseCatalog.js";
 import {
-  applyBaselinesToDay,
   baselineDocFor,
+  baselinePropagation,
   baselineRefFor,
   loadBaselines,
   type ApplyExerciseBaselinesRequestType,
@@ -117,20 +115,13 @@ export async function applyExerciseBaselines(
     }
 
     // --- Propagate to what the user reads ------------------------------
-    const planData = planSnap.data() ?? {};
-    const planDays = isRecord(planData.days) ? planData.days : {};
-    const patchedDays: Record<string, unknown> = {};
-    for (const [dayKey, rawDay] of Object.entries(planDays)) {
-      const parsed = PlannedWorkoutDay.safeParse(rawDay);
-      if (!parsed.success) continue;
-      const patched = applyBaselinesToDay(parsed.data, baselines, today);
-      if (patched !== parsed.data) patchedDays[dayKey] = patched;
-    }
-
-    // dailyOverrides are deliberately left alone: they are dated, temporary
-    // coach adjustments that expire on their own. Rewriting a load inside
-    // one would edit an adjustment the user approved as a specific thing.
-    if (Object.keys(patchedDays).length > 0) {
+    const { planDays: patchedDays, programWeeks } = baselinePropagation(
+      planSnap.data(),
+      programSnap.exists ? parseTrainingProgramDocument(programSnap.data()) : undefined,
+      baselines,
+      today,
+    );
+    if (patchedDays) {
       transaction.set(
         planRef,
         {
@@ -142,36 +133,17 @@ export async function applyExerciseBaselines(
         { merge: true },
       );
     }
-
-    if (programSnap.exists) {
-      const program = parseTrainingProgramDocument(programSnap.data());
-      let programChanged = false;
-      const weeks = program.weeks.map((week) => {
-        if (week.weekIndex < program.activeWeekIndex) return week;
-        let weekChanged = false;
-        const days: Record<string, z.infer<typeof PlannedWorkoutDay>> = {};
-        for (const [dayKey, rawDay] of Object.entries(week.days)) {
-          const patched = applyBaselinesToDay(rawDay, baselines, today);
-          if (patched !== rawDay) weekChanged = true;
-          days[dayKey] = patched;
-        }
-        if (!weekChanged) return week;
-        programChanged = true;
-        return { ...week, days };
-      });
-
-      if (programChanged) {
-        transaction.set(
-          programRef,
-          {
-            weeks,
-            source: "user_edited",
-            updatedAt: now,
-            serverUpdatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
-      }
+    if (programWeeks) {
+      transaction.set(
+        programRef,
+        {
+          weeks: programWeeks,
+          source: "user_edited",
+          updatedAt: now,
+          serverUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
     }
 
     return accepted;

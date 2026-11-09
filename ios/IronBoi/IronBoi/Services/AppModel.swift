@@ -141,12 +141,17 @@ final class AppModel: NSObject, ObservableObject {
     /// What the coach says as the workout that just finished ends; the coach
     /// screen takes it once (consumeRecap) when the workout closes.
     @Published private(set) var lastRecap: WorkoutRecap?
+    /// Records, next-time weights and the streak from the workout that just
+    /// finished: the card on the coach screen, until it's closed.
+    @Published private(set) var lastTrainingRecap: TrainingRecapModel?
     /// The workout waiting on "How did that feel?".
     @Published private(set) var pendingEffortSessionId: String?
     /// When the workout that just finished started — the reminder card
     /// suggests that time.
     private(set) var lastWorkoutStartedAt: Date?
     @Published private(set) var progressSummary: ProgressSummaryModel?
+    /// Streak, calendar, lift progress and records (derivedSummaries/training_history).
+    @Published private(set) var trainingHistory: TrainingHistoryModel?
     /// Recovery from Apple Health (AppModel+Recovery), when reads are on.
     @Published var recovery: RecoveryBaseline.Summary?
     var recoveryReadAt: Date?
@@ -208,6 +213,8 @@ final class AppModel: NSObject, ObservableObject {
     private var activeWorkoutListener: ListenerRegistration?
     private var workoutLogListener: ListenerRegistration?
     private var progressListener: ListenerRegistration?
+    private var trainingHistoryListener: ListenerRegistration?
+    private var trainingHistoryForeground: NSObjectProtocol?
     private var memoryFactListener: ListenerRegistration?
     private var memoryBriefListener: ListenerRegistration?
     // Raw workoutPlans/current doc — kept so the derived summary (which
@@ -229,6 +236,7 @@ final class AppModel: NSObject, ObservableObject {
         activeWorkoutListener?.remove()
         workoutLogListener?.remove()
         progressListener?.remove()
+        trainingHistoryListener?.remove()
         memoryFactListener?.remove()
         memoryBriefListener?.remove()
     }
@@ -255,6 +263,7 @@ final class AppModel: NSObject, ObservableObject {
                 self.listenForActiveWorkout(userId: user?.uid)
                 self.listenForWorkoutLogs(userId: user?.uid)
                 self.listenForProgressSummary(userId: user?.uid)
+                self.listenForTrainingHistory(userId: user?.uid)
                 self.listenForMemoryFacts(userId: user?.uid)
                 self.listenForMemoryBrief(userId: user?.uid)
             }
@@ -892,6 +901,103 @@ final class AppModel: NSObject, ObservableObject {
         return nil
     }
 
+    // MARK: - Training history, as the workout brain reads it
+
+    /// This week's days from the training history (dayKey → day), or empty
+    /// when the doc is missing or from another week.
+    var thisWeekDays: [String: TrainingDay] {
+        guard let history = trainingHistory, history.thisWeek.weekStart == Self.currentWeekStartISO() else { return [:] }
+        // The doc is rebuilt when a workout finishes, so it can be days old:
+        // a planned day that has since passed is missed, and today is today,
+        // by the phone's date rather than the doc's.
+        let today = Self.currentDateISO()
+        var days: [String: TrainingDay] = [:]
+        for day in history.calendar where day.date >= history.thisWeek.weekStart {
+            var status = day.status
+            if day.date < today, status == "planned" || status == "today" { status = "missed" }
+            if day.date == today, status == "planned" { status = "today" }
+            days[day.dayKey] = TrainingDay(date: day.date, dayKey: day.dayKey, status: status,
+                                           name: day.name, sessionId: day.sessionId)
+        }
+        return days
+    }
+
+    /// A workout's already logged today (the history doc, or the logs, which
+    /// can be newer than the doc).
+    var trainedToday: Bool {
+        if workoutLogs.contains(where: { $0.date == Self.currentDateISO() }) { return true }
+        guard let today = thisWeekDays[Self.currentDayKey()] else { return false }
+        return today.status == "done" || today.status == "extra"
+    }
+
+    /// A session to do today in place of a rest day (or on top of the week).
+    struct SessionOffer: Equatable {
+        let day: PlannedWorkoutDay
+        /// Set when it's a session missed earlier this week.
+        let missed: MissedSession?
+
+        /// "Thursday's Upper Pull" for a missed one, else the session's name.
+        var spokenName: String {
+            guard let missed else { return day.name }
+            return "\(AppModel.weekdayName(missed.dayKey))'s \(missed.name)"
+        }
+    }
+
+    /// The most recent session missed this week that doesn't train what was
+    /// trained yesterday or today, and is still in the plan.
+    var missedSessionOffer: SessionOffer? {
+        guard let history = trainingHistory, history.thisWeek.weekStart == Self.currentWeekStartISO(),
+              let days = currentWorkoutPlan?.days else { return nil }
+        let today = Self.currentDateISO()
+        // "Yesterday and today" as of the doc's date: only trust it when the
+        // doc is from today or yesterday.
+        let fresh = history.today >= Self.isoDate(daysAgo: 1)
+        let recent = fresh ? Set(history.recentMuscles.map { $0.lowercased() }) : []
+        // Missed per the phone's date (thisWeekDays), most recent first: a
+        // stale doc still lists a passed day as planned.
+        let missedDays = thisWeekDays.values
+            .filter { $0.status == "missed" && $0.date < today }
+            .sorted { $0.date > $1.date }
+        for missedDay in missedDays {
+            guard let day = days.first(where: { $0.dayKey == missedDay.dayKey && !$0.exercises.isEmpty }) else { continue }
+            let listed = history.missedThisWeek.first { $0.date == missedDay.date }
+            let missed = listed ?? MissedSession(date: missedDay.date, dayKey: missedDay.dayKey,
+                                                 name: missedDay.name ?? day.name, muscles: day.muscles)
+            let muscles = missed.muscles.isEmpty ? day.muscles : missed.muscles
+            if muscles.contains(where: { recent.contains($0.lowercased()) }) { continue }
+            return SessionOffer(day: day, missed: missed)
+        }
+        return nil
+    }
+
+    /// What "skip my rest day" does: a missed session first, else the next
+    /// planned one.
+    var sessionOffer: SessionOffer? {
+        missedSessionOffer ?? nextPlannedDay.map { SessionOffer(day: $0, missed: nil) }
+    }
+
+    /// The step the history says this lift took since it was last done
+    /// (up a step, or a deload), when today's weight is that new weight.
+    func weightChange(for exerciseName: String, at weight: Double) -> ProgressionEventModel? {
+        guard weight > 0, let history = trainingHistory else { return nil }
+        let name = exerciseName.lowercased()
+        guard let lift = history.lifts.first(where: { $0.exerciseName.lowercased() == name }),
+              let event = lift.events.first,
+              ["session_up", "weekly_up", "deload"].contains(event.kind),
+              // Since the last time it was done, and not done again today.
+              event.date >= lift.lastDate, lift.lastDate < Self.currentDateISO(),
+              abs(event.toLb - weight) < 0.5, abs(event.toLb - event.fromLb) >= 0.5
+        else { return nil }
+        return event
+    }
+
+    /// "Thu" → "Thursday".
+    nonisolated static func weekdayName(_ dayKey: String) -> String {
+        let names = ["Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday", "Thu": "Thursday",
+                     "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"]
+        return names[dayKey] ?? dayKey
+    }
+
     /// A logged set anywhere in the session in progress.
     var activeWorkoutHasProgress: Bool {
         activeWorkout?.exercises.contains { $0.completedSets.contains(where: \.completed) } ?? false
@@ -944,8 +1050,10 @@ final class AppModel: NSObject, ObservableObject {
         guard !isWorkoutBusy else { return }
         isWorkoutBusy = true
         defer { isWorkoutBusy = false }
-        // A new workout: no rest running, no heart readings from the last one.
+        // A new workout: no rest running, no heart readings from the last one,
+        // no progress card from the last one.
         noteRest(endsAt: nil)
+        lastTrainingRecap = nil
         noteTimedBlock(nil)
         HeartRateHub.shared.reset()
         Task { await self.refreshAlternatives(force: false) }
@@ -1578,6 +1686,14 @@ final class AppModel: NSObject, ObservableObject {
         if isPreviewSession {
             let sets = performed.reduce(0) { $0 + $1.completedSetCount }
             lastRecap = WorkoutRecap(lines: ["\(performed.count) moves, \(sets) sets."], firstWorkout: workoutLogs.isEmpty)
+            // A sample card, enough to see it: the first lift with a weight goes up one step.
+            let lifted = performed.first { $0.targetWeight > 0 }
+            lastTrainingRecap = TrainingRecapModel(
+                records: [], nextWeights: lifted.map {
+                    [TrainingRecapModel.NextWeight(exerciseName: $0.name, fromLb: $0.targetWeight,
+                                                   toLb: $0.targetWeight + 5, reason: "every rep hit")]
+                } ?? [],
+                comparedToLast: [], volumeLb: 0, previousVolumeLb: nil, streakWeeks: 2)
             pendingEffortSessionId = activeWorkout.sessionId
             self.activeWorkout = nil
             pendingSessionChanges = changes
@@ -1602,6 +1718,7 @@ final class AppModel: NSObject, ObservableObject {
             // Set before the workout closes: the coach screen reads it the
             // moment activeWorkout goes nil.
             lastRecap = response.recap
+            lastTrainingRecap = response.trainingRecap.flatMap { $0.hasNews ? $0 : nil }
             pendingEffortSessionId = activeWorkout.sessionId
             TrainingReminders.shared.markTrainedToday()
             if let start = Self.parseISO(activeWorkout.startedAt), let end = Self.parseISO(completedAt) {
@@ -1659,6 +1776,11 @@ final class AppModel: NSObject, ObservableObject {
 
     func skipEffortQuestion() {
         pendingEffortSessionId = nil
+    }
+
+    /// The progress card was closed (or a new workout began).
+    func dismissTrainingRecap() {
+        lastTrainingRecap = nil
     }
 
     // MARK: - Exercise swaps
@@ -2226,6 +2348,38 @@ final class AppModel: NSObject, ObservableObject {
             }
     }
 
+    private func listenForTrainingHistory(userId: String?) {
+        trainingHistoryListener?.remove()
+        trainingHistory = nil
+        if let token = trainingHistoryForeground { NotificationCenter.default.removeObserver(token) }
+        trainingHistoryForeground = nil
+        guard let userId else { return }
+        // The doc is built for a date: on open, and each time the app comes
+        // back, ask the server to rebuild it if it's for another day, so
+        // "missed" and "today" (and the once-a-day offer) are right.
+        refreshTrainingHistory()
+        trainingHistoryForeground = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshTrainingHistory() }
+        }
+        trainingHistoryListener = db
+            .collection("users")
+            .document(userId)
+            .collection("derivedSummaries")
+            .document("training_history")
+            .addSnapshotListener { [weak self] snapshot, error in
+                Task { @MainActor in
+                    if let error {
+                        // Advisory, like progress: keep the last copy.
+                        NSLog("[IronBoi] Training history listener error: \(error.localizedDescription)")
+                        return
+                    }
+                    self?.trainingHistory = snapshot?.data().flatMap(TrainingHistoryModel.init(firestore:))
+                }
+            }
+    }
+
     /// Background refresh of the memory brief: the server rebuilds it after
     /// every workout and coach conversation, and each new copy is saved to
     /// disk for the next live session to open with (MemoryBriefCache).
@@ -2409,7 +2563,11 @@ final class AppModel: NSObject, ObservableObject {
 
     private static func makeWorkoutLogSummary(from data: [String: Any]) -> WorkoutLogSummary? {
         guard let sessionId = data["sessionId"] as? String,
-              let date = data["date"] as? String else { return nil }
+              let utcDate = data["date"] as? String else { return nil }
+        // The day it was done where you are: `date` is the UTC day, so an
+        // evening workout in the US landed on tomorrow. Older logs lack
+        // localDate and keep the UTC day.
+        let date = (data["localDate"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? utcDate
 
         // postSessionNotes is written as "dayKey: workoutName" — take the name.
         let notes = (data["postSessionNotes"] as? String ?? "").trimmingCharacters(in: .whitespaces)
@@ -2422,7 +2580,8 @@ final class AppModel: NSObject, ObservableObject {
 
         let exercises = (data["exercises"] as? [[String: Any]] ?? []).map { ex -> LoggedExercise in
             let sets = (ex["sets"] as? [[String: Any]] ?? []).map { set in
-                LoggedSet(reps: set["reps"] as? Int, loadKg: set["loadKg"] as? Double)
+                LoggedSet(reps: set["reps"] as? Int, loadKg: set["loadKg"] as? Double,
+                          durationSec: set["durationSec"] as? Int)
             }
             return LoggedExercise(name: ex["name"] as? String ?? "Exercise", sets: sets)
         }
@@ -2752,6 +2911,46 @@ final class AppModel: NSObject, ObservableObject {
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: Date())
+    }
+
+    /// This week's Monday (weeks run Monday to Sunday, as the history's do),
+    /// as the same kind of ISO date.
+    private static func currentWeekStartISO() -> String {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = TimeZone.current
+        let monday = calendar.dateInterval(of: .weekOfYear, for: Date())?.start ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: monday)
+    }
+
+    /// Rebuilds derivedSummaries/training_history server-side when it's stale
+    /// or for another date; the listener picks up the new copy. Quiet on
+    /// failure: History just shows the last copy.
+    func refreshTrainingHistory() {
+        guard user != nil, !inPreview else { return }
+        let date = Self.currentDateISO()
+        Task {
+            do {
+                try await callCallable("refreshTrainingHistoryCallable", data: ["clientDate": date])
+            } catch {
+                NSLog("[IronBoi] Training history refresh failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// "2026-11-07" for one day ago, on the phone's calendar.
+    static func isoDate(daysAgo: Int) -> String {
+        let date = Calendar.current.date(byAdding: .day, value: -daysAgo, to: Date()) ?? Date()
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
     }
 
     private static func jsonObject<T: Encodable>(from value: T) throws -> Any {
