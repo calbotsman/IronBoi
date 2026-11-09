@@ -254,6 +254,28 @@ Verdict: **the fix is real and well tested.** The bug cause in the PR body match
 
 **F12. #46: `AppModel.updateSetReps` is now dead code** (`AppModel.swift:1119` on the branch). Nothing calls it. Delete it, or keep it on purpose.
 
+## #65 backup voice, F54 (509dbb1)
+
+**Verdict: don't merge until F56 and F57 are fixed.** The lock, the cache keys and the workout-start reset are fine. TestFlight build 71 already has both problems, and the fix has to ship as build 72 or higher.
+
+**F56. With live voice up, the latch puts Chirp next to the live voice for the rest of the workout. CONFIRMED (code), medium-high.** `voice.redirect` returns `false` while live is on (`CoachStageView.swift:1753`), so `CoachVoice` still reads the app's own lines. `VoiceCache.engine` exists so those lines match the live reply. Once latched it returns `chirp` and nothing checks whether live is active (`VoiceCache.swift:30`, `CoachVoice.swift` `backupVoice`). Failure: the app-line TTS fails or is slow while Realtime is healthy, or live reconnects after a real outage. Rep counts and cues are then Chirp, and answers are OpenAI, until the next workout. That is the "several different voices" problem #61 removed, and the PR's "one voice at a time still holds" is not true here. Fix: don't probe or latch while live is active, and clear the latch when live connects.
+
+**F57. One slow reply can latch the backup voice for a whole workout. PLAUSIBLE, medium-high.** `play` fetches every sentence of a reply at once, and `noteFailure` counts per sentence. So "two failed lines" can be two sentences of one reply timing out together at the 4 s deadline. The probe follows immediately, and Chirp has its own 3 s to answer. A brief dropout that ends during that wait, or an engine that is slow but up, reads as "the engine is down" and latches. The primary is never re-checked after that. Fix: require failures from two separate replies or a few seconds apart, or don't count a timeout as an engine failure. Ideally, retry the primary once before latching.
+
+**F58. The switch leaves holes in that reply. CONFIRMED (code), low.** In a three-sentence reply failing together: sentence 1 returns nil (only one failure so far), sentence 2 takes the probe, and sentence 3 is refused by the 30 s spacing. The user hears tick, one Chirp sentence, tick, and all the words appear on screen. A reply started before the latch can also mix a sentence from the primary or its cache with a Chirp one. It happens once per outage, and nothing is doubled: a late primary fetch only saves to the cache.
+
+**F59. Small gaps. Low.**
+- A cancelled line on the `lowSignal` path can still spend the once-per-30 s probe (no `Task.isCancelled` check before `backupVoice`).
+- A probe in flight across `resetBackupVoice` can re-latch the new workout.
+- Two of the six tests can't fail on behaviour: `testBackupFailingLeavesTheVoiceAlone` never calls anything that could set the latch, and `testANewSessionGoesBackToTheCoachsVoice` only tests a fresh struct. The sentence-level behaviour and the live interaction have no test.
+- The PR says it was not tested against a real outage.
+
+**Checked and fine:**
+- **Lock:** `lowSignal` takes the `NSLock` itself and `NSLock` isn't recursive, so reading it before taking the lock is required, not a bug. The stale read is harmless because the policy is mutated under the lock. `VoiceCache.engine` is never evaluated while the lock is held.
+- **Cache:** keys are `engine|voice|text`. Backup audio is stored under `chirp` only after `served == backup`, primary lines stay under their own engine, and after the latch every lookup is `chirp`. No line can be filed under the wrong engine.
+- **Backend:** `SpeechEngine` accepts `chirp`, the Cloud TTS path returns `engine: "chirp"`, and `CoachVoiceOption` names are Chirp3 voice names.
+- **Reset:** `AppModel.swift:1100` is the only non-preview workout start. The latch is in memory, so a relaunch clears it too.
+
 ## #61 Josh's mobile session, nine commits (deb4cb8)
 
 **Verdict: merge after the F53 guard (a few lines). F54 is a product trade-off for Josh to decide, and doesn't block the merge.** CI was pending at audit time.
@@ -262,7 +284,7 @@ Verdict: **the fix is real and well tested.** The bug cause in the PR body match
 - **F53 fixed.** The re-ask is skipped while `openAIResponseActive`, while `openAIToolsPending > 0`, while `toolsInFlight > 0`, or if `lastToolAt >= asked`. The decrement runs on every `runTool` path, including errors. The re-ask text now says "don't repeat or take any action".
 - **F55 fixed.** `lensHighlights` is no longer read in `contextBundle.ts`, and a test asserts it never reaches the bundle or prompt.
 - **F53b (low, open).** `settleOwedAnswer` (`LiveVoiceSession.swift:1061`) still resends with neither the tool guards nor the "answer only" wording. A confirmation dropped under a count after a tool ran could, rarely, re-run that tool. Fix: add the same suffix and the `lastToolAt` check there.
-- **F54** is with Josh.
+- **F54:** Josh chose a backup voice; see #65 (F56–F59).
 
 **F53. The "always answers" re-ask can repeat a tool action. CONFIRMED (code), medium-high.** `LiveVoiceSession.expectAnswer` (`LiveVoiceSession.swift:~1029`) resends the question 8 s after the ask if no live audio has played. Its guard checks speaking, owed, the count and the quiet window. It does not check `openAIResponseActive`, a tool call in flight, or a tool that ran since the ask. `CoachStageView.swift:3856` calls it for anything `isQuestionOrRequest` matches, and that regex includes `add|swap|skip|change`. Failure: "add a set" or "swap bench". The coach calls the tool, and the server round-trip plus the confirmation audio takes more than 8 s. The re-ask fires, "[app] They asked you this… Answer it now", and the model can call the tool a second time: two added sets, or a double swap. Fix: skip the re-ask while a response or tool call is active, or if any tool ran since `lastAskedAt`. Tell the model "answer only, don't repeat any action".
 
