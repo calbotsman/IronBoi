@@ -27,6 +27,7 @@ final class VoiceCache: @unchecked Sendable {
     static var engine: String {
         // Read straight from settings (the same keys LiveVoiceSession uses),
         // so this works off the main thread too.
+        if shared.usingBackupVoice { return BackupVoicePolicy.backupEngine }
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: "liveVoiceBeta") as? Bool ?? true else { return "chirp" }
         // Your pick in settings, else the engine the server actually gave
@@ -101,6 +102,32 @@ final class VoiceCache: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         failures = []
         lowSignalUntil = .distantPast
+    }
+
+    // MARK: - Backup voice
+
+    private var backupVoice = BackupVoicePolicy()
+
+    var usingBackupVoice: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return backupVoice.isActive
+    }
+
+    func shouldTryBackupVoice(after engine: String) -> Bool {
+        let failingRepeatedly = lowSignal
+        lock.lock(); defer { lock.unlock() }
+        return backupVoice.shouldTryBackup(after: engine, failingRepeatedly: failingRepeatedly)
+    }
+
+    func backupVoiceAnswered() {
+        lock.lock(); defer { lock.unlock() }
+        backupVoice.backupAnswered()
+    }
+
+    /// A new workout starts back on the coach's own voice.
+    func resetBackupVoice() {
+        lock.lock(); defer { lock.unlock() }
+        backupVoice = BackupVoicePolicy()
     }
 }
 
