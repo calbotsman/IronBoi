@@ -256,7 +256,15 @@ Verdict: **the fix is real and well tested.** The bug cause in the PR body match
 
 ## #65 backup voice, F54 (509dbb1)
 
-**Verdict: don't merge until F56 and F57 are fixed.** The lock, the cache keys and the workout-start reset are fine. TestFlight build 71 already has both problems, and the fix has to ship as build 72 or higher.
+**Re-audit at c82a707 + e301824 (build 72): safe to merge once iOS CI is green.**
+- **F56 fixed.** The live `state` didSet calls `VoiceCache.setLiveActive(isActive)`. `isActive` is listening or speaking only, so connect and standby attempts during an outage don't clear the latch. While live is active there is no probe and no latch, and `usingBackupVoice` is false. Live connecting resets the policy and bumps the generation.
+- **F57 fixed.** A probe needs failures at least 5 s apart within the last minute, so one reply whose sentences time out together doesn't count. The backup lasts 5 min, then the coach's own voice is tried again. Cost in a long outage: about two lost lines (tick and caption) every 5 min. That's acceptable.
+- **F59 fixed.** A cancelled line doesn't spend the probe, and a stale generation can't latch. The tests were rewritten into 8 behaviour tests, including the one-reply case, live on, and the 5 min recheck.
+- **F60 (new, low).** A probe whose generation went stale (reset, or live connected) still returns and plays its Chirp audio for that one line (`CoachVoice.swift` `backupVoice` returns `data` after the ignored `backupVoiceAnswered`). So live connecting mid-probe can give one Chirp line next to live. Fix: have `backupVoiceAnswered` return a Bool, and return nil when it's stale.
+- **Also in this commit, fine:** captions mode shows the last coach message only if it's from the last 2 h and the same day (`isFresh`). `captionRoom` now reserves Start's height, using the same 54 pt constant as the button. Layout was checked only by reading the code, not on a device.
+- **Process:** builds 71 and 72 both went to TestFlight from this unmerged branch, before CI finished. Main is still at 70. Any later PR must bump above 72.
+
+**Earlier verdict (509dbb1): don't merge until F56 and F57 are fixed.** The lock, the cache keys and the workout-start reset are fine. TestFlight build 71 already has both problems, and the fix has to ship as build 72 or higher.
 
 **F56. With live voice up, the latch puts Chirp next to the live voice for the rest of the workout. CONFIRMED (code), medium-high.** `voice.redirect` returns `false` while live is on (`CoachStageView.swift:1753`), so `CoachVoice` still reads the app's own lines. `VoiceCache.engine` exists so those lines match the live reply. Once latched it returns `chirp` and nothing checks whether live is active (`VoiceCache.swift:30`, `CoachVoice.swift` `backupVoice`). Failure: the app-line TTS fails or is slow while Realtime is healthy, or live reconnects after a real outage. Rep counts and cues are then Chirp, and answers are OpenAI, until the next workout. That is the "several different voices" problem #61 removed, and the PR's "one voice at a time still holds" is not true here. Fix: don't probe or latch while live is active, and clear the latch when live connects.
 
