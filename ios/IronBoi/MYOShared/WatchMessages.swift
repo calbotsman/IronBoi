@@ -58,4 +58,8 @@ struct WatchWorkoutState: Codable, Equatable {
     var ageYears: Int?
     /// Whether "Save workouts to Apple Health" is on in the phone's settings.
     var saveToHealth: Bool
+    /// The paper picked on the phone (`Paper.id`) and the coach's colour
+    /// ("RRGGBB"), so the Watch looks like the app. Nil from older phones.
+    var paperId: String? = nil
+    var coachHex: String? = nil
 }

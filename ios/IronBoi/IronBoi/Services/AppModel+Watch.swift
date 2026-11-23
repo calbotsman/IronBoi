@@ -10,7 +10,9 @@ extension AppModel {
             sessionId: workout.sessionId,
             workoutName: String(workout.workoutName.prefix(80)),
             ageYears: profile.ageYears,
-            saveToHealth: HealthSync.shared.enabled)
+            saveToHealth: HealthSync.shared.enabled,
+            paperId: PaperStore.shared.paper.id,
+            coachHex: UserDefaults.standard.string(forKey: CoachColor.storageKey) ?? CoachColor.defaultHex)
         if let index = currentExerciseIndex, workout.exercises.indices.contains(index) {
             let exercise = workout.exercises[index]
             state.exercise = String(exercise.name.prefix(80))
