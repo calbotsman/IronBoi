@@ -107,27 +107,46 @@ final class VoiceCache: @unchecked Sendable {
     // MARK: - Backup voice
 
     private var backupVoice = BackupVoicePolicy()
+    /// Bumped on reset, so a probe still in flight can't switch the new
+    /// workout to the backup (F59).
+    private var backupGeneration = 0
+    private var liveActive = false
 
     var usingBackupVoice: Bool {
         lock.lock(); defer { lock.unlock() }
-        return backupVoice.isActive
+        return !liveActive && backupVoice.isActive()
     }
 
-    func shouldTryBackupVoice(after engine: String) -> Bool {
-        let failingRepeatedly = lowSignal
+    /// Returns the generation to hand back with `backupVoiceAnswered`, or
+    /// nil when the backup shouldn't be tried.
+    func shouldTryBackupVoice(after engine: String) -> Int? {
         lock.lock(); defer { lock.unlock() }
-        return backupVoice.shouldTryBackup(after: engine, failingRepeatedly: failingRepeatedly)
+        let now = Date()
+        let recent = failures.filter { now.timeIntervalSince($0) < 60 }
+        guard backupVoice.shouldTryBackup(after: engine, failures: recent, liveActive: liveActive, now: now) else { return nil }
+        return backupGeneration
     }
 
-    func backupVoiceAnswered() {
+    func backupVoiceAnswered(generation: Int) {
         lock.lock(); defer { lock.unlock() }
+        guard generation == backupGeneration, !liveActive else { return }
         backupVoice.backupAnswered()
+    }
+
+    /// Live voice speaks in its own voice: while it's on, the app's lines
+    /// follow it, never the backup (F56). It connecting clears the switch.
+    func setLiveActive(_ active: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        guard active != liveActive else { return }
+        liveActive = active
+        if active { backupVoice = BackupVoicePolicy(); backupGeneration += 1 }
     }
 
     /// A new workout starts back on the coach's own voice.
     func resetBackupVoice() {
         lock.lock(); defer { lock.unlock() }
         backupVoice = BackupVoicePolicy()
+        backupGeneration += 1
     }
 }
 

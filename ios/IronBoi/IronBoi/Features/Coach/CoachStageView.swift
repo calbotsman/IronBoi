@@ -268,10 +268,18 @@ struct CoachStageView: View {
     private static let stageArea = "coachStageArea"
     /// Where the pinned caption starts: just under the coach's body.
     private var captionTop: CGFloat { restFocus.y + stageSize.width * 0.225 + 36 }
-    /// Height left between that and the workout card / controls.
+    /// Height left between that and the workout card / controls, less the
+    /// Start button when it sits under the caption: a three-line recap
+    /// pushed Start down over the mic and sound buttons.
     private var captionRoom: CGFloat? {
-        bottomChromeTop.map { max(0, $0 - captionTop - MyoTheme.Spacing.sm) }
+        let start: CGFloat = startButtonBelowCaption ? Self.startButtonHeight + MyoTheme.Spacing.lg : 0
+        return bottomChromeTop.map { max(0, $0 - captionTop - MyoTheme.Spacing.sm - start) }
     }
+    private var startButtonBelowCaption: Bool {
+        showsStartButton && !askingSkipRestDay && !askingMicPermission
+    }
+    /// The Start capsule's height (see `startButton`).
+    private static let startButtonHeight: CGFloat = 54
 
     private static func measureTop() -> some View {
         GeometryReader { geo in
@@ -332,6 +340,14 @@ struct CoachStageView: View {
 
     private var lastCoachMessage: CoachMessage? {
         appModel.messages.last { $0.role == .coach && !$0.isPendingCoachReply }
+    }
+
+    /// Captions mode keeps the last reply on screen; one from an earlier
+    /// session isn't a reply any more. Opening the app to yesterday's
+    /// workout recap read like an unexplained block of text.
+    private static func isFresh(_ message: CoachMessage, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(message.timestamp) < 2 * 60 * 60
+            && Calendar.current.isDate(message.timestamp, inSameDayAs: now)
     }
 
     private static let space = "coachStage"
@@ -1069,7 +1085,7 @@ struct CoachStageView: View {
                 .onTapGesture { withAnimation(MyoTheme.Motion.fade) { textReply = nil } }
                 .accessibilityAction(named: "Dismiss") { textReply = nil }
         case .rest:
-            if !speaksReplies, let message = lastCoachMessage {
+            if !speaksReplies, let message = lastCoachMessage, Self.isFresh(message) {
                 // Muted: text is the only way the reply reaches you.
                 VStack(spacing: MyoTheme.Spacing.sm) {
                     ScrollView {
@@ -1375,7 +1391,7 @@ struct CoachStageView: View {
             }
             .foregroundStyle(MyoTheme.Colors.ink)
             .padding(.horizontal, 28)
-            .frame(height: 54)
+            .frame(height: Self.startButtonHeight)
             .contentShape(Capsule())
             .myoGlass(tint: MyoTheme.Colors.coachAmber.opacity(0.3))
             // Warm colour behind the glass for it to bend and blur.

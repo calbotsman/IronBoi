@@ -110,22 +110,23 @@ final class CoachVoice: NSObject, ObservableObject {
     }
 
     /// The coach's engine keeps failing: see if the backup can read this
-    /// line. If it can, the engine is down and the backup takes over until
-    /// the next workout (BackupVoicePolicy); if not, it's the signal.
+    /// line. If it can, the engine is down and the backup reads for a few
+    /// minutes (BackupVoicePolicy); if not, it's the signal.
     private static func backupVoice(
         for text: String, after engine: String,
         _ fetchAudio: @escaping (String, String) async throws -> (Data, String)
     ) async -> Data? {
-        guard VoiceCache.shared.shouldTryBackupVoice(after: engine) else { return nil }
+        // A line no longer wanted doesn't spend the probe (F59).
+        guard !Task.isCancelled, let generation = VoiceCache.shared.shouldTryBackupVoice(after: engine) else { return nil }
         let backup = BackupVoicePolicy.backupEngine
         guard let (data, served) = try? await withDeadline(3, { try await fetchAudio(text, backup) }), served == backup else {
             AudioHub.log("voice: backup voice failed too")
             return nil
         }
         if !VoiceCache.shared.usingBackupVoice {
-            AudioHub.log("voice: \(engine) is failing, backup voice until the next workout")
+            AudioHub.log("voice: \(engine) is failing, backup voice for a few minutes")
         }
-        VoiceCache.shared.backupVoiceAnswered()
+        VoiceCache.shared.backupVoiceAnswered(generation: generation)
         VoiceCache.shared.store(data, for: text, engine: backup)
         VoiceCache.shared.noteSuccess()
         return data
