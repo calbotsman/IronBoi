@@ -31,6 +31,10 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
     @Published private(set) var peakBpm: Int?
     /// Zone from the last 10 s averaged, held 15 s before changing.
     @Published private(set) var zone: Int?
+    /// Active energy this workout, from the live builder.
+    @Published private(set) var activeKcal: Double?
+    /// When the workout started (for the elapsed clock).
+    @Published private(set) var startedAt: Date?
     private var zoneTracker = ZoneTracker()
     /// The phone said it's finishing the workout after our End.
     private var endAccepted = false
@@ -59,6 +63,8 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         peakBpm = nil
         zone = nil
         zoneTracker.reset()
+        activeKcal = nil
+        startedAt = nil
         endAccepted = false
         state = nil
         endRequest = nil
@@ -82,6 +88,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
             let start = Date()
             session.startActivity(with: start)
             try await builder.beginCollection(at: start)
+            startedAt = start
             phase = .running
         } catch {
             log("start failed: \(error.localizedDescription)")
@@ -110,6 +117,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
         builder.delegate = self
         self.session = session
         self.builder = builder
+        startedAt = session.startDate
         phase = session.state == .paused ? .paused : .running
         // Mirroring stops when the app dies; ask again so the phone hears us.
         Task {
@@ -277,13 +285,17 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
 
     nonisolated func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didCollectDataOf collectedTypes: Set<HKSampleType>) {
         let heartRate = HKQuantityType(.heartRate)
+        let activeEnergy = HKQuantityType(.activeEnergyBurned)
+        let energy = workoutBuilder.statistics(for: activeEnergy)?.sumQuantity()?.doubleValue(for: .kilocalorie())
+        if collectedTypes.contains(activeEnergy), let energy {
+            Task { @MainActor in self.activeKcal = energy }
+        }
         guard collectedTypes.contains(heartRate) else { return }
         let perMinute = HKUnit.count().unitDivided(by: .minute())
         let stats = workoutBuilder.statistics(for: heartRate)
         guard let quantity = stats?.mostRecentQuantity() else { return }
         let bpm = Int(quantity.doubleValue(for: perMinute).rounded())
         let at = stats?.mostRecentQuantityDateInterval()?.end ?? Date()
-        let energy = workoutBuilder.statistics(for: HKQuantityType(.activeEnergyBurned))?.sumQuantity()?.doubleValue(for: .kilocalorie())
         Task { @MainActor in self.collected(bpm: bpm, at: at, energy: energy) }
     }
 
@@ -298,3 +310,28 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
         send(.heart(bpm: bpm, at: at, activeEnergyKcal: energy))
     }
 }
+
+#if DEBUG
+// MARK: - Screenshot fixture (Debug builds only)
+
+extension WatchWorkoutManager {
+    /// MYO_WATCH_DEMO=lift or =rest: fills the screens with a sample
+    /// workout so they can be screenshotted in the simulator, which has no
+    /// paired phone or heart sensor. Debug builds only; never in TestFlight.
+    func loadDemo(_ kind: String) {
+        let now = Date()
+        phase = .running
+        startedAt = now.addingTimeInterval(-23 * 60)
+        bpm = kind == "rest" ? 128 : 142
+        bpmAt = now
+        peakBpm = 151
+        zone = kind == "rest" ? 3 : 4
+        activeKcal = 186
+        state = WatchWorkoutState(
+            sessionId: "demo", workoutName: "Lower A", exercise: "Deadlift", setNumber: 2, totalSets: 4,
+            targetReps: 5, weightLb: 315, restEndsAt: kind == "rest" ? now.addingTimeInterval(89) : nil,
+            nextExercise: "Walking Lunge", caption: "Set 1 done. 6 reps, 1 over. Rest ninety seconds.",
+            ageYears: 38, saveToHealth: true)
+    }
+}
+#endif

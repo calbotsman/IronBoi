@@ -6,6 +6,14 @@ import WatchKit
 struct MYOWatchApp: App {
     @WKApplicationDelegateAdaptor private var delegate: MYOWatchDelegate
 
+    init() {
+        #if DEBUG
+        if let demo = ProcessInfo.processInfo.environment["MYO_WATCH_DEMO"] {
+            WatchWorkoutManager.shared.loadDemo(demo)
+        }
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             WatchRootView()

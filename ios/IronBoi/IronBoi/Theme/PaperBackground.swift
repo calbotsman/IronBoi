@@ -1,5 +1,9 @@
 import SwiftUI
+#if os(watchOS)
+import CoreGraphics
+#else
 import UIKit
+#endif
 
 /// The paper has material. Per the Living Dossier art direction (Pell), the
 /// cream carries a faint fiber tooth — "felt, not seen" (~8%). Per Felix, it's
@@ -7,8 +11,30 @@ import UIKit
 /// per-surface Canvas (which would cost on every scroll). Uniform across
 /// surfaces: texture is identity, not a tier signal.
 enum PaperTexture {
+    #if os(watchOS)
+    /// watchOS has no UIGraphicsImageRenderer: the same specks, drawn once
+    /// into a CoreGraphics bitmap at the Watch's 2× scale.
+    static let image: Image = makeTile().map { Image(decorative: $0, scale: 2) } ?? Image(systemName: "circle.fill")
+
+    private static func makeTile() -> CGImage? {
+        let scale: CGFloat = 2
+        let size = CGSize(width: 160, height: 160)
+        guard let cg = CGContext(data: nil, width: Int(size.width * scale), height: Int(size.height * scale),
+                                 bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        cg.scaleBy(x: scale, y: scale)
+        for _ in 0 ..< 2600 {
+            let dot = CGFloat.random(in: 0.5 ... 1.3)
+            cg.setFillColor(CGColor(srgbRed: 0.10, green: 0.08, blue: 0.06, alpha: CGFloat.random(in: 0.03 ... 0.10)))
+            cg.fillEllipse(in: CGRect(x: CGFloat.random(in: 0 ..< size.width), y: CGFloat.random(in: 0 ..< size.height),
+                                      width: dot, height: dot))
+        }
+        return cg.makeImage()
+    }
+    #else
     /// A small noise tile, generated once at first access and reused everywhere.
     static let tile: UIImage = makeTile()
+    static var image: Image { Image(uiImage: tile) }
 
     private static func makeTile() -> UIImage {
         let size = CGSize(width: 160, height: 160)
@@ -28,6 +54,7 @@ enum PaperTexture {
             }
         }
     }
+    #endif
 }
 
 /// The base paper surface: cream + the cached grain, multiplied. Use as a
@@ -37,7 +64,7 @@ struct PaperBackground: View {
     var body: some View {
         MyoTheme.Colors.cream
             .overlay(
-                Image(uiImage: PaperTexture.tile)
+                PaperTexture.image
                     .resizable(resizingMode: .tile)
                     // Was 0.8, which read as visible speckle on every screen.
                     .opacity(0.35)
