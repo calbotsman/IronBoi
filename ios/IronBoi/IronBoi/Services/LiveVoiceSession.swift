@@ -26,7 +26,9 @@ final class LiveVoiceSession: ObservableObject {
     /// mic until the stage hands it over (`takeMic`).
     enum State: Equatable { case idle, connecting, standby, listening, speaking }
 
-    @Published private(set) var state: State = .idle
+    @Published private(set) var state: State = .idle {
+        didSet { VoiceCache.shared.setLiveActive(isActive) }
+    }
     /// What the coach is saying right now.
     @Published private(set) var caption = ""
     /// What it heard you say this turn.
