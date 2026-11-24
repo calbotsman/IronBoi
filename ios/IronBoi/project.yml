@@ -246,6 +246,11 @@ targets:
     sources:
       - path: MYOWatch
       - path: MYOShared
+      # The phone's theme, shared rather than copied: palette, type ramp,
+      # paper and its grain. Both compile for watchOS (no Firebase, no
+      # phone-only types); keep it that way.
+      - path: IronBoi/Theme/MyoTheme.swift
+      - path: IronBoi/Theme/PaperBackground.swift
     info:
       path: MYOWatch/Info.plist
       properties:
