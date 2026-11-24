@@ -254,6 +254,29 @@ Verdict: **the fix is real and well tested.** The bug cause in the PR body match
 
 **F12. #46: `AppModel.updateSetReps` is now dead code** (`AppModel.swift:1119` on the branch). Nothing calls it. Delete it, or keep it on purpose.
 
+## #67 Watch restyle (3dc137c)
+
+**Verdict: safe to merge once iOS CI is green.** No behaviour changes on the workout path. The previous red run was the CI flake in F61, not this PR.
+
+**F61. The launch smoke test hangs on iOS 26.2 now and then. CONFIRMED, medium (process, #57).** `simctl launch failed (hung for 120s) on iOS_26.2` happened on three branches. The app never spawned and left no crash report:
+- 42534049826, `brave-bell-fqewds`, 2026-11-08
+- 45265454892, `watch-looks-like-app`, 2026-11-24
+- 45459389568, `watch-restyle`, 2026-11-24
+
+`brave-bell` changes nothing on the Watch, so this is CoreSimulator, not the app. It is the flake predicted in the #57 audit. Fix in `scripts/ios-launch-smoke.sh`: only when launch hangs with no spawn and no crash report, shut down, reboot the simulator once and relaunch, and log that it retried. Never retry when the app exited or crashed. Alternatively, raise the launch deadline to 240 s. Until then, a red smoke step needs its log read before anyone calls it a regression.
+
+**F62. The paper background stays light in Always On. PLAUSIBLE, low.** `.preferredColorScheme(.light)` plus `PaperBackground` on every page applies with the wrist down for a whole workout. The blob dims to 0.5 and the extras hide, but the full-screen light background doesn't. Apple's watchOS guidance is a dark, dimmed Always On view, and it is better for battery during an hour's workout. Fix: when `isLuminanceReduced`, swap the paper for black or a very dark tone.
+
+**F63. The elapsed clock keeps running through a pause. CONFIRMED, low.** `StatusLine` shows `now − startedAt` (`WatchViews.swift`), wall clock. The builder's `elapsedTime(at:)` excludes paused time and matches what Health saves.
+
+**Checked and fine:**
+- **Behaviour unchanged:** Set done, pause and End call the same methods (`setDone`, `togglePause`, `requestEnd`) with the same disabled states, and End still goes through the confirmation dialog.
+- **Data:** the calories come from the live builder (`activeEnergyBurned`, only once collected). `startedAt` is set on start and on recovery, and both are reset with the session.
+- **Demo fixture:** `MYO_WATCH_DEMO`/`MYO_WATCH_PAGE` are inside `#if DEBUG` and env-gated, so they never ship in TestFlight or Release.
+- **Shared theme:** `CoachVoiceOption` moved unchanged into its own phone-only file. `MyoTheme` and `PaperBackground` compile for watchOS without Firebase. The watchOS grain is drawn once into a `CGContext`, because there is no `UIGraphicsImageRenderer` on watchOS.
+- **Project file:** the pbxproj still copies `GoogleService-Info.plist` (F40 check).
+- **Always On:** the animation stops and the extras hide.
+
 ## #65 backup voice, F54 (509dbb1)
 
 **Re-audit at c82a707 + e301824 (build 72): safe to merge once iOS CI is green.**
